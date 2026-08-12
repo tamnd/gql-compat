@@ -1,0 +1,497 @@
+# Optional query features: the GQ family, plus the GA and GE features that
+# change how a query composes rather than what a value is.
+#
+# Every case here names the feature code it costs. A failure means the engine
+# cannot claim that feature; it says nothing about conformance, because ISO
+# makes each of these a separate claim under 24.3.
+#
+# Where one statement genuinely needs two features to run, the case claims
+# both. That is a deliberate loss of resolution — the report will mark both as
+# unproven — and it is preferred to a case that quietly attributes a failure to
+# the wrong feature.
+
+defaults:
+  kind: optional
+  fixture: social
+  tags: [read]
+
+cases:
+  - id: optional/gq01/use-current-graph
+    name: A use graph clause selects the graph a linear query statement runs against
+    features: [GQ01]
+    subclauses: ["16.2"]
+    productions: [use graph clause, focused linear query statement, current graph]
+    tags: [composition]
+    # CURRENT_PROPERTY_GRAPH rather than a name: the working graph's name is
+    # the adapter's business, and a case that hard-coded one would be measuring
+    # the harness's naming convention instead of the clause.
+    query: |
+      USE CURRENT_PROPERTY_GRAPH
+      MATCH (p:Person)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/gq02/otherwise
+    name: OTHERWISE evaluates its right operand only when the left yields no records
+    features: [GQ02]
+    subclauses: ["14.1"]
+    productions: [query conjunction, composite query expression]
+    tags: [composition]
+    query: |
+      MATCH (x:Nonexistent)
+      RETURN x.name AS name
+      OTHERWISE
+      MATCH (p:Person)
+      WHERE p.age = 55
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Erin]]
+
+  - id: optional/gq03/union-distinct
+    name: UNION without a set quantifier removes duplicates across the operands
+    features: [GQ03]
+    subclauses: ["14.1", "14.2"]
+    productions: [set operator, composite query statement]
+    tags: [composition]
+    query: |
+      MATCH (p:Person)
+      WHERE p.city = 'Berlin'
+      RETURN p.name AS name
+      UNION
+      MATCH (p:Person)
+      WHERE p.age > 30
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Carol], [Erin]]
+
+  - id: optional/gq03/union-all
+    name: UNION ALL keeps the duplicates UNION removes
+    features: [GQ03]
+    subclauses: ["14.2"]
+    productions: [set operator, set quantifier]
+    tags: [composition]
+    query: |
+      MATCH (p:Person)
+      WHERE p.city = 'Berlin'
+      RETURN p.name AS name
+      UNION ALL
+      MATCH (p:Person)
+      WHERE p.age > 30
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Carol], [Alice], [Carol], [Erin]]
+
+  - id: optional/gq04/except-distinct
+    name: EXCEPT DISTINCT subtracts the right operand's records from the left
+    features: [GQ04]
+    subclauses: ["14.2"]
+    productions: [set operator]
+    tags: [composition]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      EXCEPT DISTINCT
+      MATCH (p:Person)
+      WHERE p.city = 'Berlin'
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Bob], [Dave], [Erin]]
+
+  - id: optional/gq05/except-all
+    name: EXCEPT ALL subtracts records one occurrence at a time
+    features: [GQ05]
+    subclauses: ["14.2"]
+    productions: [set operator, set quantifier]
+    tags: [composition]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      EXCEPT ALL
+      MATCH (p:Person)
+      WHERE p.city = 'Berlin'
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Bob], [Dave], [Erin]]
+
+  - id: optional/gq06/intersect-distinct
+    name: INTERSECT DISTINCT keeps the records both operands produce
+    features: [GQ06]
+    subclauses: ["14.2"]
+    productions: [set operator]
+    tags: [composition]
+    query: |
+      MATCH (p:Person)
+      WHERE p.age > 30
+      RETURN p.name AS name
+      INTERSECT DISTINCT
+      MATCH (p:Person)
+      WHERE p.city = 'Berlin'
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Carol]]
+
+  - id: optional/gq07/intersect-all
+    name: INTERSECT ALL keeps one occurrence per matching pair of occurrences
+    features: [GQ07]
+    subclauses: ["14.2"]
+    productions: [set operator, set quantifier]
+    tags: [composition]
+    query: |
+      MATCH (p:Person)
+      WHERE p.age > 30
+      RETURN p.name AS name
+      INTERSECT ALL
+      MATCH (p:Person)
+      WHERE p.city = 'Berlin'
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Carol]]
+
+  - id: optional/gq08/filter-search-condition
+    name: A filter statement narrows a binding table between two other statements
+    features: [GQ08]
+    subclauses: ["14.6"]
+    productions: [filter statement]
+    query: |
+      MATCH (p:Person)
+      FILTER p.age > 40
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Carol], [Erin]]
+
+  - id: optional/gq08/filter-where-clause
+    name: A filter statement also takes the WHERE spelling of its condition
+    features: [GQ08]
+    subclauses: ["14.6"]
+    productions: [filter statement, where clause]
+    query: |
+      MATCH (p:Person)
+      FILTER WHERE p.city = 'Paris'
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Bob], [Erin]]
+
+  - id: optional/gq09/let-statement
+    name: A let statement binds a computed value for the statements after it
+    features: [GQ09]
+    subclauses: ["14.7"]
+    productions: [let statement, let variable definition]
+    query: |
+      MATCH (p:Person)
+      WHERE p.name = 'Bob'
+      LET twice = p.age * 2
+      RETURN twice AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[54]]
+
+  - id: optional/gq10/for-over-list
+    name: A for statement turns each element of a list into a record
+    features: [GQ10]
+    subclauses: ["14.8"]
+    productions: [for statement, for item, list value constructor]
+    fixture: unit
+    query: |
+      FOR x IN [1, 2, 3]
+      RETURN x AS v
+    expect:
+      kind: rows
+      unordered: true
+      columns: [v]
+      rows: [[1], [2], [3]]
+
+  - id: optional/gq11/for-with-ordinality
+    name: WITH ORDINALITY numbers the records a for statement produces from one
+    features: [GQ11, GQ10]
+    subclauses: ["14.8"]
+    productions: [for statement, for ordinality or offset]
+    fixture: unit
+    query: |
+      FOR x IN [10, 20]
+      WITH ORDINALITY i
+      RETURN x AS v, i AS n
+    expect:
+      kind: rows
+      unordered: true
+      columns: [v, n]
+      rows: [[10, 1], [20, 2]]
+
+  - id: optional/gq24/for-with-offset
+    name: WITH OFFSET numbers the records a for statement produces from zero
+    features: [GQ24, GQ10]
+    subclauses: ["14.8"]
+    productions: [for statement, for ordinality or offset]
+    fixture: unit
+    query: |
+      FOR x IN [10, 20]
+      WITH OFFSET i
+      RETURN x AS v, i AS n
+    expect:
+      kind: rows
+      unordered: true
+      columns: [v, n]
+      rows: [[10, 0], [20, 1]]
+
+  - id: optional/gq12/offset
+    name: An offset clause discards the first records of an ordered result
+    features: [GQ12]
+    subclauses: ["14.9", "16.19"]
+    productions: [offset clause, offset synonym]
+    tags: [ordered]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      ORDER BY name
+      OFFSET 2
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[Carol], [Dave], [Erin]]
+
+  - id: optional/gq13/limit
+    name: A limit clause caps the number of records returned
+    features: [GQ13]
+    subclauses: ["14.9", "16.18"]
+    productions: [limit clause]
+    tags: [ordered]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      ORDER BY name
+      LIMIT 2
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[Alice], [Bob]]
+
+  - id: optional/gq13/offset-and-limit
+    name: An offset and a limit clause together take a window of an ordered result
+    features: [GQ12, GQ13]
+    subclauses: ["14.9"]
+    productions: [order by and page statement, offset clause, limit clause]
+    tags: [ordered]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      ORDER BY name
+      OFFSET 1
+      LIMIT 2
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[Bob], [Carol]]
+
+  - id: optional/gq14/complex-sort-key
+    name: A sort key may be an expression rather than a bare column reference
+    features: [GQ14]
+    subclauses: ["16.17"]
+    productions: [sort key, sort specification]
+    tags: [ordered]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name, p.age AS age
+      ORDER BY age * -1, name
+    expect:
+      kind: rows
+      columns: [name, age]
+      rows: [[Erin, 55], [Carol, 41], [Alice, 34], [Bob, 27], [Dave, 27]]
+
+  - id: optional/gq15/group-by
+    name: An explicit group by clause groups a return statement body
+    features: [GQ15]
+    subclauses: ["16.15"]
+    productions: [group by clause, grouping element list]
+    tags: [aggregate]
+    query: |
+      MATCH (p:Person)
+      RETURN p.city AS city, COUNT(*) AS n
+      GROUP BY p.city
+    expect:
+      kind: rows
+      unordered: true
+      columns: [city, n]
+      rows: [[Berlin, 2], [Paris, 2], [Lisbon, 1]]
+
+  - id: optional/gq16/pre-projection-sort-key
+    name: A sort key may name a variable bound before the projection
+    features: [GQ16]
+    subclauses: ["16.17"]
+    productions: [sort key, element variable reference]
+    tags: [ordered]
+    # p.name, not the alias: the sort key resolves against the binding table
+    # the return statement consumed rather than the record it produced.
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS who
+      ORDER BY p.name
+    expect:
+      kind: rows
+      columns: [who]
+      rows: [[Alice], [Bob], [Carol], [Dave], [Erin]]
+
+  - id: optional/gq18/scalar-subquery
+    name: A value query expression uses a whole query as one scalar value
+    features: [GQ18]
+    subclauses: ["20.6"]
+    productions: [value query expression, nested query specification]
+    tags: [composition]
+    query: |
+      RETURN VALUE { MATCH (p:Person) RETURN COUNT(*) } AS total
+    expect:
+      kind: rows
+      columns: [total]
+      rows: [[5]]
+
+  - id: optional/gq19/graph-pattern-yield
+    name: A yield clause on a graph pattern narrows which variables it exports
+    features: [GQ19]
+    subclauses: ["16.14"]
+    productions: [graph pattern yield clause, graph pattern yield item]
+    tags: [pattern]
+    query: |
+      MATCH (p:Person)-[:KNOWS]->(q:Person)
+      YIELD q
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/gq20/next-composition
+    name: NEXT feeds one statement's binding table into the next
+    features: [GQ20]
+    subclauses: ["9.2"]
+    productions: [next statement, statement block]
+    tags: [composition]
+    query: |
+      MATCH (p:Person)
+      WHERE p.age > 30
+      RETURN p.name AS name
+      NEXT
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[3]]
+
+  - id: optional/gq21/optional-match-block
+    name: An OPTIONAL block over several match statements yields nulls when the block finds nothing
+    features: [GQ21]
+    subclauses: ["14.4"]
+    productions: [optional match statement, optional operand, match statement block]
+    tags: [pattern, "null"]
+    query: |
+      MATCH (p:Person)
+      WHERE p.name = 'Erin'
+      OPTIONAL { MATCH (p)-[:KNOWS]->(q:Person) MATCH (q)-[:KNOWS]->(r:Person) }
+      RETURN p.name AS name, r.name AS reach
+    expect:
+      kind: rows
+      columns: [name, reach]
+      rows: [[Erin, null]]
+
+  - id: optional/gq22/exists-multiple-match
+    name: An EXISTS predicate may hold a block of several match statements
+    features: [GQ22]
+    subclauses: ["19.4"]
+    productions: [exists predicate, match statement block]
+    tags: [pattern]
+    query: |
+      MATCH (p:Person)
+      WHERE EXISTS { MATCH (p)-[:KNOWS]->(q:Person) MATCH (q)-[:KNOWS]->(r:Person) }
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Bob], [Carol]]
+
+  - id: optional/ga03/nulls-first
+    name: NULLS FIRST puts the null values at the head of an ordered result
+    features: [GA03]
+    subclauses: ["16.17"]
+    productions: [null ordering, sort specification]
+    fixture: nullable
+    tags: [ordered, "null"]
+    query: |
+      MATCH (m:Maybe)
+      RETURN m.note AS note
+      ORDER BY note NULLS FIRST
+    expect:
+      kind: rows
+      columns: [note]
+      rows: [[null], [present]]
+
+  - id: optional/ga07/order-by-discarded-variable
+    name: A sort key may read a value the projection discards
+    features: [GA07]
+    subclauses: ["16.17"]
+    productions: [sort key]
+    tags: [ordered]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      ORDER BY p.age, p.name
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[Bob], [Dave], [Alice], [Carol], [Erin]]
+
+  - id: optional/ge07/boolean-xor
+    name: XOR is true when exactly one operand is true
+    features: [GE07]
+    subclauses: ["20.20"]
+    productions: [boolean value expression]
+    fixture: unit
+    tags: [expression]
+    query: |
+      RETURN (TRUE XOR FALSE) AS a, (TRUE XOR TRUE) AS b
+    expect:
+      kind: rows
+      columns: [a, b]
+      rows: [[true, false]]
+
+  - id: optional/ge03/let-value-expression
+    name: A let value expression binds a variable inside one expression
+    features: [GE03]
+    subclauses: ["20.5"]
+    productions: [let value expression, let variable definition list]
+    fixture: unit
+    tags: [expression]
+    query: |
+      RETURN LET x = 2 IN x * 3 END AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[6]]

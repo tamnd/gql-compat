@@ -1,0 +1,292 @@
+# Mandatory graph patterns: node patterns, the right-pointing full edge
+# pattern, concatenation, path pattern lists, label expressions and the local
+# element pattern predicate.
+#
+# The edge patterns here are all the right-pointing full form. ISO makes the
+# other five full forms one optional feature (G043) and the abbreviated forms
+# two more (G044, G045), so a case using `<-[e]-` or `->` would be claiming a
+# feature under the heading of a mandatory subclause. Those spellings are
+# tested in 21-optional-pattern.yaml, where losing them costs a feature and
+# nothing more.
+
+defaults:
+  kind: mandatory
+  fixture: social
+  tags: [read, pattern]
+
+cases:
+  - id: mandatory/pattern/node-pattern-unlabelled
+    name: A node pattern with only a variable binds every node in the graph
+    subclauses: ["16.4"]
+    productions: [node pattern, element variable declaration]
+    query: |
+      MATCH (x)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[7]]
+
+  - id: mandatory/pattern/edge-pattern-directed
+    name: A right-pointing full edge pattern binds edges of a type in their direction
+    subclauses: ["16.7"]
+    productions: [edge pattern, full edge pattern, full edge pointing right, path pattern expression]
+    query: |
+      MATCH (p:Person)-[k:KNOWS]->(q:Person)
+      RETURN p.name AS knower, q.name AS known
+    expect:
+      kind: rows
+      unordered: true
+      columns: [knower, known]
+      rows:
+        - [Alice, Bob]
+        - [Bob, Carol]
+        - [Alice, Carol]
+        - [Carol, Dave]
+        - [Dave, Erin]
+
+  - id: mandatory/pattern/edge-property-predicate
+    name: A property of an edge variable is readable in a where clause
+    subclauses: ["16.7", "16.13", "20.11"]
+    productions: [property reference, element variable reference]
+    query: |
+      MATCH (p:Person)-[k:KNOWS]->(q:Person)
+      WHERE k.since > 2018
+      RETURN p.name AS knower, q.name AS known
+    expect:
+      kind: rows
+      unordered: true
+      columns: [knower, known]
+      rows:
+        - [Alice, Carol]
+        - [Carol, Dave]
+        - [Dave, Erin]
+
+  - id: mandatory/pattern/edge-type-selects
+    name: An edge type in a pattern excludes edges of every other type
+    subclauses: ["16.7", "16.8"]
+    productions: [edge pattern, label expression]
+    query: |
+      MATCH (p:Person)-[:WORKS_AT]->(c:Company)
+      RETURN p.name AS person, c.name AS company
+    expect:
+      kind: rows
+      unordered: true
+      columns: [person, company]
+      rows:
+        - [Alice, Acme]
+        - [Bob, Acme]
+        - [Carol, Globex]
+
+  - id: mandatory/pattern/edge-pattern-untyped
+    name: An empty element pattern filler matches an edge of any type
+    subclauses: ["16.7"]
+    productions: [element pattern filler, full edge pointing right]
+    query: |
+      MATCH (p:Person)-[]->()
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[8]]
+
+  - id: mandatory/pattern/anonymous-endpoint
+    name: A node pattern needs no variable to constrain a path
+    subclauses: ["16.4", "16.7"]
+    productions: [node pattern]
+    query: |
+      MATCH (p:Person)-[:KNOWS]->()
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: mandatory/pattern/path-concatenation
+    name: Concatenated element patterns match a two-edge path
+    subclauses: ["16.7"]
+    productions: [path concatenation, path term, path factor]
+    query: |
+      MATCH (p:Person)-[:KNOWS]->(q:Person)-[:KNOWS]->(r:Person)
+      RETURN p.name AS start, r.name AS finish
+    expect:
+      kind: rows
+      unordered: true
+      columns: [start, finish]
+      rows:
+        - [Alice, Carol]
+        - [Bob, Dave]
+        - [Alice, Dave]
+        - [Carol, Erin]
+
+  - id: mandatory/pattern/path-pattern-list-joins
+    name: Two path patterns in one graph pattern join on their shared variable
+    subclauses: ["16.4"]
+    productions: [path pattern list, path pattern, graph pattern]
+    query: |
+      MATCH (p:Person)-[:KNOWS]->(q:Person), (q)-[:KNOWS]->(r:Person)
+      RETURN p.name AS start, r.name AS finish
+    expect:
+      kind: rows
+      unordered: true
+      columns: [start, finish]
+      rows:
+        - [Alice, Carol]
+        - [Bob, Dave]
+        - [Alice, Dave]
+        - [Carol, Erin]
+
+  - id: mandatory/pattern/property-specification
+    name: A property key-value pair in a pattern filters as an equality would
+    subclauses: ["16.4"]
+    productions: [element property specification, property key value pair list]
+    query: |
+      MATCH (p:Person {name: 'Alice'})
+      RETURN p.age AS age
+    expect:
+      kind: rows
+      columns: [age]
+      rows: [[34]]
+
+  - id: mandatory/pattern/element-pattern-predicate
+    name: A local where clause inside an element pattern filters that element
+    subclauses: ["16.4", "16.13"]
+    productions: [element pattern predicate, element pattern where clause]
+    query: |
+      MATCH (p:Person WHERE p.age > 40)
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Carol], [Erin]]
+
+  - id: mandatory/pattern/label-disjunction
+    name: A label disjunction matches an element carrying either label
+    subclauses: ["16.8", "22.5"]
+    productions: [label disjunction, label expression]
+    query: |
+      MATCH (x:Person|Company)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[7]]
+
+  - id: mandatory/pattern/label-negation
+    name: A label negation matches an element that does not carry the label
+    subclauses: ["16.8", "22.5"]
+    productions: [label negation, label factor]
+    query: |
+      MATCH (x:!Company)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: mandatory/pattern/label-conjunction
+    name: A label conjunction matches only an element carrying both labels
+    subclauses: ["16.8", "22.5"]
+    productions: [label conjunction, label term]
+    fixture: multilabel
+    query: |
+      MATCH (x:Person&Employee)
+      RETURN x.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Mika]]
+
+  - id: mandatory/pattern/label-parenthesized
+    name: Parentheses group a label expression against the default precedence
+    subclauses: ["16.8"]
+    productions: [parenthesized label expression]
+    fixture: multilabel
+    query: |
+      MATCH (x:(Person&Employee)|Employee)
+      RETURN x.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Mika]]
+
+  - id: mandatory/pattern/exists-predicate
+    name: An EXISTS predicate over a match statement filters on a pattern it does not project
+    subclauses: ["19.4"]
+    productions: [exists predicate, match statement block]
+    query: |
+      MATCH (p:Person)
+      WHERE EXISTS { MATCH (p)-[:WORKS_AT]->(:Company) }
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Bob], [Carol]]
+
+  - id: mandatory/pattern/exists-predicate-negated
+    name: NOT EXISTS keeps the bindings the pattern does not hold for
+    subclauses: ["19.4", "20.20"]
+    productions: [exists predicate]
+    query: |
+      MATCH (p:Person)
+      WHERE NOT EXISTS { MATCH (p)-[:WORKS_AT]->(:Company) }
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Dave], [Erin]]
+
+  - id: mandatory/pattern/optional-match
+    name: OPTIONAL MATCH keeps a binding and nulls the variables its pattern did not bind
+    subclauses: ["14.4"]
+    productions: [optional match statement, optional operand]
+    tags: ["null"]
+    query: |
+      MATCH (p:Person)
+      OPTIONAL MATCH (p)-[:WORKS_AT]->(c:Company)
+      RETURN p.name AS name, c.name AS company
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name, company]
+      rows:
+        - [Alice, Acme]
+        - [Bob, Acme]
+        - [Carol, Globex]
+        - [Dave, null]
+        - [Erin, null]
+
+  - id: mandatory/pattern/self-loop
+    name: An edge whose endpoints are the same node matches a two-node pattern
+    subclauses: ["16.7"]
+    productions: [path concatenation]
+    fixture: selfloop
+    tags: [edge-case]
+    query: |
+      MATCH (x:Peer)-[:FRIEND]->(y:Peer)
+      RETURN x.name AS source, y.name AS target
+    expect:
+      kind: rows
+      unordered: true
+      columns: [source, target]
+      rows: [[solo, solo]]
+
+  - id: mandatory/pattern/parallel-edges
+    name: Two edges between one pair of nodes are two bindings, not one
+    subclauses: ["16.7", "4.11.6"]
+    productions: [edge pattern]
+    fixture: parallel
+    tags: [edge-case]
+    query: |
+      MATCH (x:Peer)-[f:FRIEND]->(y:Peer)
+      RETURN f.rank AS rank
+    expect:
+      kind: rows
+      unordered: true
+      columns: [rank]
+      rows: [[1], [2]]

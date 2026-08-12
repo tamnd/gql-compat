@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.5"
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "these files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - run: go vet ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      # Three platforms because the measurement layer differs on each: page
+      # faults and I/O counters are readable on Linux and not on macOS, and
+      # the allocated-size call behind the disk figure is a syscall per OS.
+      # A metric that silently became zero on one of them would show up as a
+      # storage difference between engines that were never compared.
+      - run: go test ./...
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      # The sampler polls one process from a goroutine while the runner drives
+      # another, and the report reads what the sampler wrote. That is the only
+      # concurrency here and it is exactly the kind a race detector finds.
+      - run: go test -race ./...
+
+  cover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: go test -coverprofile=cover.out -covermode=atomic ./...
+      - run: go tool cover -func=cover.out | tail -1
+      - uses: actions/upload-artifact@v5
+        with:
+          name: coverage
+          path: cover.out
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      # Every conformance claim this tool makes is a reference into the ISO
+      # artifacts. If one of them changes — an upstream correction, a bad
+      # merge, an editor's stray newline — the scores change with it. The
+      # checksums make that a failing build instead of a quietly different
+      # number, and `validate` then proves every reference in the corpus still
+      # resolves against them.
+      - name: Checksums of the vendored ISO artifacts
+        run: make verify-artifacts
+      - name: Every ISO reference in the corpus resolves
+        run: go run ./cmd/gql-compat validate
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      # An end-to-end run against the scripted engine. It proves the pipeline
+      # from corpus to five rendered reports, which no unit test covers, and
+      # it needs no database. -fail-on none because the fake engine's answers
+      # are scripted and its score is meaningless; what is being tested is
+      # that a report comes out at all.
+      - name: Run the corpus against the scripted engine
+        run: go run ./cmd/gql-compat run -adapter fake -repeats 1 -warmups 0 -fail-on none -quiet -out ./reports
+      - name: Every format was written and none is empty
+        run: |
+          for ext in json md html csv xml; do
+            f="reports/fake.$ext"
+            [ -s "$f" ] || { echo "missing or empty: $f"; exit 1; }
+          done
+          ls -l reports
+      - uses: actions/upload-artifact@v5
+        with:
+          name: smoke-reports
+          path: reports/

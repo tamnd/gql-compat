@@ -1,0 +1,455 @@
+# Optional features outside the read path: writing data (GD), managing the
+# catalog (GC), declaring a graph type (GG), transactions (GT) and session
+# state (GS).
+#
+# Every case that changes anything is marked `mutating`, which makes the
+# runner reload the fixture before the next case that needs one. Cases that
+# have to observe their own effect put the write in `setup` and the read in
+# `query`; that costs the engine a multiple-statement capability, and an
+# engine without one is skipped rather than failed, because running the two
+# halves as one statement would need NEXT, which is a different feature
+# (GQ20) and would attribute the failure to the wrong place.
+#
+# The catalog cases each use a graph or schema name of their own. Sharing one
+# name across cases would make a case's outcome depend on whether an earlier
+# case had run, and a suite whose results depend on their order is not
+# measuring the engine.
+
+defaults:
+  kind: optional
+  tags: [write]
+
+cases:
+  - id: optional/gd01/insert-node
+    name: INSERT adds a node and the same statement can return its properties
+    features: [GD01]
+    subclauses: ["13.2"]
+    productions: [insert statement, insert graph pattern, insert node pattern, insert element pattern filler]
+    fixture: blank
+    mutating: true
+    query: |
+      INSERT (x:Person {name: 'Zoe', age: 30})
+      RETURN x.name AS name, x.age AS age
+    expect:
+      kind: rows
+      columns: [name, age]
+      rows: [[Zoe, 30]]
+
+  - id: optional/gd01/insert-is-visible-to-a-later-match
+    name: A node inserted by one statement is matched by the next
+    features: [GD01]
+    subclauses: ["13.2", "14.4"]
+    productions: [insert statement, match statement]
+    fixture: blank
+    mutating: true
+    setup:
+      - "INSERT (:Person {name: 'Zoe'})"
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Zoe]]
+
+  - id: optional/gd01/insert-edge-between-matched-nodes
+    name: INSERT joins two nodes a MATCH bound in the same statement
+    features: [GD01]
+    subclauses: ["13.1", "13.2"]
+    productions: [simple linear data-accessing statement, insert edge pointing right, insert path pattern]
+    fixture: pair
+    mutating: true
+    query: |
+      MATCH (a:Person {name: 'Ada'}), (b:Person {name: 'Linus'})
+      INSERT (a)-[k:KNOWS {since: 2020}]->(b)
+      RETURN k.since AS since
+    expect:
+      kind: rows
+      columns: [since]
+      rows: [[2020]]
+
+  - id: optional/gd01/set-property
+    name: SET assigns a property on a bound element
+    features: [GD01]
+    subclauses: ["13.3"]
+    productions: [set statement, set item, set property item]
+    fixture: pair
+    mutating: true
+    query: |
+      MATCH (p:Person {name: 'Ada'})
+      SET p.age = 37
+      RETURN p.age AS age
+    expect:
+      kind: rows
+      columns: [age]
+      rows: [[37]]
+
+  - id: optional/gd01/set-all-properties
+    name: Assigning a whole record replaces every property the element had
+    features: [GD01]
+    subclauses: ["13.3"]
+    productions: [set all properties item, property key value pair list]
+    fixture: pair
+    mutating: true
+    # The record form is a replacement, not a merge, so `age` is gone
+    # afterwards even though it was set before and is not mentioned here.
+    query: |
+      MATCH (p:Person {name: 'Ada'})
+      SET p = {name: 'Ada Lovelace'}
+      RETURN p.name AS name, p.age AS age
+    expect:
+      kind: rows
+      columns: [name, age]
+      rows: [["Ada Lovelace", null]]
+
+  - id: optional/gd01/remove-property
+    name: REMOVE takes a property off an element, leaving a read of it null
+    features: [GD01]
+    subclauses: ["13.4"]
+    productions: [remove statement, remove item, remove property item]
+    fixture: pair
+    mutating: true
+    tags: [write, "null"]
+    query: |
+      MATCH (p:Person {name: 'Ada'})
+      REMOVE p.age
+      RETURN p.age AS age
+    expect:
+      kind: rows
+      columns: [age]
+      rows: [[null]]
+
+  - id: optional/gd02/set-label
+    name: SET adds a label to an element
+    features: [GD01, GD02]
+    subclauses: ["13.3"]
+    productions: [set label item, is or colon]
+    fixture: pair
+    mutating: true
+    setup:
+      - "MATCH (p:Person {name: 'Ada'}) SET p:Employee"
+    query: |
+      MATCH (x:Employee)
+      RETURN x.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Ada]]
+
+  - id: optional/gd02/remove-label
+    name: REMOVE takes a label off an element, and the element stops matching it
+    features: [GD01, GD02]
+    subclauses: ["13.4"]
+    productions: [remove label item]
+    fixture: multilabel
+    mutating: true
+    setup:
+      - "MATCH (x:Employee) REMOVE x:Employee"
+    query: |
+      MATCH (x:Employee)
+      RETURN x.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: []
+
+  - id: optional/gd04/delete-node
+    name: DELETE removes a node named by a simple expression
+    features: [GD01, GD04]
+    subclauses: ["13.5"]
+    productions: [delete statement, delete item list, delete item]
+    fixture: pair
+    mutating: true
+    # ISO splits DELETE into GD04 for delete items that are simple expressions
+    # and GD03 for delete items that are subqueries. A bare variable reference
+    # reads as the simple case, so that is what this claims.
+    setup:
+      - "MATCH (p:Person {name: 'Ada'}) DELETE p"
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Linus]]
+
+  - id: optional/gd04/detach-delete-node
+    name: DETACH DELETE removes a node together with the edges on it
+    features: [GD01, GD04]
+    subclauses: ["13.5"]
+    productions: [delete statement]
+    fixture: social
+    mutating: true
+    setup:
+      - "MATCH (p:Person {name: 'Carol'}) DETACH DELETE p"
+    query: |
+      MATCH ()-[k:KNOWS]->()
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[3]]
+
+  - id: optional/gd01/delete-edge
+    name: Deleting an edge leaves both of its endpoints in place
+    features: [GD01, GD04]
+    subclauses: ["13.5"]
+    productions: [delete item, edge pattern]
+    fixture: social
+    mutating: true
+    setup:
+      - "MATCH (:Person {name: 'Alice'})-[k:KNOWS]->(:Person {name: 'Bob'}) DELETE k"
+    query: |
+      MATCH (p:Person)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/gc04/create-graph
+    name: CREATE GRAPH adds a graph with an open graph type to the catalog
+    features: [GC04, GG01]
+    subclauses: ["12.4"]
+    productions: [create graph statement, catalog graph parent and name, open graph type]
+    tags: [write, catalog]
+    mutating: true
+    query: |
+      CREATE PROPERTY GRAPH gqlcompat_create ANY
+    expect:
+      kind: accept
+
+  - id: optional/gc05/create-graph-if-not-exists
+    name: IF NOT EXISTS makes a second CREATE GRAPH of the same name succeed
+    features: [GC04, GC05]
+    subclauses: ["12.4"]
+    productions: [create graph statement]
+    tags: [write, catalog]
+    mutating: true
+    setup:
+      - "CREATE PROPERTY GRAPH gqlcompat_ifne ANY"
+    query: |
+      CREATE PROPERTY GRAPH IF NOT EXISTS gqlcompat_ifne ANY
+    expect:
+      kind: accept
+
+  - id: optional/gc04/drop-graph
+    name: DROP GRAPH removes a graph from the catalog
+    features: [GC04]
+    subclauses: ["12.5"]
+    productions: [drop graph statement]
+    tags: [write, catalog]
+    mutating: true
+    setup:
+      - "CREATE PROPERTY GRAPH gqlcompat_drop ANY"
+    query: |
+      DROP PROPERTY GRAPH gqlcompat_drop
+    expect:
+      kind: accept
+
+  - id: optional/gc01/create-schema
+    name: CREATE SCHEMA adds a schema at an absolute directory path
+    features: [GC01]
+    subclauses: ["12.2"]
+    productions: [create schema statement, catalog schema parent and name, absolute directory path]
+    tags: [write, catalog]
+    mutating: true
+    query: |
+      CREATE SCHEMA /gqlcompat_schema
+    expect:
+      kind: accept
+
+  - id: optional/gc02/create-schema-if-not-exists
+    name: IF NOT EXISTS makes a second CREATE SCHEMA of the same name succeed
+    features: [GC01, GC02]
+    subclauses: ["12.2"]
+    productions: [create schema statement]
+    tags: [write, catalog]
+    mutating: true
+    setup:
+      - "CREATE SCHEMA /gqlcompat_schema_ifne"
+    query: |
+      CREATE SCHEMA IF NOT EXISTS /gqlcompat_schema_ifne
+    expect:
+      kind: accept
+
+  - id: optional/gc01/drop-schema
+    name: DROP SCHEMA removes a schema from the catalog
+    features: [GC01]
+    subclauses: ["12.3"]
+    productions: [drop schema statement]
+    tags: [write, catalog]
+    mutating: true
+    setup:
+      - "CREATE SCHEMA /gqlcompat_schema_drop"
+    query: |
+      DROP SCHEMA /gqlcompat_schema_drop
+    expect:
+      kind: accept
+
+  - id: optional/gg03/graph-type-inline
+    name: A graph can be created with its type written inline
+    features: [GC04, GG02, GG03]
+    subclauses: ["12.4", "18.2"]
+    productions: [nested graph type specification, node type pattern, property types specification]
+    tags: [write, catalog]
+    mutating: true
+    query: |
+      CREATE PROPERTY GRAPH gqlcompat_typed { (:Person {name :: STRING}) }
+    expect:
+      kind: accept
+
+  - id: optional/gc03/create-graph-type-if-not-exists
+    name: A graph type is a catalog object in its own right
+    features: [GC01, GC03, GG03]
+    subclauses: ["12.6"]
+    productions: [create graph type statement, catalog graph type parent and name, graph type source]
+    tags: [write, catalog]
+    mutating: true
+    setup:
+      - "CREATE PROPERTY GRAPH TYPE gqlcompat_gt { (:Person) }"
+    query: |
+      CREATE PROPERTY GRAPH TYPE IF NOT EXISTS gqlcompat_gt { (:Person) }
+    expect:
+      kind: accept
+
+  - id: optional/gg04/graph-type-like-a-graph
+    name: LIKE takes the type of an existing graph
+    features: [GC04, GG04]
+    subclauses: ["12.4"]
+    productions: [graph type like graph, of graph type]
+    tags: [write, catalog]
+    mutating: true
+    setup:
+      - "CREATE PROPERTY GRAPH gqlcompat_like_src { (:Person) }"
+    query: |
+      CREATE PROPERTY GRAPH gqlcompat_like LIKE gqlcompat_like_src
+    expect:
+      kind: accept
+
+  - id: optional/gg05/graph-as-copy-of
+    name: A graph source copies the contents of another graph
+    features: [GC04, GG05]
+    subclauses: ["12.4"]
+    productions: [graph source, create graph statement]
+    tags: [write, catalog]
+    mutating: true
+    setup:
+      - "CREATE PROPERTY GRAPH gqlcompat_copy_src ANY"
+    query: |
+      CREATE PROPERTY GRAPH gqlcompat_copy ANY AS COPY OF gqlcompat_copy_src
+    expect:
+      kind: accept
+
+  - id: optional/gt01/start-transaction-and-commit
+    name: An explicit transaction can be opened and committed
+    features: [GT01]
+    subclauses: ["8.1", "8.4"]
+    productions: [start transaction command, commit command]
+    tags: [write, transaction]
+    mutating: true
+    setup:
+      - "START TRANSACTION"
+    query: |
+      COMMIT
+    expect:
+      kind: accept
+
+  - id: optional/gt01/rollback-undoes-an-insert
+    name: ROLLBACK discards what the transaction wrote
+    features: [GT01, GD01]
+    subclauses: ["8.1", "8.3"]
+    productions: [rollback command, start transaction command]
+    fixture: blank
+    tags: [write, transaction]
+    mutating: true
+    # This is the only case in the file that tests what a transaction is for
+    # rather than that its keywords parse. An engine that accepts ROLLBACK and
+    # keeps the row fails here, which is the intended reading of GT01.
+    setup:
+      - "START TRANSACTION"
+      - "INSERT (:Person {name: 'Zoe'})"
+      - "ROLLBACK"
+    query: |
+      MATCH (p:Person)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[0]]
+
+  - id: optional/gt02/read-only-transaction
+    name: A transaction can be opened with a declared access mode
+    features: [GT01, GT02]
+    subclauses: ["8.1", "8.2"]
+    productions: [transaction characteristics, transaction mode, transaction access mode]
+    tags: [write, transaction]
+    mutating: true
+    setup:
+      - "START TRANSACTION READ ONLY"
+    query: |
+      ROLLBACK
+    expect:
+      kind: accept
+
+  - id: optional/gs03/session-set-value-parameter
+    name: SESSION SET VALUE defines a parameter the session can then read
+    features: [GS03]
+    subclauses: ["7.1", "7.4"]
+    productions: [session set command, session set value parameter clause, session set parameter name]
+    tags: [write, session]
+    mutating: true
+    setup:
+      - "SESSION SET VALUE $threshold = 40"
+    query: |
+      RETURN $threshold AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[40]]
+
+  - id: optional/gs14/session-set-value-from-expression
+    name: A session value parameter can be initialized from an expression
+    features: [GS03, GS14]
+    subclauses: ["7.1"]
+    productions: [opt typed value initializer, value initializer]
+    tags: [write, session]
+    mutating: true
+    setup:
+      - "SESSION SET VALUE $doubled = 20 * 2"
+    query: |
+      RETURN $doubled AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[40]]
+
+  - id: optional/gs08/session-reset-parameters
+    name: SESSION RESET PARAMETERS clears what SESSION SET defined
+    features: [GS03, GS08]
+    subclauses: ["7.2"]
+    productions: [session reset command, session reset arguments]
+    tags: [write, session]
+    mutating: true
+    setup:
+      - "SESSION SET VALUE $gone = 1"
+    query: |
+      SESSION RESET ALL PARAMETERS
+    expect:
+      kind: accept
+
+  - id: optional/gs06/session-reset-graph
+    name: SESSION RESET PROPERTY GRAPH restores the default working graph
+    features: [GS06]
+    subclauses: ["7.2"]
+    productions: [session reset command]
+    tags: [write, session]
+    mutating: true
+    query: |
+      SESSION RESET PROPERTY GRAPH
+    expect:
+      kind: accept

@@ -1,0 +1,92 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - misspell
+    - nilerr
+    - noctx
+    - perfsprint
+    - prealloc
+    - revive
+    - unconvert
+    - usestdlibvars
+    - wastedassign
+
+  settings:
+    errcheck:
+      # A report that failed to write half way through is a broken report, and
+      # every io.Writer here is one a caller passed in. Ignoring an error from
+      # one is how a truncated file gets published as a result.
+      check-type-assertions: true
+      exclude-functions:
+        # Usage and help text goes to os.Stdout or os.Stderr and is the last
+        # thing the process does. There is no recovery from a short write to a
+        # terminal, and checking it would bury the text in error handling.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    govet:
+      enable-all: true
+      disable:
+        # Field alignment would reorder the metric structs, whose order is the
+        # order a reader of the JSON expects to find them in.
+        - fieldalignment
+        # `if err := f(); err != nil` inside a function that already holds an
+        # err is the idiom, not a bug: the inner err is scoped to the if, and
+        # spelling it err2 to satisfy the check makes the code worse.
+        - shadow
+    revive:
+      rules:
+        - name: exported
+          # Everything here is public API by design: the CLI is written
+          # against the same exported surface a library caller gets, so an
+          # undocumented exported identifier is a real gap.
+          severity: error
+        - name: package-comments
+    gocritic:
+      enabled-tags: [diagnostic, performance, style]
+      disabled-checks:
+        - ifElseChain
+        - commentFormatting
+        # The metric and report structs are passed and ranged by value
+        # deliberately: a Report handed to a formatter must not be something the
+        # formatter can edit under the caller, and a measurement copied once per
+        # case is not a cost worth trading that for.
+        - hugeParam
+        - rangeValCopy
+        # `max`, `min` and `cap` read as the quantities they are in a metrics
+        # package, and shadowing a builtin inside a four-line helper is clearer
+        # than inventing a synonym for it.
+        - builtinShadow
+
+  exclusions:
+    rules:
+      # Test files construct large literal reports and fixtures on purpose;
+      # the point of them is to be explicit rather than concise.
+      - path: _test\.go
+        linters:
+          - dupl
+          - gocritic
+          - prealloc
+      # The vendored ISO artifacts are ISO's text, transcribed. Nothing in
+      # there is ours to reformat.
+      - path: iso/artifacts/
+        linters:
+          - misspell
+          - revive
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes: [github.com/tamnd/gql-compat]

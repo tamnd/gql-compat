@@ -1,0 +1,205 @@
+# Grammar cases: what the parser must take and what it must refuse.
+#
+# A grammar case asserts acceptance or refusal and nothing else. It exists
+# because a permissive parser and a conforming one give the same answers to
+# every case in the rest of this suite; the difference between them only shows
+# up on input the standard does not define. An engine that accepts a statement
+# ISO has no production for is not more capable, it is differently specified,
+# and a compatibility report that never asked would never say so.
+#
+# Refusal cases are deliberately not near the boundary. Each one is wrong in a
+# way no reading of the grammar accommodates, so a refusal is evidence about
+# the engine rather than about how the case was written.
+
+defaults:
+  kind: grammar
+  fixture: unit
+  tags: [syntax]
+
+cases:
+  - id: grammar/keywords-are-case-insensitive
+    name: Keywords are matched without regard to case
+    subclauses: ["21.3"]
+    productions: [GQL terminal character, token]
+    query: |
+      match (u:Unit) return 1 as v
+    expect:
+      kind: accept
+
+  - id: grammar/keywords-mixed-case
+    name: A keyword may mix cases within itself
+    subclauses: ["21.3"]
+    productions: [token]
+    query: |
+      MaTcH (u:Unit) ReTuRn 1 AS v
+    expect:
+      kind: accept
+
+  - id: grammar/whitespace-between-tokens-is-free
+    name: Line breaks and runs of spaces between tokens carry no meaning
+    subclauses: ["21.3"]
+    productions: [separator, whitespace]
+    query: |
+      MATCH
+          (u:Unit)
+
+      RETURN
+          1     AS     v
+    expect:
+      kind: accept
+
+  - id: grammar/comment-between-tokens
+    name: A comment is a separator and may appear wherever whitespace may
+    subclauses: ["21.3"]
+    productions: [separator, comment, bracketed comment]
+    query: |
+      MATCH /* here */ (u:Unit) /* and here */ RETURN 1 AS v
+    expect:
+      kind: accept
+
+  - id: grammar/delimited-identifier-accent
+    name: An accent-quoted identifier may contain characters a regular one may not
+    subclauses: ["21.3"]
+    productions: [delimited identifier, accent quoted character sequence]
+    query: |
+      MATCH (`odd name`:Unit)
+      RETURN 1 AS v
+    expect:
+      kind: accept
+
+  - id: grammar/delimited-identifier-double-quoted
+    name: A double-quoted identifier is the other delimited form
+    subclauses: ["21.3"]
+    productions: [delimited identifier, double quoted character sequence]
+    # An engine that reads double quotes as a string literal will take this as
+    # a node pattern containing a value and refuse it, or worse, accept it as
+    # something else. Both are worth knowing.
+    query: |
+      MATCH ("odd name":Unit)
+      RETURN 1 AS v
+    expect:
+      kind: accept
+
+  - id: grammar/delimited-identifier-holds-a-keyword
+    name: Delimiting an identifier lets it be spelled like a keyword
+    subclauses: ["21.3"]
+    productions: [delimited identifier, binding variable]
+    query: |
+      RETURN 1 AS `MATCH`
+    expect:
+      kind: accept
+
+  - id: grammar/reject-keyword-as-bare-identifier
+    name: A reserved word is not a regular identifier
+    subclauses: ["21.3"]
+    productions: [regular identifier, binding variable]
+    query: |
+      RETURN 1 AS MATCH
+    expect:
+      kind: reject
+
+  - id: grammar/reject-trailing-semicolon
+    name: A statement terminator is not part of the GQL grammar
+    subclauses: ["21.3"]
+    productions: [GQL-program, token]
+    # No production in ISO/IEC 39075 admits a semicolon, so a conforming
+    # implementation has nothing to do with one. Almost every engine accepts
+    # it anyway, inherited from SQL clients. That divergence is the point of
+    # this case; it is reported, not scored as a defect of the engine's
+    # usefulness.
+    query: |
+      MATCH (u:Unit) RETURN 1 AS v;
+    expect:
+      kind: reject
+
+  - id: grammar/reject-dangling-edge-pattern
+    name: An edge pattern with no node after it is not a path pattern
+    subclauses: ["16.7"]
+    productions: [path pattern expression, path concatenation]
+    query: |
+      MATCH (u:Unit)-[e:LINK]->
+      RETURN 1 AS v
+    expect:
+      kind: reject
+
+  - id: grammar/reject-match-with-no-pattern
+    name: MATCH requires a graph pattern
+    subclauses: ["14.4"]
+    productions: [match statement, graph pattern]
+    query: |
+      MATCH
+      RETURN 1 AS v
+    expect:
+      kind: reject
+
+  - id: grammar/reject-adjacent-labels-without-an-operator
+    name: Two label names side by side are not a label expression
+    subclauses: ["16.8"]
+    productions: [label expression, label term]
+    query: |
+      MATCH (x:Unit Other)
+      RETURN 1 AS v
+    expect:
+      kind: reject
+
+  - id: grammar/reject-double-equals
+    name: The equality operator is one equals sign
+    subclauses: ["19.3"]
+    productions: [comparison predicate, equals operator]
+    query: |
+      MATCH (u:Unit)
+      WHERE 1 == 1
+      RETURN 1 AS v
+    expect:
+      kind: reject
+
+  - id: grammar/reject-unterminated-string-literal
+    name: A quote with no closing quote is not a token
+    subclauses: ["21.2"]
+    productions: [character string literal, unbroken single quoted character sequence]
+    query: |
+      RETURN 'unterminated AS v
+    expect:
+      kind: reject
+
+  - id: grammar/reject-unterminated-bracketed-comment
+    name: A bracketed comment must be closed
+    subclauses: ["21.3"]
+    productions: [bracketed comment, bracketed comment terminator]
+    query: |
+      RETURN 1 AS v /* never closed
+    expect:
+      kind: reject
+
+  - id: grammar/reject-return-before-match
+    name: A result statement does not precede the statement it draws from
+    subclauses: ["14.3"]
+    productions: [simple linear query statement, primitive result statement]
+    query: |
+      RETURN 1 AS v
+      MATCH (u:Unit)
+    expect:
+      kind: reject
+
+  - id: grammar/reject-property-access-on-a-literal
+    name: A period after a number is not a property reference
+    subclauses: ["20.11"]
+    productions: [property reference, element variable reference]
+    query: |
+      RETURN 1.name AS v
+    expect:
+      kind: reject
+
+  - id: optional/gb01/long-identifier
+    kind: optional
+    name: An identifier may be longer than the minimum an engine must support
+    features: [GB01]
+    subclauses: ["21.3"]
+    productions: [regular identifier, identifier extend]
+    # ISO makes support for long identifiers a feature rather than a rule, and
+    # sets no length in the mandatory case, so the only honest test is one
+    # identifier that is plainly long. This one is 128 characters.
+    query: |
+      RETURN 1 AS aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbccccccccccccccccccccccccccccccccdddddddddddddddddddddddddddddddd
+    expect:
+      kind: accept

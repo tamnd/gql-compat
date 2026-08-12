@@ -1,0 +1,239 @@
+# Optional procedure features (GP): inline procedures, their variable scope,
+# and the variable definitions a procedure body may open with.
+#
+# Named procedure calls — GP04, and GP14 and GP15, which are about what may be
+# passed to one — have no cases here. ISO defines the syntax of a named call
+# but not a single procedure to call: every procedure name is supplied by the
+# implementation or the catalog. A portable case would have to invent a name,
+# and every engine would fail it for the same uninteresting reason. An engine
+# that wants credit for GP04 has to demonstrate it in its own dialect, which
+# is what the `dialects` field is for; nothing in this suite can do it.
+#
+# For the same reason there are no cases for the binding-table variable
+# definitions (GP08 through GP10): a binding table variable has to be
+# initialized from a binding table that already exists in the catalog, and
+# nothing in this corpus can put one there portably.
+
+defaults:
+  kind: optional
+  fixture: social
+  tags: [read, procedure]
+
+cases:
+  - id: optional/gp01/inline-procedure
+    name: An inline procedure runs a nested query and yields its table
+    features: [GP01]
+    subclauses: ["15.1", "15.2", "9.2"]
+    productions: [call procedure statement, procedure call, inline procedure call, nested procedure specification]
+    query: |
+      CALL { MATCH (p:Person) RETURN p.name AS name }
+      RETURN name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Bob], [Carol], [Dave], [Erin]]
+
+  - id: optional/gp02/implicit-variable-scope
+    name: Without a scope clause the outer variables are all in scope
+    features: [GP01, GP02]
+    subclauses: ["15.2"]
+    productions: [inline procedure call, nested query specification]
+    # The inner MATCH names `p`, which nothing inside the braces bound. With
+    # the implicit scope it is the `p` from the outer MATCH, and each of the
+    # three employed people yields one row.
+    query: |
+      MATCH (p:Person)
+      CALL { MATCH (p)-[:WORKS_AT]->(c:Company) RETURN c.name AS company }
+      RETURN p.name AS name, company AS company
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name, company]
+      rows:
+        - [Alice, Acme]
+        - [Bob, Acme]
+        - [Carol, Globex]
+
+  - id: optional/gp03/explicit-variable-scope
+    name: A scope clause names exactly which outer variables the body sees
+    features: [GP01, GP03]
+    subclauses: ["15.2"]
+    productions: [variable scope clause, binding variable reference list]
+    query: |
+      MATCH (p:Person)
+      CALL (p) { MATCH (p)-[:WORKS_AT]->(c:Company) RETURN c.name AS company }
+      RETURN p.name AS name, company AS company
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name, company]
+      rows:
+        - [Alice, Acme]
+        - [Bob, Acme]
+        - [Carol, Globex]
+
+  - id: optional/gp03/empty-variable-scope
+    name: An empty scope clause shuts every outer variable out
+    features: [GP01, GP03]
+    subclauses: ["15.2"]
+    productions: [variable scope clause]
+    # With nothing in scope the body is a constant, so each of the five outer
+    # rows is paired with the same one row from the body.
+    query: |
+      MATCH (p:Person)
+      CALL () { MATCH (c:Company) WHERE c.name = 'Acme' RETURN c.name AS company }
+      RETURN p.name AS name, company AS company
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name, company]
+      rows:
+        - [Alice, Acme]
+        - [Bob, Acme]
+        - [Carol, Acme]
+        - [Dave, Acme]
+        - [Erin, Acme]
+
+  - id: optional/gp05/value-variable-definition
+    name: A procedure body may open by defining a value variable
+    features: [GP01, GP05, GP06, GP17]
+    subclauses: ["9.2", "10.3"]
+    productions: [binding variable definition block, binding variable definition, value variable definition]
+    query: |
+      CALL {
+        VALUE threshold = 40
+        MATCH (p:Person)
+        WHERE p.age > threshold
+        RETURN p.name AS name
+      }
+      RETURN name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Carol], [Erin]]
+
+  - id: optional/gp05/typed-value-variable-definition
+    name: A value variable may declare its type
+    features: [GP01, GP05, GP06, GP17]
+    subclauses: ["10.3"]
+    productions: [value variable definition, opt typed value initializer, typed]
+    query: |
+      CALL {
+        VALUE threshold :: INT = 40
+        MATCH (p:Person)
+        WHERE p.age > threshold
+        RETURN p.name AS name
+      }
+      RETURN name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Carol], [Erin]]
+
+  - id: optional/gp07/value-variable-from-a-subquery
+    name: A value variable may be initialized from a scalar subquery
+    features: [GP01, GP05, GP07, GP17]
+    subclauses: ["10.3", "20.6"]
+    productions: [value variable definition, value initializer]
+    requires: [GQ18]
+    query: |
+      CALL {
+        VALUE oldest = VALUE { MATCH (q:Person) RETURN MAX(q.age) }
+        MATCH (p:Person)
+        WHERE p.age = oldest
+        RETURN p.name AS name
+      }
+      RETURN name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Erin]]
+
+  - id: optional/gp11/graph-variable-definition
+    name: A procedure body may bind a graph to a variable and then use it
+    features: [GP01, GP11, GP12, GP17]
+    subclauses: ["10.1"]
+    productions: [graph variable definition, opt typed graph initializer, graph initializer]
+    requires: [GQ01]
+    # CURRENT_PROPERTY_GRAPH rather than a name: which graph the working graph
+    # is called is the adapter's business, and a case that named one would be
+    # testing the harness's configuration.
+    query: |
+      CALL {
+        PROPERTY GRAPH g = CURRENT_PROPERTY_GRAPH
+        USE g
+        MATCH (p:Person)
+        RETURN COUNT(*) AS n
+      }
+      RETURN n AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/gp16/at-schema-clause
+    name: A procedure body may name the schema it resolves names against
+    features: [GP01, GP16]
+    subclauses: ["9.2", "16.1"]
+    productions: [at schema clause, schema reference, predefined schema reference]
+    query: |
+      CALL {
+        AT CURRENT_SCHEMA
+        MATCH (p:Person)
+        RETURN COUNT(*) AS n
+      }
+      RETURN n AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/gp18/catalog-and-data-statement-mixing
+    name: One procedure body may hold both a catalog statement and a data statement
+    features: [GP01, GP18, GC04]
+    subclauses: ["9.2", "12.1"]
+    productions: [statement block, next statement, linear catalog-modifying statement]
+    requires: [GQ20]
+    tags: [write, catalog, procedure]
+    mutating: true
+    # ISO makes this a feature rather than a rule because an implementation is
+    # allowed to refuse the mix outright, with 25G02. An engine that does is
+    # not failing to implement CREATE; it is declining GP18, and the report
+    # should read it that way.
+    query: |
+      CALL {
+        CREATE PROPERTY GRAPH gqlcompat_mixed ANY
+        NEXT
+        MATCH (p:Person)
+        RETURN COUNT(*) AS n
+      }
+      RETURN n AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/gp01/optional-call
+    name: OPTIONAL CALL keeps the row when the body yields nothing
+    features: [GP01, GP03]
+    subclauses: ["15.1"]
+    productions: [call procedure statement]
+    tags: [read, procedure, "null"]
+    query: |
+      MATCH (p:Person)
+      OPTIONAL CALL (p) { MATCH (p)-[:WORKS_AT]->(c:Company) RETURN c.name AS company }
+      RETURN p.name AS name, company AS company
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name, company]
+      rows:
+        - [Alice, Acme]
+        - [Bob, Acme]
+        - [Carol, Globex]
+        - [Dave, null]
+        - [Erin, null]

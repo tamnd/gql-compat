@@ -1,0 +1,285 @@
+# Mandatory query statements: MATCH, WHERE, RETURN, ORDER BY, and the
+# aggregation a return statement does without being asked.
+#
+# ISO/IEC 39075 gives mandatory features no code, so every case here cites the
+# subclause that specifies the behaviour. Nothing in this file may use a
+# construct that features.xml lists as optional: no USE, no LIMIT, no OFFSET,
+# no explicit GROUP BY, no UNION. An engine that fails one of these cannot
+# claim GQL conformance at all, which is a much stronger statement than losing
+# a feature, and the corpus earns the right to make it by staying inside the
+# mandatory surface.
+
+defaults:
+  kind: mandatory
+  fixture: social
+  tags: [read]
+
+cases:
+  - id: mandatory/query/match-node-by-label
+    name: A match statement binds every node carrying a label and a return statement projects one property
+    subclauses: ["14.4", "14.11", "16.4"]
+    productions: [match statement, return statement, node pattern, graph pattern]
+    tags: [pattern]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Bob], [Carol], [Dave], [Erin]]
+
+  - id: mandatory/query/match-second-label
+    name: A label in a node pattern selects only the nodes that carry it
+    subclauses: ["14.4", "16.8"]
+    productions: [label expression, element pattern filler]
+    tags: [pattern]
+    query: |
+      MATCH (c:Company)
+      RETURN c.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Acme], [Globex]]
+
+  - id: mandatory/query/return-multiple-items
+    name: A return item list projects more than one value per binding
+    subclauses: ["14.11"]
+    productions: [return item list, return item, return item alias]
+    query: |
+      MATCH (p:Person)
+      WHERE p.city = 'Lisbon'
+      RETURN p.name AS name, p.age AS age
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name, age]
+      rows: [[Dave, 27]]
+
+  - id: mandatory/query/return-distinct
+    name: DISTINCT in a return statement body removes duplicate records
+    subclauses: ["14.11", "22.12"]
+    productions: [set quantifier, return statement body]
+    query: |
+      MATCH (p:Person)
+      RETURN DISTINCT p.city AS city
+    expect:
+      kind: rows
+      unordered: true
+      columns: [city]
+      rows: [[Berlin], [Paris], [Lisbon]]
+
+  - id: mandatory/query/where-comparison
+    name: A where clause keeps only the bindings its search condition holds for
+    subclauses: ["16.13", "19.3"]
+    productions: [where clause, search condition, comparison predicate]
+    query: |
+      MATCH (p:Person)
+      WHERE p.age > 30
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Carol], [Erin]]
+
+  - id: mandatory/query/where-conjunction
+    name: AND in a search condition requires both operands
+    subclauses: ["16.13", "20.20"]
+    productions: [boolean value expression, search condition]
+    query: |
+      MATCH (p:Person)
+      WHERE p.age > 25 AND p.city = 'Berlin'
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Carol]]
+
+  - id: mandatory/query/where-disjunction
+    name: OR in a search condition accepts either operand
+    subclauses: ["16.13", "20.20"]
+    productions: [boolean value expression]
+    query: |
+      MATCH (p:Person)
+      WHERE p.city = 'Lisbon' OR p.age = 55
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Dave], [Erin]]
+
+  - id: mandatory/query/where-negation
+    name: NOT inverts a search condition that is true or false
+    subclauses: ["16.13", "20.20"]
+    productions: [boolean value expression]
+    query: |
+      MATCH (p:Person)
+      WHERE NOT p.city = 'Berlin'
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Bob], [Dave], [Erin]]
+
+  - id: mandatory/query/order-by-ascending
+    name: An order by clause after a return statement sorts on a projected column
+    subclauses: ["14.9", "16.16", "16.17"]
+    productions: [order by and page statement, order by clause, sort specification]
+    tags: [ordered]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      ORDER BY name
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[Alice], [Bob], [Carol], [Dave], [Erin]]
+
+  - id: mandatory/query/order-by-descending-then-ascending
+    name: A sort specification list breaks ties on the next key and honours DESC
+    subclauses: ["16.16", "16.17", "22.14"]
+    productions: [sort specification list, ordering specification]
+    tags: [ordered]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name, p.age AS age
+      ORDER BY age DESC, name ASC
+    expect:
+      kind: rows
+      columns: [name, age]
+      rows: [[Erin, 55], [Carol, 41], [Alice, 34], [Bob, 27], [Dave, 27]]
+
+  - id: mandatory/query/count-star
+    name: COUNT of asterisk counts bindings without reading a value
+    subclauses: ["20.9"]
+    productions: [aggregate function]
+    tags: [aggregate]
+    query: |
+      MATCH (p:Person)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: mandatory/query/aggregate-sum-min-max
+    name: SUM, MIN and MAX reduce a whole binding table to one record
+    subclauses: ["20.9"]
+    productions: [general set function, general set function type]
+    tags: [aggregate]
+    query: |
+      MATCH (p:Person)
+      RETURN SUM(p.age) AS total, MIN(p.age) AS youngest, MAX(p.age) AS oldest
+    expect:
+      kind: rows
+      columns: [total, youngest, oldest]
+      rows: [[184, 27, 55]]
+
+  - id: mandatory/query/aggregate-avg
+    name: AVG of exact numbers is the exact mean, not an integer quotient
+    subclauses: ["20.9"]
+    productions: [general set function]
+    tags: [aggregate]
+    query: |
+      MATCH (p:Person)
+      RETURN AVG(p.age) AS mean
+    expect:
+      kind: rows
+      columns: [mean]
+      rows: [[36.8]]
+
+  - id: mandatory/query/aggregate-count-distinct
+    name: COUNT DISTINCT counts distinct values, not bindings
+    subclauses: ["20.9", "22.12"]
+    productions: [general set function, set quantifier]
+    tags: [aggregate]
+    query: |
+      MATCH (p:Person)
+      RETURN COUNT(DISTINCT p.age) AS ages
+    expect:
+      kind: rows
+      columns: [ages]
+      rows: [[4]]
+
+  - id: mandatory/query/implicit-grouping
+    name: A return statement groups on its non-aggregated items without a group by clause
+    subclauses: ["14.11", "22.15"]
+    productions: [return statement body, aggregate function]
+    tags: [aggregate]
+    query: |
+      MATCH (p:Person)
+      RETURN p.city AS city, COUNT(*) AS n
+    expect:
+      kind: rows
+      unordered: true
+      columns: [city, n]
+      rows: [[Berlin, 2], [Paris, 2], [Lisbon, 1]]
+
+  - id: mandatory/query/aggregate-over-empty-input
+    name: COUNT over no bindings is zero and still returns one record
+    subclauses: ["20.9"]
+    productions: [aggregate function]
+    tags: [aggregate, edge-case]
+    query: |
+      MATCH (p:Person)
+      WHERE p.age > 200
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[0]]
+
+  - id: mandatory/query/match-with-no-results
+    name: A pattern that matches nothing yields no records and is not an error
+    subclauses: ["14.4"]
+    productions: [match statement]
+    tags: [edge-case]
+    query: |
+      MATCH (x:Nonexistent)
+      RETURN x.name AS name
+    expect:
+      kind: empty
+
+  - id: mandatory/query/finish
+    name: FINISH ends a query with no records rather than with an error
+    subclauses: ["14.10"]
+    productions: [primitive result statement]
+    query: |
+      MATCH (p:Person)
+      FINISH
+    expect:
+      kind: empty
+
+  - id: mandatory/query/return-without-match
+    name: A linear query statement may be a return statement alone
+    subclauses: ["14.3", "14.11"]
+    productions: [ambient linear query statement, linear query statement]
+    fixture: unit
+    query: |
+      RETURN 1 AS one
+    expect:
+      kind: rows
+      columns: [one]
+      rows: [[1]]
+
+  - id: mandatory/query/order-by-as-a-statement
+    name: An order by and page statement stands on its own inside a linear query statement
+    subclauses: ["14.9"]
+    productions: [order by and page statement, primitive query statement]
+    tags: [ordered]
+    query: |
+      MATCH (p:Person)
+      ORDER BY p.age, p.name
+      RETURN p.name AS name, p.age AS age
+    expect:
+      kind: rows
+      columns: [name, age]
+      rows: [[Bob, 27], [Dave, 27], [Alice, 34], [Carol, 41], [Erin, 55]]
+    # Bob and Dave share an age, so the case sorts on the name as well. An
+    # ordered expectation with a tie in it would be testing which of two
+    # correct answers an engine happens to give.

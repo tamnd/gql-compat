@@ -1,0 +1,430 @@
+# Performance cases, over generated graphs.
+#
+# These are not conformance cases. A performance case passes by completing
+# with the right answer; what it is for is the numbers the runner records
+# around it — latency distribution, resident memory, bytes on disk, ingest
+# cost. Nothing here is a pass/fail judgement about speed, because a threshold
+# would encode the machine it was chosen on.
+#
+# Every expectation is still an exact answer. Timing a query that returned the
+# wrong rows is worse than not timing it, so each case asserts a count or a
+# sum that the generator makes predictable, and a case that gets it wrong is
+# reported as a failure and its timings are ignored.
+#
+# The graphs are built from a fixed seed, so the same fixture is the same
+# graph on every machine and in every run. A throughput comparison across
+# engines is otherwise a comparison of graphs.
+#
+# Scales run 1k / 10k / 100k on the path shape, which is the one axis worth
+# spending three fixtures on: it is where an engine's per-node overhead
+# separates from its per-byte overhead. The other shapes appear once each, at
+# 10k, because their point is the degree distribution and not the size.
+
+fixtures:
+  - name: perf-path-1k
+    description: A directed chain of a thousand nodes; the smallest scale point.
+    generated: {shape: path, nodes: 1000, seed: 1}
+
+  - name: perf-path-10k
+    description: The same chain at ten thousand nodes.
+    generated: {shape: path, nodes: 10000, seed: 1}
+
+  - name: perf-path-100k
+    description: The same chain at a hundred thousand nodes.
+    generated: {shape: path, nodes: 100000, seed: 1}
+
+  - name: perf-star-10k
+    description: >-
+      One node with ten thousand out-edges. The worst case for an adjacency
+      list an engine has to scan rather than index.
+    generated: {shape: star, nodes: 10000, seed: 1}
+
+  - name: perf-grid-10k
+    description: >-
+      A hundred by a hundred lattice. Neighbourhoods grow polynomially, so a
+      k-hop query stays finishable at a depth where a scale-free graph would
+      already have touched everything.
+    generated: {shape: grid, nodes: 10000, seed: 1}
+
+  - name: perf-clique-512
+    description: >-
+      Five hundred and twelve nodes, all pairs joined: 261632 edges in the
+      smallest possible node count. Separates per-edge cost from per-node cost.
+    generated: {shape: clique, nodes: 512, seed: 1}
+
+  - name: perf-scale-free-10k
+    description: >-
+      Preferential attachment with mean out-degree four. The shape real graphs
+      have, and the one where a mean degree predicts nothing about a hub.
+    generated: {shape: power-law, nodes: 10000, degree: 4, seed: 1}
+
+  - name: perf-random-10k
+    description: >-
+      Erdos-Renyi with mean out-degree eight. Uniform degree, no locality: the
+      control against which the other shapes' locality effects are read.
+    generated: {shape: erdos-renyi, nodes: 10000, degree: 8, seed: 1}
+
+  - name: perf-wide-10k
+    description: >-
+      Ten thousand nodes carrying five integer properties each, so a scan can
+      be made to read something wider than an identifier.
+    generated: {shape: path, nodes: 10000, properties: 5, seed: 1}
+
+defaults:
+  kind: performance
+  tags: [performance]
+
+cases:
+  - id: performance/scan/count-path-1k
+    name: Count every node in a thousand-node graph
+    fixture: perf-path-1k
+    tags: [performance, scan]
+    query: |
+      MATCH (n:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1000]]
+
+  - id: performance/scan/count-path-10k
+    name: Count every node in a ten-thousand-node graph
+    fixture: perf-path-10k
+    tags: [performance, scan]
+    query: |
+      MATCH (n:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[10000]]
+
+  - id: performance/scan/count-path-100k
+    name: Count every node in a hundred-thousand-node graph
+    fixture: perf-path-100k
+    tags: [performance, scan]
+    repeat: 5
+    timeout_ms: 120000
+    query: |
+      MATCH (n:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[100000]]
+
+  - id: performance/scan/sum-property-100k
+    name: Sum a property across a hundred thousand nodes
+    fixture: perf-path-100k
+    tags: [performance, scan, aggregate]
+    repeat: 5
+    timeout_ms: 120000
+    # The ids are 0 through 99999, so the sum is fixed and large enough that
+    # an engine reading a narrower integer than it should will disagree.
+    query: |
+      MATCH (n:N)
+      RETURN SUM(n.id) AS total
+    expect:
+      kind: rows
+      columns: [total]
+      rows: [[4999950000]]
+
+  - id: performance/scan/read-several-properties
+    name: Read three properties of every node in a wide-record graph
+    fixture: perf-wide-10k
+    tags: [performance, scan]
+    repeat: 5
+    # The nodes carry five properties and the predicate reads three of them,
+    # so the scan pays for a wide record. Counting the survivors rather than
+    # returning them keeps the measurement on the engine instead of on the
+    # harness carrying rows back. The three conditions reduce to i mod 1000 =
+    # 113, which ten of the ten thousand nodes satisfy.
+    query: |
+      MATCH (n:N)
+      WHERE n.p0 = 3 AND n.p1 = 13 AND n.p2 = 113
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[10]]
+
+  - id: performance/lookup/point-by-property
+    name: Find the one node with a given property value
+    fixture: perf-path-100k
+    tags: [performance, lookup]
+    repeat: 20
+    timeout_ms: 120000
+    # An engine with a property index answers this in constant time and an
+    # engine without one scans; the ratio against the count case above is the
+    # measurement.
+    query: |
+      MATCH (n:N)
+      WHERE n.id = 50000
+      RETURN n.id AS id
+    expect:
+      kind: rows
+      columns: [id]
+      rows: [[50000]]
+
+  - id: performance/filter/one-in-ten
+    name: Filter a tenth of a hundred thousand nodes
+    fixture: perf-path-100k
+    tags: [performance, filter]
+    repeat: 5
+    timeout_ms: 120000
+    query: |
+      MATCH (n:N)
+      WHERE n.p0 = 3
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[10000]]
+
+  - id: performance/filter/one-in-a-hundred
+    name: Filter a hundredth of a hundred thousand nodes
+    fixture: perf-path-100k
+    tags: [performance, filter]
+    repeat: 5
+    timeout_ms: 120000
+    query: |
+      MATCH (n:N)
+      WHERE n.p1 = 42
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1000]]
+
+  - id: performance/join/two-hop-path-10k
+    name: Two-hop traversal along a chain
+    fixture: perf-path-10k
+    tags: [performance, traversal]
+    repeat: 5
+    query: |
+      MATCH (a:N)-[:E]->(b:N)-[:E]->(c:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[9998]]
+
+  - id: performance/join/star-fan-out
+    name: Traverse ten thousand edges out of one node
+    fixture: perf-star-10k
+    tags: [performance, traversal]
+    repeat: 5
+    query: |
+      MATCH (a:N {id: 0})-[:E]->(b:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[9999]]
+
+  - id: performance/join/grid-two-hop
+    name: Two-hop traversal on a lattice
+    fixture: perf-grid-10k
+    tags: [performance, traversal]
+    repeat: 5
+    # 19800 edges, each of whose heads has out-degree 2 except on the far row
+    # and column; the 39202 two-hop paths are a property of the lattice, not
+    # of the engine.
+    query: |
+      MATCH (a:N)-[:E]->(b:N)-[:E]->(c:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[39202]]
+
+  - id: performance/join/clique-edge-scan
+    name: Count every edge of a clique
+    fixture: perf-clique-512
+    tags: [performance, traversal]
+    repeat: 5
+    timeout_ms: 120000
+    query: |
+      MATCH (a:N)-[:E]->(b:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[261632]]
+
+  - id: performance/join/scale-free-two-hop
+    name: Two-hop traversal on a heavy-tailed graph
+    fixture: perf-scale-free-10k
+    tags: [performance, traversal]
+    repeat: 5
+    timeout_ms: 120000
+    # No expected count: preferential attachment rejects duplicate targets, so
+    # the edge count depends on the generator's rejection stream. The case
+    # asserts only that the engine finished, which is all a timing needs.
+    query: |
+      MATCH (a:N)-[:E]->(b:N)-[:E]->(c:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: accept
+
+  - id: performance/join/random-two-hop
+    name: Two-hop traversal on a uniform random graph
+    fixture: perf-random-10k
+    tags: [performance, traversal]
+    repeat: 5
+    timeout_ms: 120000
+    query: |
+      MATCH (a:N)-[:E]->(b:N)-[:E]->(c:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: accept
+
+  - id: performance/sort/top-three-of-a-hundred-thousand
+    name: Sort a hundred thousand rows and keep three
+    fixture: perf-path-100k
+    tags: [performance, sort]
+    requires: [GQ13]
+    repeat: 5
+    timeout_ms: 120000
+    query: |
+      MATCH (n:N)
+      RETURN n.id AS id
+      ORDER BY n.id DESC
+      LIMIT 3
+    expect:
+      kind: rows
+      columns: [id]
+      rows: [[99999], [99998], [99997]]
+
+  - id: performance/group/count-by-bucket
+    name: Group a hundred thousand nodes into ten buckets
+    fixture: perf-path-100k
+    tags: [performance, aggregate]
+    repeat: 5
+    timeout_ms: 120000
+    query: |
+      MATCH (n:N)
+      RETURN n.p0 AS bucket, COUNT(*) AS total
+      ORDER BY bucket
+    expect:
+      kind: rows
+      columns: [bucket, total]
+      rows:
+        - [0, 10000]
+        - [1, 10000]
+        - [2, 10000]
+        - [3, 10000]
+        - [4, 10000]
+        - [5, 10000]
+        - [6, 10000]
+        - [7, 10000]
+        - [8, 10000]
+        - [9, 10000]
+
+  - id: performance/recursion/bounded-quantifier-five-hops
+    name: Walk up to five hops from one end of a chain
+    fixture: perf-path-10k
+    tags: [performance, recursive]
+    requires: [G036, G060]
+    repeat: 5
+    query: |
+      MATCH (a:N {id: 0})-[:E]->{1,5}(b:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: performance/recursion/unbounded-reachability
+    name: Walk the whole chain from one end
+    fixture: perf-path-1k
+    tags: [performance, recursive]
+    requires: [G036, G061]
+    repeat: 3
+    timeout_ms: 300000
+    # A thousand nodes, not ten thousand: transitive closure from one end of a
+    # chain is quadratic in the number of paths for an engine that materializes
+    # them, and the smaller scale is what keeps that engine measurable rather
+    # than merely timed out.
+    query: |
+      MATCH (a:N {id: 0})-[:E]->+(b:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[999]]
+
+  - id: performance/recursion/shortest-path-across-a-lattice
+    name: Find one shortest path across a lattice
+    fixture: perf-grid-10k
+    tags: [performance, recursive]
+    requires: [G019, G036, G061]
+    repeat: 3
+    timeout_ms: 300000
+    query: |
+      MATCH SHORTEST 1 (a:N {id: 0})-[:E]->+(b:N {id: 9999})
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: performance/write/insert-one-node
+    name: Insert a single node
+    fixture: perf-path-10k
+    tags: [performance, write]
+    requires: [GD01]
+    mutating: true
+    repeat: 20
+    # The runner reloads a mutating fixture between cases, not between
+    # repetitions, so these twenty inserts land on a graph that grows from
+    # 10000 to 10020 nodes. That is deliberate: the spread across the twenty
+    # samples is what separates an engine whose write cost is constant from
+    # one whose write cost grows with what is already stored. Mutating cases
+    # get no warm-up, so none of the twenty is discarded.
+    query: |
+      INSERT (x:N {id: -1})
+      RETURN x.id AS id
+    expect:
+      kind: rows
+      columns: [id]
+      rows: [[-1]]
+
+  - id: performance/write/set-property-on-every-node
+    name: Assign a property across ten thousand nodes
+    fixture: perf-path-10k
+    tags: [performance, write]
+    requires: [GD01]
+    mutating: true
+    repeat: 1
+    timeout_ms: 300000
+    # One repetition only. The second would be assigning a property that is
+    # already there, which is a different operation on most storage engines,
+    # and averaging it with the first would report neither.
+    query: |
+      MATCH (n:N)
+      SET n.touched = 1
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[10000]]
+
+  - id: performance/ingest/load-a-hundred-thousand-nodes
+    name: Load the largest fixture and report what the ingest cost
+    fixture: perf-path-100k
+    tags: [performance, ingest]
+    repeat: 1
+    timeout_ms: 300000
+    # The statement is trivial on purpose. What this case exists to record is
+    # the load that precedes it: ingest wall time, bytes written, and peak
+    # resident memory, which the runner attaches to the first case that causes
+    # a fixture to be loaded.
+    query: |
+      MATCH (n:N)
+      WHERE n.id = 0
+      RETURN n.id AS id
+    expect:
+      kind: rows
+      columns: [id]
+      rows: [[0]]

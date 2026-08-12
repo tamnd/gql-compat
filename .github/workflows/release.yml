@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+env:
+  GO_VERSION: "1.26.5"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # goreleaser derives the changelog from the commits since the last
+          # tag, which a shallow clone does not have.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # A report records the tool version that produced it, and reports are
+      # only comparable across versions when the schema matches. A release
+      # binary that said "devel" would make its own reports unciteable, so the
+      # tag is checked against the corpus before anything is built.
+      - name: The corpus this release embeds is self-consistent
+        run: |
+          make verify-artifacts
+          go run ./cmd/gql-compat validate
+
+      - uses: sigstore/cosign-installer@v4
+      - uses: anchore/sbom-action/download-syft@v0
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

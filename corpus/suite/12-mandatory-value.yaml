@@ -1,0 +1,422 @@
+# Mandatory value expressions, predicates and literals.
+#
+# These cases run against the one-node `unit` fixture and project a constant.
+# The point is to measure the expression and not the pattern matching, and a
+# fixture with exactly one node makes the expected table exactly one record
+# without the case having to say anything about the graph.
+#
+# Nothing here uses a function ISO lists as an optional feature. The numeric
+# and string functions in GF01 through GF13, the cast in GA05 and the type
+# predicate in GA06 are tested in 22-optional-value.yaml.
+#
+# Nothing here writes a number with a decimal point either. GL04 is "Exact
+# number in common notation without suffix", so `2.5` is a feature an engine
+# is allowed not to have, and a mandatory case that spelled one would fail a
+# conforming engine for a reason the case was not about. Where a case needs a
+# non-integer it reads one from the `numbers` fixture, where the value arrives
+# through the adapter's own value encoding rather than through the lexer.
+
+defaults:
+  kind: mandatory
+  fixture: unit
+  tags: [read, expression]
+
+cases:
+  - id: mandatory/value/literal-integer
+    name: An unsigned integer literal is returned as the number it spells
+    subclauses: ["21.2"]
+    productions: [unsigned integer, exact numeric literal, literal]
+    query: |
+      RETURN 42 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[42]]
+
+  - id: mandatory/value/literal-character-string
+    name: A character string literal in single quotes is returned unchanged
+    subclauses: ["21.2"]
+    productions: [character string literal, general literal]
+    query: |
+      RETURN 'hello' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[hello]]
+
+  - id: mandatory/value/literal-boolean
+    name: TRUE and FALSE are boolean literals
+    subclauses: ["21.2"]
+    productions: [boolean literal, truth value]
+    query: |
+      RETURN TRUE AS t, FALSE AS f
+    expect:
+      kind: rows
+      columns: [t, f]
+      rows: [[true, false]]
+
+  - id: mandatory/value/literal-null
+    name: NULL is a literal and survives projection as the null value
+    subclauses: ["21.2", "4.4.5"]
+    productions: [null literal]
+    query: |
+      RETURN NULL AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[null]]
+
+  - id: mandatory/value/bracketed-comment
+    name: Text between a solidus-asterisk pair is a comment
+    subclauses: ["21.3"]
+    productions: [comment, bracketed comment, bracketed comment introducer, bracketed comment terminator]
+    tags: [lexical]
+    # The two other comment forms are features GB02 and GB03; this one is not,
+    # so it is the only comment an engine must accept.
+    query: |
+      RETURN /* a comment */ 1 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: mandatory/value/arithmetic-precedence
+    name: Multiplication binds tighter than addition in a numeric value expression
+    subclauses: ["20.21"]
+    productions: [numeric value expression, term, factor]
+    query: |
+      RETURN 2 + 3 * 4 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[14]]
+
+  - id: mandatory/value/arithmetic-parentheses
+    name: Parentheses override operator precedence
+    subclauses: ["20.21"]
+    productions: [numeric value expression, value expression primary]
+    query: |
+      RETURN (2 + 3) * 4 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[20]]
+
+  - id: mandatory/value/arithmetic-negation
+    name: A unary minus negates a numeric value expression
+    subclauses: ["20.21"]
+    productions: [signed numeric literal, numeric value expression]
+    query: |
+      RETURN 7 + -2 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[5]]
+
+  - id: mandatory/value/string-concatenation
+    name: The concatenation operator joins two character strings
+    subclauses: ["20.23"]
+    productions: [string value expression, character string concatenation]
+    query: |
+      RETURN 'ab' || 'cd' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[abcd]]
+
+  - id: mandatory/value/fold
+    name: UPPER and LOWER change the case of a character string
+    subclauses: ["20.24"]
+    productions: [fold, character string function]
+    tags: [string]
+    query: |
+      RETURN UPPER('aB') AS u, LOWER('aB') AS l
+    expect:
+      kind: rows
+      columns: [u, l]
+      rows: [[AB, ab]]
+
+  - id: mandatory/value/char-length
+    name: CHAR_LENGTH counts the characters of a string
+    subclauses: ["20.22"]
+    productions: [char length expression]
+    tags: [string]
+    query: |
+      RETURN CHAR_LENGTH('abcd') AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[4]]
+
+  - id: mandatory/value/trim-default
+    name: TRIM with only a source removes spaces from both ends
+    subclauses: ["20.24"]
+    productions: [trim function, single-character trim function, trim source]
+    tags: [string]
+    # The forms that name a trim character or an end are features GF06 and
+    # GF05; this one-argument form is not, so every engine must have it.
+    query: |
+      RETURN TRIM('  ab  ') AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[ab]]
+
+  - id: mandatory/value/normalize
+    name: NORMALIZE returns a string that is already in normal form unchanged
+    subclauses: ["20.24", "19.7"]
+    productions: [normalize function, normal form]
+    tags: [string]
+    # The argument is ASCII, so the case does not depend on the engine having
+    # a Unicode normalization table; it depends only on NORMALIZE existing and
+    # being the identity where the standard says it is.
+    query: |
+      RETURN NORMALIZE('ab', NFC) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[ab]]
+
+  - id: mandatory/value/comparison-yields-boolean
+    name: A comparison predicate is a value expression and projects a boolean
+    subclauses: ["19.3"]
+    productions: [comparison predicate, comparison predicate part 2]
+    query: |
+      RETURN 1 < 2 AS lt, 2 <= 2 AS le, 3 <> 4 AS ne
+    expect:
+      kind: rows
+      columns: [lt, le, ne]
+      rows: [[true, true, true]]
+
+  - id: mandatory/value/numeric-comparison-across-types
+    name: A number with a fractional part compares against an integer without a cast
+    subclauses: ["22.13", "4.4.2"]
+    productions: [comparison predicate]
+    fixture: numbers
+    # The fractional operand is a stored property rather than a literal,
+    # because writing `2` as a comparand is mandatory and writing `2.0` is
+    # feature GL04. What is under test is the comparison, not the notation.
+    query: |
+      MATCH (v:Value)
+      WHERE v.x > 2
+      RETURN v.n AS n
+    expect:
+      kind: rows
+      unordered: true
+      columns: [n]
+      rows: [[3], [4]]
+
+  - id: mandatory/value/null-propagates-through-arithmetic
+    name: An arithmetic operand that is null makes the result null
+    subclauses: ["20.21", "4.4.5"]
+    productions: [numeric value expression, null literal]
+    tags: [null]
+    query: |
+      RETURN 1 + NULL AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[null]]
+
+  - id: mandatory/value/boolean-operators
+    name: AND, OR and NOT combine boolean values
+    subclauses: ["20.20"]
+    productions: [boolean value expression, boolean term, boolean factor]
+    query: |
+      RETURN (TRUE AND FALSE) AS a, (TRUE OR FALSE) AS b, (NOT TRUE) AS c
+    expect:
+      kind: rows
+      columns: [a, b, c]
+      rows: [[false, true, false]]
+
+  - id: mandatory/value/three-valued-logic
+    name: A boolean operand that is unknown gives an unknown result, not false
+    subclauses: ["20.20", "4.4.5"]
+    productions: [boolean value expression]
+    tags: [null]
+    query: |
+      RETURN TRUE AND NULL AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[null]]
+
+  - id: mandatory/value/three-valued-logic-short-circuit
+    name: FALSE AND unknown is false, because no operand can make it true
+    subclauses: ["20.20"]
+    productions: [boolean value expression]
+    tags: [null]
+    query: |
+      RETURN FALSE AND NULL AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  - id: mandatory/value/case-searched
+    name: A searched case expression returns the result of its first true when clause
+    subclauses: ["20.7"]
+    productions: [case expression, searched case, case specification]
+    query: |
+      RETURN CASE WHEN 1 > 2 THEN 'no' WHEN 1 < 2 THEN 'yes' ELSE 'neither' END AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[yes]]
+
+  - id: mandatory/value/case-simple
+    name: A simple case expression compares its operand against each when clause
+    subclauses: ["20.7"]
+    productions: [simple case, case operand]
+    query: |
+      RETURN CASE 2 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'other' END AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[two]]
+
+  - id: mandatory/value/case-else-omitted
+    name: A case expression with no matching when clause and no else is null
+    subclauses: ["20.7"]
+    productions: [searched case]
+    tags: [null]
+    query: |
+      RETURN CASE WHEN 1 > 2 THEN 'no' END AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[null]]
+
+  - id: mandatory/value/coalesce
+    name: COALESCE returns its first operand that is not null
+    subclauses: ["20.7"]
+    productions: [case abbreviation]
+    tags: [null]
+    query: |
+      RETURN COALESCE(NULL, 'x', 'y') AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[x]]
+
+  - id: mandatory/value/nullif
+    name: NULLIF returns null when its operands are equal
+    subclauses: ["20.7"]
+    productions: [case abbreviation]
+    tags: [null]
+    query: |
+      RETURN NULLIF(1, 1) AS same, NULLIF(1, 2) AS different
+    expect:
+      kind: rows
+      columns: [same, different]
+      rows: [[null, 1]]
+
+  - id: mandatory/value/is-null-predicate
+    name: IS NULL is true of a property whose value is null
+    subclauses: ["19.5"]
+    productions: [null predicate, null predicate part 2]
+    fixture: nullable
+    tags: [null]
+    query: |
+      MATCH (m:Maybe)
+      WHERE m.note IS NULL
+      RETURN m.id AS id
+    expect:
+      kind: rows
+      unordered: true
+      columns: [id]
+      rows: [[2]]
+
+  - id: mandatory/value/is-not-null-predicate
+    name: IS NOT NULL is true of a property that has a value
+    subclauses: ["19.5"]
+    productions: [null predicate]
+    fixture: nullable
+    tags: [null]
+    query: |
+      MATCH (m:Maybe)
+      WHERE m.note IS NOT NULL
+      RETURN m.id AS id
+    expect:
+      kind: rows
+      unordered: true
+      columns: [id]
+      rows: [[1]]
+
+  - id: mandatory/value/comparison-with-null-is-unknown
+    name: A comparison against null is unknown, so it filters the binding out
+    subclauses: ["19.3", "22.13"]
+    productions: [comparison predicate]
+    fixture: nullable
+    tags: [null]
+    query: |
+      MATCH (m:Maybe)
+      WHERE m.note = 'present'
+      RETURN m.id AS id
+    expect:
+      kind: rows
+      unordered: true
+      columns: [id]
+      rows: [[1]]
+
+  - id: mandatory/value/string-ordering
+    name: Character strings compare in the order the collation gives them
+    subclauses: ["22.14", "22.16"]
+    productions: [comparison predicate]
+    fixture: social
+    query: |
+      MATCH (p:Person)
+      WHERE p.name < 'C'
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Bob]]
+
+  - id: mandatory/value/parameter-reference
+    name: A general parameter reference binds a value supplied outside the statement
+    subclauses: ["20.4"]
+    productions: [dynamic parameter specification, general parameter reference, parameter name]
+    tags: [parameters]
+    params:
+      threshold: 40
+    query: |
+      RETURN $threshold AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[40]]
+
+  - id: mandatory/value/parameter-in-predicate
+    name: A parameter is usable wherever a value specification is
+    subclauses: ["20.3", "20.4"]
+    productions: [value specification, dynamic parameter specification]
+    fixture: social
+    tags: [parameters]
+    params:
+      threshold: 40
+    query: |
+      MATCH (p:Person)
+      WHERE p.age > $threshold
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Carol], [Erin]]
+
+  - id: mandatory/value/property-of-absent-key
+    name: Reading a property an element does not have gives null, not an error
+    subclauses: ["20.11", "4.3.4"]
+    productions: [property reference]
+    fixture: social
+    tags: [null, edge-case]
+    query: |
+      MATCH (p:Person)
+      WHERE p.name = 'Alice'
+      RETURN p.nickname AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[null]]

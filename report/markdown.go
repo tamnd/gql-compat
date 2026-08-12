@@ -1,0 +1,574 @@
+package report
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/tamnd/gql-compat/fixture"
+	"github.com/tamnd/gql-compat/metrics"
+	"github.com/tamnd/gql-compat/runner"
+)
+
+// WriteMarkdown renders the report for a human.
+//
+// The order is deliberate. What was measured and on what comes first, because
+// a score without a version and a machine is not a claim about anything. Then
+// the scoreboard, then what the engine could not be asked and why, then the
+// failures in full, and only then the metric tables — which are long, and
+// which nobody reads before knowing whether the run passed.
+func WriteMarkdown(w io.Writer, rep *runner.Report) error {
+	b := bufio.NewWriter(w)
+	defer func() { _ = b.Flush() }()
+
+	p := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
+	nl := func() { fmt.Fprintln(b) }
+
+	p("# GQL conformance report: %s\n", rep.Engine.Adapter)
+	nl()
+	p("%s\n", headline(rep))
+	nl()
+
+	p("## What was measured\n")
+	nl()
+	p("| | |\n|---|---|\n")
+	p("| Engine | `%s` |\n", rep.Engine.Adapter)
+	p("| Version | %s |\n", md(rep.Engine.Version))
+	p("| Mode | %s |\n", rep.Run.Mode)
+	p("| Cases | %d |\n", rep.Totals.Cases)
+	p("| Repetitions per case | %d (after %d warmup%s) |\n",
+		rep.Run.Repeats, rep.Run.Warmups, plural(rep.Run.Warmups))
+	p("| Statement timeout | %s |\n", metrics.Format(rep.Run.Timeout))
+	p("| Sampler interval | %s |\n", metrics.Format(rep.Run.SampleInterval))
+	if rep.Run.Selector != "" {
+		p("| Selector | `%s` |\n", rep.Run.Selector)
+	}
+	p("| Started | %s |\n", rep.Run.Started.UTC().Format("2006-01-02 15:04:05 UTC"))
+	p("| Wall time | %s |\n", metrics.Format(rep.Run.Wall))
+	p("| Standard | ISO/IEC 39075:2024, artifacts from %s |\n", rep.Run.ISOSource)
+	nl()
+
+	p("### Host\n")
+	nl()
+	h := rep.Host
+	p("| | |\n|---|---|\n")
+	p("| Platform | %s (%s/%s) |\n", md(fallback(h.Platform, "unknown")), h.OS, h.Arch)
+	if h.Kernel != "" {
+		p("| Kernel | %s |\n", md(h.Kernel))
+	}
+	if h.CPUModel != "" {
+		p("| CPU | %s |\n", md(h.CPUModel))
+	}
+	p("| Cores | %d physical, %d logical, GOMAXPROCS %d |\n", h.CPUCores, h.CPULogical, h.GOMAXPROCS)
+	if h.MemoryTotal > 0 {
+		p("| Memory | %s |\n", metrics.FormatBytes(h.MemoryTotal))
+	}
+	p("| Go | %s |\n", h.GoVersion)
+	if h.Containerised {
+		p("| Virtualised | yes — absolute latencies on a shared runner are not comparable across machines |\n")
+	}
+	nl()
+
+	writeCapabilities(b, rep)
+	writeScoreboard(b, rep)
+	writeCoverage(b, rep)
+	writeSkips(b, rep)
+	writeFailures(b, rep)
+	writeLatency(b, rep)
+	writeResources(b, rep)
+	writeLoads(b, rep)
+	writeMethodology(b, rep)
+	return b.Flush()
+}
+
+func headline(rep *runner.Report) string {
+	t := rep.Totals
+	judged := t.Pass + t.Fail
+	var parts []string
+	if judged > 0 {
+		parts = append(parts, fmt.Sprintf("**%d of %d judged cases passed** (%.1f%%)",
+			t.Pass, judged, 100*float64(t.Pass)/float64(judged)))
+	} else {
+		parts = append(parts, "**no case produced a verdict**")
+	}
+	if t.Skip > 0 {
+		parts = append(parts, fmt.Sprintf("%d were skipped because the engine declared it could not hold the fixture or accept the case's shape", t.Skip))
+	}
+	if t.Error > 0 {
+		parts = append(parts, fmt.Sprintf("%d could not be judged because the harness or the session failed", t.Error))
+	}
+	if t.WeakEvidence > 0 {
+		parts = append(parts, fmt.Sprintf("%d passes rest on error-text matching rather than a GQLSTATUS and are the weakest evidence here", t.WeakEvidence))
+	}
+	return strings.Join(parts, "; ") + "."
+}
+
+func writeCapabilities(b io.Writer, rep *runner.Report) {
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("## Declared capabilities\n\n")
+	p("These are the engine's own statements about what it can hold and do, made before any case ran. Every skip below traces back to one of them.\n\n")
+	p("| Capability | Supported |\n|---|:-:|\n")
+	caps := rep.Engine.Capabilities
+	for _, c := range fixture.AllCapabilities {
+		p("| %s | %s |\n", c, tick(caps.Data[c]))
+	}
+	p("| GQLSTATUS reporting | %s |\n", tick(caps.GQLStatus))
+	p("| Named parameters | %s |\n", tick(caps.Parameters))
+	p("| Explicit transactions | %s |\n", tick(caps.Transactions))
+	p("| Multiple statements | %s |\n", tick(caps.MultipleStatements))
+	p("| Resettable in place | %s |\n", tick(caps.Isolated))
+	p("\n")
+	if len(caps.Notes) > 0 {
+		p("Adapter notes:\n\n")
+		for _, n := range caps.Notes {
+			p("- %s\n", n)
+		}
+		p("\n")
+	}
+}
+
+func writeScoreboard(b io.Writer, rep *runner.Report) {
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("## Scoreboard\n\n")
+	p("Pass rate is passes over cases that produced a verdict. Skips and harness errors are excluded from the denominator and shown beside it, so a rate cannot be improved by refusing more work.\n\n")
+	p("| Kind | Cases | Pass | Fail | Skip | Error | Pass rate |\n|---|---:|---:|---:|---:|---:|---:|\n")
+	for _, r := range kindRows(rep) {
+		p("| %s | %d | %d | %d | %d | %d | %s |\n",
+			r.Kind, r.Cases, r.Pass, r.Fail, r.Skip, r.Error, rate(r.KindTotals))
+	}
+	t := rep.Totals
+	p("| **total** | **%d** | **%d** | **%d** | **%d** | **%d** | **%s** |\n",
+		t.Cases, t.Pass, t.Fail, t.Skip, t.Error,
+		rate(runner.KindTotals{Pass: t.Pass, Fail: t.Fail}))
+	p("\n")
+	if rep.Run.Mode == runner.ModeCompat {
+		p("> This is a **compatibility** run: the statements executed were the engine's own documented spellings, not standard GQL. Nothing in this table is a conformance result.\n\n")
+	}
+}
+
+func writeCoverage(b io.Writer, rep *runner.Report) {
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	cov := rep.Coverage
+	p("## Coverage of the standard\n\n")
+	p("Denominators come from ISO's own published surface, not from this corpus: %d optional features, %d GQLSTATUS codes, %d grammar productions, and %d clauses that specify behaviour. A corpus that tests twelve features reads as twelve of %d, which is the honest way to say it.\n\n",
+		cov.FeaturesTotal, cov.ConditionsTotal, cov.ProductionsTotal, cov.SubclausesTotal, cov.FeaturesTotal)
+
+	p("### Optional feature families\n\n")
+	p("| Family | ISO features | Tested here | Supported |\n|---|---:|---:|---:|\n")
+	var tested, supported, total int
+	for _, f := range cov.Families {
+		total += f.Total
+		tested += f.Tested
+		supported += f.Supported
+		if f.Tested == 0 {
+			continue
+		}
+		p("| %s | %d | %d | %d |\n", f.Family, f.Total, f.Tested, f.Supported)
+	}
+	p("| **all families** | **%d** | **%d** | **%d** |\n\n", total, tested, supported)
+	if tested < total {
+		p("%d of the %d optional features this standard defines are not exercised by the corpus at all. They are neither supported nor unsupported here; they are untested, and the report says so rather than defaulting them either way.\n\n",
+			total-tested, total)
+	}
+
+	writeStatusTable(b, "### Optional features tested", "Feature", cov.Features)
+	p("### Mandatory behaviour\n\n")
+	p("ISO gives mandatory features no code, so a claim about one can only cite the subclause that specifies it. This corpus cites %d of the %d clauses that specify behaviour.\n\n",
+		len(cov.Subclauses), cov.SubclausesTotal)
+	writeStatusTable(b, "", "Subclause", cov.Subclauses)
+	writeStatusTable(b, "### GQLSTATUS conditions tested", "Code", cov.Conditions)
+}
+
+func writeStatusTable(b io.Writer, heading, label string, items map[string]runner.Status) {
+	if len(items) == 0 {
+		return
+	}
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	keys := make([]string, 0, len(items))
+	for k := range items {
+		keys = append(keys, k)
+	}
+	sortKeys(keys)
+	if heading != "" {
+		p("%s\n\n", heading)
+	}
+	p("| %s | Description | Cases | Pass | Fail | Skip | Verdict |\n|---|---|---:|---:|---:|---:|---|\n", label)
+	for _, k := range keys {
+		s := items[k]
+		p("| `%s` | %s | %d | %d | %d | %d | %s |\n",
+			k, md(s.Description), s.Cases, s.Pass, s.Fail, s.Skip, verdict(s))
+	}
+	p("\n")
+}
+
+func verdict(s runner.Status) string {
+	switch {
+	case s.Supported():
+		return "supported"
+	case s.Pass+s.Fail == 0:
+		return "untested — every case was skipped"
+	case s.Fail > 0:
+		return "**not supported**"
+	default:
+		return "partly tested"
+	}
+}
+
+func writeSkips(b io.Writer, rep *runner.Report) {
+	groups := skipsByReason(rep)
+	if len(groups) == 0 {
+		return
+	}
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("## What the engine was not asked\n\n")
+	p("A skip is a measurement. It says the engine declared, in advance, that it could not represent the data a case needs or accept the shape the case has. None of these are failures and none of them are passes.\n\n")
+	// The HTML report puts the case ids behind a disclosure triangle. Markdown
+	// has no such thing, so they go in the table: a count on its own tells a
+	// reader that something was declined without telling them what, and the
+	// ids are the only way to check a skip was legitimate.
+	p("| Reason | Cases | Which |\n|---|---:|---|\n")
+	for _, g := range groups {
+		p("| %s | %d | %s |\n", g.Reason, len(g.IDs), idList(g.IDs))
+	}
+	p("\n")
+
+	byCap := map[fixture.Capability]int{}
+	for _, c := range rep.Cases {
+		if c.Outcome != runner.Skip {
+			continue
+		}
+		for _, m := range c.Missing {
+			byCap[m]++
+		}
+	}
+	if len(byCap) > 0 {
+		p("Missing capabilities, by how many cases each one cost:\n\n")
+		p("| Capability | Cases blocked |\n|---|---:|\n")
+		for _, c := range fixture.AllCapabilities {
+			if n := byCap[c]; n > 0 {
+				p("| %s | %d |\n", c, n)
+			}
+		}
+		p("\n")
+	}
+}
+
+func writeFailures(b io.Writer, rep *runner.Report) {
+	fs := failures(rep)
+	if len(fs) == 0 {
+		return
+	}
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("## Failures and errors\n\n")
+	for i := range fs {
+		c := &fs[i]
+		p("### `%s` — %s\n\n", c.ID, c.Name)
+		p("%s. %s.\n\n", strings.ToUpper(string(c.Outcome[:1]))+string(c.Outcome[1:]), md(strings.TrimSuffix(c.Reason, ".")))
+		if claims := claimList(c); claims != "" {
+			p("Claims: %s.\n\n", claims)
+		}
+		p("```gql\n%s\n```\n\n", strings.TrimSpace(c.Statement))
+		if c.WantStatus != "" || c.GotStatus != "" {
+			p("- Expected GQLSTATUS `%s`, engine reported `%s`\n",
+				fallback(c.WantStatus, "any failure"), fallback(c.GotStatus, "none"))
+		}
+		if c.Message != "" {
+			p("- Engine said: %s\n", md(oneLine(c.Message)))
+		}
+		if d := c.Diff; d != nil {
+			// A difference in the shape of the table locates itself at row -1,
+			// because there is no row to point at. Printing the coordinates
+			// unconditionally turned "the row count differs" into "row -1,
+			// column 0", which sends a reader looking for a row that does not
+			// exist. The Diff renders itself correctly either way.
+			if d.Row >= 0 {
+				p("- Row %d, column %d: expected `%s`, got `%s`\n", d.Row, d.Col, md(d.Want), md(d.Got))
+			} else {
+				p("- %s: expected `%s`, got `%s`\n", md(d.Reason), md(d.Want), md(d.Got))
+			}
+		}
+		p("\n")
+	}
+}
+
+// idList renders case ids for a table cell. Past a couple of dozen the list
+// stops being something a person reads and starts being something that pushes
+// the rest of the table off the screen; the count beside it is exact either
+// way, and the JSON and CSV always carry every id.
+func idList(ids []string) string {
+	const shown = 12
+	parts := make([]string, 0, shown+1)
+	for i, id := range ids {
+		if i == shown {
+			parts = append(parts, fmt.Sprintf("and %d more", len(ids)-shown))
+			break
+		}
+		parts = append(parts, "`"+id+"`")
+	}
+	return strings.Join(parts, ", ")
+}
+
+func claimList(c *runner.CaseResult) string {
+	var parts []string
+	if len(c.Subclauses) > 0 {
+		parts = append(parts, "subclause "+strings.Join(c.Subclauses, ", "))
+	}
+	if len(c.Features) > 0 {
+		parts = append(parts, "feature "+strings.Join(c.Features, ", "))
+	}
+	if len(c.Conditions) > 0 {
+		parts = append(parts, "condition "+strings.Join(c.Conditions, ", "))
+	}
+	if len(c.Productions) > 0 {
+		parts = append(parts, "production <"+strings.Join(c.Productions, ">, <")+">")
+	}
+	return strings.Join(parts, "; ")
+}
+
+func writeLatency(b io.Writer, rep *runner.Report) {
+	ran := judged(rep)
+	if len(ran) == 0 {
+		return
+	}
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("## Latency, per case\n\n")
+	p("Every case ran %d times after %d warmup%s. Percentiles are nearest-rank over that many samples and are not interpolated: with this few samples an interpolated p99 would be an invention.\n\n",
+		rep.Run.Repeats, rep.Run.Warmups, plural(rep.Run.Warmups))
+	p("| Case | n | min | p50 | p90 | p99 | max | mean | stddev | MAD | rows | q/s | rows/s |\n")
+	p("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	for i := range ran {
+		c := ran[i]
+		s := c.Stats
+		p("| `%s` | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+			c.ID, s.Count,
+			metrics.Format(s.Min), metrics.Format(s.P50), metrics.Format(s.P90),
+			metrics.Format(s.P99), metrics.Format(s.Max), metrics.Format(s.Mean),
+			metrics.Format(s.StdDev), metrics.Format(s.MAD),
+			num(s.MeanRows), num(s.QueriesPerSec), num(s.RowsPerSec))
+	}
+	p("\n")
+}
+
+func writeResources(b io.Writer, rep *runner.Report) {
+	ran := judged(rep)
+	if len(ran) == 0 {
+		return
+	}
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("## Process and storage, per case\n\n")
+	p("A dash means the measurement was not available on this platform for this process, which is different from zero. I/O counters and page faults, in particular, are unreadable for another user's process on most systems, and a server engine's data directory is not on this machine at all.\n\n")
+	p("| Case | CPU user | CPU sys | util | RSS peak | RSS end | VMS peak | threads | read | write | minor flt | major flt | vol cs | invol cs | disk after | disk Δ | alloc Δ | files | reads |\n")
+	p("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	for i := range ran {
+		c := ran[i]
+		pr, d := c.Process, c.Disk
+		p("| `%s` | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %d |\n",
+			c.ID,
+			dashDur(pr.CPUOK, pr.CPUUser), dashDur(pr.CPUOK, pr.CPUSys),
+			dashPct(c),
+			dashBytes(pr.MemoryOK, pr.RSSPeak), dashBytes(pr.MemoryOK, pr.RSSEnd),
+			dashBytes(pr.MemoryOK, pr.VMSPeak), dashInt(pr.MemoryOK, int64(pr.NumThread)),
+			dashBytes(pr.IOOK, pr.ReadBytes), dashBytes(pr.IOOK, pr.WriteBytes),
+			dashInt(pr.FaultsOK, pr.MinorFaults), dashInt(pr.FaultsOK, pr.MajorFaults),
+			dashInt(pr.CtxOK, pr.VoluntaryCS), dashInt(pr.CtxOK, pr.InvoluntaryCS),
+			dashBytes(d.OK, d.BytesAfter), dashSigned(d.OK, d.Growth()),
+			dashSigned(d.OK, d.AllocGrowth()), dashInt(d.OK, int64(d.Files)),
+			pr.Samples)
+	}
+	p("\n")
+}
+
+func writeLoads(b io.Writer, rep *runner.Report) {
+	var loads []runner.CaseResult
+	for _, c := range rep.Cases {
+		if c.Load != nil {
+			loads = append(loads, c)
+		}
+	}
+	if len(loads) == 0 {
+		return
+	}
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("## Ingest\n\n")
+	p("One row per fixture load. Cases that reused a graph another case had already loaded contribute nothing here, which is why these times must not be summed into a per-case cost.\n\n")
+	p("| Fixture | Triggered by | Nodes | Edges | Wall | nodes/s | edges/s | Apparent Δ | Allocated Δ | bits/edge | bytes/node | RSS peak | CPU |\n")
+	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	for i := range loads {
+		c := loads[i]
+		l := c.Load
+		cpu := "—"
+		if l.Process.CPUOK {
+			cpu = metrics.Format(l.Process.CPUUser + l.Process.CPUSys)
+		}
+		p("| %s | `%s` | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+			c.Fixture, c.ID, l.Nodes, l.Edges, metrics.Format(l.Wall),
+			num(l.NodesPerSec), num(l.EdgesPerSec),
+			dashSigned(l.Disk.OK, l.Disk.Growth()), dashSigned(l.Disk.OK, l.Disk.AllocGrowth()),
+			dashFloat(l.Disk.OK, l.BitsPerEdge), dashFloat(l.Disk.OK, l.BytesPerNode),
+			dashBytes(l.Process.MemoryOK, l.Process.RSSPeak), cpu)
+	}
+	p("\n")
+}
+
+func writeMethodology(b io.Writer, rep *runner.Report) {
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("## How to read this\n\n")
+	p("- **Conformance is not a percentage.** ISO/IEC 39075 asks for a claim, not a score: §24.2 fixes what minimum conformance is, §24.3 makes each optional feature its own claim by code, and §24.5.2 says what an implementation must state to claim conformance at all. The scoreboard above is evidence for such a statement, not the statement itself.\n")
+	p("- **Skips are the engine's own declaration.** They come from the capability table, which the adapter fills in before the run. An engine cannot be made to look better by skipping more, because skips are never in the pass-rate denominator.\n")
+	p("- **A pass on error text is weaker than a pass on a code.** Where an engine reports no GQLSTATUS, a condition case can only confirm that something was refused. Those passes are counted separately in the headline.\n")
+	p("- **Apparent and allocated disk sizes both appear.** A sparse or compressed file makes them differ, and quoting only one of them flatters by accident.\n")
+	p("- **Absolute latencies are about this machine.** %s\n", hostCaveat(rep))
+	p("\n")
+	p("Generated by gql-compat, report schema %d, %s.\n",
+		rep.Schema, rep.Generated.UTC().Format("2006-01-02 15:04:05 UTC"))
+}
+
+func hostCaveat(rep *runner.Report) string {
+	if rep.Host.Containerised {
+		return "This run was on a virtualised or shared host, where a p99 says as much about the neighbours as about the engine. Compare engines within a run, not numbers across runs."
+	}
+	return "Compare engines within one run; comparing a latency here against one from another machine compares the machines."
+}
+
+func judged(rep *runner.Report) []*runner.CaseResult {
+	var out []*runner.CaseResult
+	for i := range rep.Cases {
+		if rep.Cases[i].Stats.Count > 0 {
+			out = append(out, &rep.Cases[i])
+		}
+	}
+	return out
+}
+
+func tick(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+func rate(k runner.KindTotals) string {
+	if k.Pass+k.Fail == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f%%", 100*k.Rate())
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func fallback(s, def string) string {
+	if strings.TrimSpace(s) == "" {
+		return def
+	}
+	return s
+}
+
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// md escapes the characters that would otherwise break a table cell.
+func md(s string) string {
+	s = oneLine(s)
+	s = strings.ReplaceAll(s, "|", "\\|")
+	return s
+}
+
+func num(f float64) string {
+	switch {
+	case f == 0:
+		return "0"
+	case f >= 1000:
+		return fmt.Sprintf("%.0f", f)
+	case f >= 10:
+		return fmt.Sprintf("%.1f", f)
+	default:
+		return fmt.Sprintf("%.2f", f)
+	}
+}
+
+func dashDur[T ~int64](ok bool, d T) string {
+	if !ok {
+		return "—"
+	}
+	return metrics.Format(durationOf(d))
+}
+
+func dashBytes(ok bool, n int64) string {
+	if !ok {
+		return "—"
+	}
+	return metrics.FormatBytes(n)
+}
+
+func dashSigned(ok bool, n int64) string {
+	if !ok {
+		return "—"
+	}
+	if n < 0 {
+		return "-" + metrics.FormatBytes(-n)
+	}
+	return metrics.FormatBytes(n)
+}
+
+func dashInt(ok bool, n int64) string {
+	if !ok {
+		return "—"
+	}
+	return strconv.FormatInt(n, 10)
+}
+
+func dashFloat(ok bool, f float64) string {
+	if !ok {
+		return "—"
+	}
+	return num(f)
+}
+
+func dashPct(c *runner.CaseResult) string {
+	s := utilization(c)
+	if s == "" {
+		return "—"
+	}
+	series := metrics.Series{Process: c.Process, Samples: []metrics.Sample{{Wall: c.Stats.Total}}}
+	u, _ := series.CPUUtilization()
+	return fmt.Sprintf("%.2f×", u)
+}
+
+// sortKeys orders the keys of a coverage table.
+//
+// Plain string order would put subclause 14.10 before 14.4, which reads as a
+// mistake in a document whose whole point is to be checked against another
+// document. Dotted numbers are compared segment by segment, numerically where
+// both segments are numbers; everything else falls back to string order, which
+// is what feature codes and GQLSTATUS codes want anyway.
+func sortKeys(keys []string) {
+	sort.Slice(keys, func(i, j int) bool { return lessKey(keys[i], keys[j]) })
+}
+
+func lessKey(a, b string) bool {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(as) && i < len(bs); i++ {
+		if as[i] == bs[i] {
+			continue
+		}
+		an, aerr := strconv.Atoi(as[i])
+		bn, berr := strconv.Atoi(bs[i])
+		if aerr == nil && berr == nil {
+			return an < bn
+		}
+		return as[i] < bs[i]
+	}
+	return len(as) < len(bs)
+}
+
+// durationOf converts a duration-like value back to a time.Duration for the
+// formatter, which is what lets the dash helpers take either.
+func durationOf[T ~int64](d T) time.Duration { return time.Duration(d) }

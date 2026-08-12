@@ -1,0 +1,382 @@
+# Clause and subclause structure of ISO/IEC 39075:2024 (GQL), edition 1.
+#
+# Unlike features.xml, conditions.xml and the grammar, ISO publishes no
+# machine-readable artifact for the document's own structure — and mandatory
+# features carry no feature code, so the subclause number is the only handle a
+# conformance claim has on them. This file supplies that handle.
+#
+# It is transcribed from the table of contents in the publicly downloadable
+# preview of the standard:
+#   https://cdn.standards.iteh.ai/samples/76120/a5695073ca0a485c9929f50970f4c862/ISO-IEC-39075-2024.pdf
+# (contents pages iii-xi), which ISO and its resellers publish free of charge.
+# Only numbers and titles are reproduced: no normative text of the standard is
+# copied here, and none is needed — a corpus cites a subclause, it does not
+# quote it.
+#
+# Format is "number<TAB>title", one per line, in document order. Titles keep
+# the standard's own spelling, including the angle brackets it puts around
+# syntactic elements, so a report can be read next to the document.
+#
+# A number in this file is not a promise that gql-compat tests it. It is the
+# denominator: the report says how many of these a run actually exercised.
+
+1	Scope
+2	Normative references
+3	Terms and definitions
+3.1	General terms and definitions
+3.2	GQL-environment terms and definitions
+3.3	GQL-catalog terms and definitions
+3.4	Graph terms and definitions
+3.5	Procedure and command terms and definitions
+3.6	General syntax terms and definitions
+3.7	Graph pattern terms and definitions
+3.8	Value terms and definitions
+3.9	Type terms and definitions
+3.10	Temporal terms and definitions
+4	Concepts
+4.1	Use of terms
+4.2	GQL-environments and their components
+4.2.1	General description of GQL-environments
+4.2.2	GQL-agents
+4.2.3	GQL-implementations
+4.2.3.1	Introduction to GQL-implementations
+4.2.3.2	GQL-clients
+4.2.3.3	GQL-servers
+4.2.4	Basic security model
+4.2.4.1	Principals
+4.2.4.2	Authorization identifiers and privileges
+4.2.5	GQL-catalog
+4.2.5.1	General description of the GQL-catalog
+4.2.5.2	GQL-directories
+4.2.5.3	GQL-schemas
+4.2.6	GQL-data
+4.3	GQL-objects
+4.3.1	General introduction to GQL-objects
+4.3.2	References to GQL-schemas and GQL-objects
+4.3.3	Primary objects and secondary objects
+4.3.4	Properties and supported property value types
+4.3.5	Graphs
+4.3.5.1	Introduction to graphs
+4.3.5.2	Graph descriptors
+4.3.6	Binding tables
+4.4	Values
+4.4.1	General information about values
+4.4.2	Comparable values
+4.4.3	Properties of distinct values
+4.4.4	Reference values
+4.4.5	Material values and the null value
+4.5	GQL-sessions
+4.5.1	General description of GQL-sessions
+4.5.2	Session contexts
+4.5.2.1	Introduction to session contexts
+4.5.2.2	Session context creation
+4.5.2.3	Session context modification
+4.6	GQL-transactions
+4.6.1	General description of GQL-transactions
+4.6.2	Transaction demarcation
+4.6.3	Transaction isolation
+4.6.4	Encompassing transaction belonging to an external agent
+4.7	GQL-requests and GQL-programs
+4.7.1	General description of GQL-requests and GQL-programs
+4.7.2	GQL-request contexts
+4.7.2.1	Introduction to GQL-request contexts
+4.7.2.2	GQL-request context creation
+4.7.2.3	GQL-request context modification
+4.7.3	Execution of GQL-requests
+4.7.4	Working schema references
+4.7.5	Working graph site
+4.7.6	Execution stack
+4.7.7	Operations
+4.8	Execution contexts
+4.8.1	General description of execution contexts
+4.8.2	Execution context creation and initialization
+4.8.3	Execution context modification
+4.8.4	Execution outcomes
+4.9	Diagnostic information
+4.9.1	Introduction to diagnostic information
+4.9.2	GQL-status objects
+4.9.3	Conditions
+4.10	Procedures and commands
+4.10.1	General description of procedures and commands
+4.10.2	Procedures
+4.10.2.1	General description of procedures
+4.10.2.2	Named procedure descriptors
+4.10.2.3	Procedure execution
+4.10.2.4	Procedures classified by kind of side effects
+4.10.3	Commands
+4.10.4	GQL-procedures
+4.10.4.1	Introduction to GQL-procedures
+4.10.4.2	Binding variables and general parameters
+4.10.4.3	Statements
+4.10.4.4	Statements classified by use of working graph sites
+4.10.4.5	Statements classified by function
+4.11	Graph pattern matching
+4.11.1	Summary of graph pattern matching
+4.11.2	Paths
+4.11.3	Path patterns
+4.11.4	Graph pattern variables
+4.11.5	References to graph pattern variables
+4.11.6	Path pattern matching
+4.11.7	Path modes
+4.11.8	Selective path search prefixes
+4.11.9	Match modes
+4.12	Data types
+4.12.1	General introduction to data types and base types
+4.12.2	Major classes of data types
+4.12.3	Data type descriptors
+4.12.4	Naming of data types and base types
+4.12.5	Material, nullable, and immaterial data types
+4.12.6	Most specific static value type and static base type
+4.12.7	Open and closed data types
+4.12.8	Additional terminology related to data types
+4.13	GQL-object types
+4.13.1	Introduction to GQL-object types and related base types
+4.13.2	Graph types and graph element types
+4.13.2.1	Introduction to graph types and graph element types
+4.13.2.2	Graph type descriptors
+4.13.2.3	Node types
+4.13.2.4	Edge types
+4.13.2.5	Property types
+4.13.2.6	Key label sets
+4.13.2.7	Structural consistency of element types
+4.13.3	Binding table types
+4.14	Dynamic union types
+4.14.1	Introduction to dynamic union types and the dynamic base type
+4.14.2	Dynamic union data type descriptors
+4.14.3	Characteristics of dynamic union types
+4.14.4	Dynamic generation of type tests and casts
+4.14.4.1	Introduction to dynamic generation of type tests and casts for <value expression>s
+4.14.4.2	Dynamic generation of type tests and strict casts for a <value expression> without operands
+4.14.4.3	Dynamic generation of type tests and strict casts for a <value expression> with operands
+4.14.4.4	Dynamic generation of additional type tests and lax casts for a <value expression>
+4.15	Constructed value types
+4.15.1	Introduction to constructed value types and related base types
+4.15.2	Path value types
+4.15.3	List value types
+4.15.4	Record types
+4.16	Predefined value types
+4.16.1	Introduction to predefined value types and related base types
+4.16.2	Boolean types
+4.16.3	Character string types
+4.16.3.1	Introduction to character strings
+4.16.3.2	Collations
+4.16.4	Byte string types
+4.16.5	Numeric types
+4.16.5.1	Introduction to numbers
+4.16.5.2	Characteristics of numbers
+4.16.5.3	Binary exact numeric types
+4.16.5.4	Decimal exact numeric types
+4.16.5.5	Approximate numeric types
+4.16.6	Temporal types
+4.16.6.1	Introduction to temporal data
+4.16.6.2	Temporal instant types
+4.16.6.3	Temporal duration types
+4.16.6.4	Operators involving values of temporal types
+4.16.7	Reference value types
+4.16.8	Immaterial value types: null type and empty type
+4.17	Sites
+4.17.1	General description of sites
+4.17.2	Static and dynamic sites
+4.17.3	Assignment and store assignment
+4.17.4	Nullability
+4.17.4.1	Introduction to nullability
+4.17.4.2	Nullability requirements
+4.17.4.3	Nullability inference
+5	Notation and conventions
+5.1	Notation taken from The Unicode Standard
+5.2	Notation
+5.3	Conventions
+5.3.1	Specification of syntactic elements
+5.3.2	Use of terms
+5.3.2.1	Syntactic containment
+5.3.2.2	Keywords and <keyword>s
+5.3.2.3	Terms denoting rule requirements
+5.3.2.4	Rule evaluation order
+5.3.2.5	Conditional rules
+5.3.2.6	Syntactic substitution
+5.3.3	Descriptors
+5.3.4	Subclauses used as subroutines
+5.3.5	Document typography
+5.3.6	Index typography
+5.3.7	Feature ID and Feature Name
+6	<GQL-program>
+7	Session management
+7.1	<session set command>
+7.2	<session reset command>
+7.3	<session close command>
+7.4	<session parameter specification>
+8	Transaction management
+8.1	<start transaction command>
+8.2	<transaction characteristics>
+8.3	<rollback command>
+8.4	<commit command>
+9	Procedure specification
+9.1	<procedure specification>
+9.2	<procedure body>
+10	Variable definitions
+10.1	<graph variable definition>
+10.2	<binding table variable definition>
+10.3	<value variable definition>
+11	Object expressions
+11.1	<graph expression>
+11.2	<binding table expression>
+11.3	<object expression primary>
+12	Catalog-modifying statements
+12.1	<linear catalog-modifying statement>
+12.2	<create schema statement>
+12.3	<drop schema statement>
+12.4	<create graph statement>
+12.5	<drop graph statement>
+12.6	<create graph type statement>
+12.7	<drop graph type statement>
+12.8	<call catalog-modifying procedure statement>
+13	Data-modifying statements
+13.1	<linear data-modifying statement>
+13.2	<insert statement>
+13.3	<set statement>
+13.4	<remove statement>
+13.5	<delete statement>
+13.6	<call data-modifying procedure statement>
+14	Query statements
+14.1	<composite query statement>
+14.2	<composite query expression>
+14.3	<linear query statement> and <simple query statement>
+14.4	<match statement>
+14.5	<call query statement>
+14.6	<filter statement>
+14.7	<let statement>
+14.8	<for statement>
+14.9	<order by and page statement>
+14.10	<primitive result statement>
+14.11	<return statement>
+14.12	<select statement>
+15	Procedure calling
+15.1	<call procedure statement> and <procedure call>
+15.2	<inline procedure call>
+15.3	<named procedure call>
+16	Common elements
+16.1	<at schema clause>
+16.2	<use graph clause>
+16.3	<graph pattern binding table>
+16.4	<graph pattern>
+16.5	<insert graph pattern>
+16.6	<path pattern prefix>
+16.7	<path pattern expression>
+16.8	<label expression>
+16.9	<path variable reference>
+16.10	<element variable reference>
+16.11	<graph pattern quantifier>
+16.12	<simplified path pattern expression>
+16.13	<where clause>
+16.14	<yield clause>
+16.15	<group by clause>
+16.16	<order by clause>
+16.17	<sort specification list>
+16.18	<limit clause>
+16.19	<offset clause>
+17	Object references
+17.1	<schema reference> and <catalog schema parent and name>
+17.2	<graph reference> and <catalog graph parent and name>
+17.3	<graph type reference> and <catalog graph type parent and name>
+17.4	<binding table reference> and <catalog binding table parent and name>
+17.5	<procedure reference> and <catalog procedure parent and name>
+17.6	<catalog object parent reference>
+17.7	<reference parameter specification>
+17.8	<external object reference>
+18	Type elements
+18.1	<nested graph type specification>
+18.2	<node type specification>
+18.3	<edge type specification>
+18.4	<label set phrase> and <label set specification>
+18.5	<property types specification>
+18.6	<property type>
+18.7	<property value type>
+18.8	<binding table type>
+18.9	<value type>
+18.10	<field type>
+19	Predicates
+19.1	<search condition>
+19.2	<predicate>
+19.3	<comparison predicate>
+19.4	<exists predicate>
+19.5	<null predicate>
+19.6	<value type predicate>
+19.7	<normalized predicate>
+19.8	<directed predicate>
+19.9	<labeled predicate>
+19.10	<source/destination predicate>
+19.11	<all_different predicate>
+19.12	<same predicate>
+19.13	<property_exists predicate>
+20	Value expressions and specifications
+20.1	<value expression>
+20.2	<value expression primary>
+20.3	<value specification>
+20.4	<dynamic parameter specification>
+20.5	<let value expression>
+20.6	<value query expression>
+20.7	<case expression>
+20.8	<cast specification>
+20.9	<aggregate function>
+20.10	<element_id function>
+20.11	<property reference>
+20.12	<binding variable reference>
+20.13	<path value expression>
+20.14	<path value constructor>
+20.15	<list value expression>
+20.16	<list value function>
+20.17	<list value constructor>
+20.18	<record constructor>
+20.19	<field>
+20.20	<boolean value expression>
+20.21	<numeric value expression>
+20.22	<numeric value function>
+20.23	<string value expression>
+20.24	<character string function>
+20.25	<byte string function>
+20.26	<datetime value expression>
+20.27	<datetime value function>
+20.28	<duration value expression>
+20.29	<duration value function>
+21	Lexical elements
+21.1	Names and variables
+21.2	<literal>
+21.3	<token>, <separator>, and <identifier>
+21.4	<GQL terminal character>
+22	Additional common rules
+22.1	Annotation of a <GQL-program>
+22.2	Machinery for graph pattern matching
+22.3	Evaluation of a <path pattern expression>
+22.4	Evaluation of a selective <path pattern>
+22.5	Satisfaction of a <label expression> by a label set
+22.6	Application of bindings to evaluate an expression
+22.7	Evaluation of an expression on a group variable
+22.8	Application of bindings to generate a record
+22.9	Resolution of a <simple directory path> from a start directory
+22.10	Store assignment
+22.11	Determination of identical values
+22.12	Determination of distinct values
+22.13	Equality operations
+22.14	Ordering operations
+22.15	Grouping operations
+22.16	Determination of collation
+22.17	Graph-type specific combination of property value types
+22.18	General combination of value types
+22.19	Static combination of value types
+22.20	Determination of value type precedence
+23	GQLSTATUS and diagnostic records
+23.1	GQLSTATUS
+23.2	Diagnostic records
+24	Conformance
+24.1	Introduction to conformance
+24.2	Minimum conformance
+24.3	Conformance to features
+24.4	Requirements for GQL-programs
+24.4.1	Introduction to requirements for GQL-programs
+24.4.2	Claims of conformance for GQL-programs
+24.5	Requirements for GQL-implementations
+24.5.1	Introduction to requirements for GQL-implementations
+24.5.2	Claims of conformance for GQL-implementations
+24.5.3	Extensions and options
+24.6	GQL Flagger
+24.7	Implied feature relationships

@@ -1,0 +1,226 @@
+package corpus_test
+
+import (
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/tamnd/gql-compat/corpus"
+	"github.com/tamnd/gql-compat/iso"
+)
+
+// The embedded suite is the product this package ships. Every assertion below
+// is about the suite itself rather than about the loader: the loader is
+// exercised by loading it, and what needs guarding is that a case cannot be
+// added which claims something ISO does not define, or which no engine could
+// be judged against fairly.
+
+func load(t *testing.T) (*corpus.Suite, *iso.Catalog) {
+	t.Helper()
+	cat, err := iso.Load()
+	if err != nil {
+		t.Fatalf("loading the ISO catalogue: %v", err)
+	}
+	suite, fixtures, err := corpus.LoadEmbedded(iso.Codes{Catalog: cat})
+	if err != nil {
+		t.Fatalf("loading the embedded suite: %v", err)
+	}
+	if suite.Len() == 0 {
+		t.Fatal("the embedded suite is empty")
+	}
+	if fixtures == nil {
+		t.Fatal("the embedded suite has no fixtures")
+	}
+	return suite, cat
+}
+
+func TestEmbeddedSuiteLoads(t *testing.T) {
+	suite, _ := load(t)
+	byKind := map[corpus.Kind]int{}
+	for _, c := range suite.Cases {
+		byKind[c.Kind]++
+	}
+	// Every kind must be represented. A suite that had quietly lost its
+	// condition cases would still load, still pass, and still report a
+	// conformance percentage — over a corpus that no longer tested errors.
+	for _, k := range corpus.AllKinds {
+		if byKind[k] == 0 {
+			t.Errorf("the suite contains no %s cases", k)
+		}
+	}
+	t.Logf("%d cases: %v", suite.Len(), byKind)
+}
+
+func TestCaseIDsAreUnique(t *testing.T) {
+	suite, _ := load(t)
+	seen := map[string]string{}
+	for _, c := range suite.Cases {
+		if first, dup := seen[c.ID]; dup {
+			t.Errorf("case id %q appears in both %s and %s", c.ID, first, c.Source)
+			continue
+		}
+		seen[c.ID] = c.Source
+	}
+}
+
+func TestCaseIDsMatchTheirKind(t *testing.T) {
+	suite, _ := load(t)
+	prefix := map[corpus.Kind]string{
+		corpus.KindMandatory:   "mandatory/",
+		corpus.KindOptional:    "optional/",
+		corpus.KindCondition:   "condition/",
+		corpus.KindGrammar:     "grammar/",
+		corpus.KindPerformance: "performance/",
+	}
+	for _, c := range suite.Cases {
+		if want := prefix[c.Kind]; !strings.HasPrefix(c.ID, want) {
+			t.Errorf("%s: a %s case should have an id beginning %q", c.ID, c.Kind, want)
+		}
+	}
+}
+
+func TestMandatoryCasesClaimNoOptionalFeature(t *testing.T) {
+	suite, _ := load(t)
+	// This is the rule the whole mandatory/optional split rests on. If a
+	// mandatory case used an optional feature, an engine could fail it by
+	// lawfully declining that feature, and the suite would be reporting a
+	// conformance defect where the standard permits a choice.
+	for _, c := range suite.Cases {
+		if c.Kind != corpus.KindMandatory {
+			continue
+		}
+		if len(c.Features) > 0 {
+			t.Errorf("%s: a mandatory case claims optional feature(s) %v", c.ID, c.Features)
+		}
+		if len(c.Requires) > 0 {
+			t.Errorf("%s: a mandatory case requires optional feature(s) %v", c.ID, c.Requires)
+		}
+	}
+}
+
+func TestOptionalCasesNameKnownFeatures(t *testing.T) {
+	suite, cat := load(t)
+	for _, c := range suite.Cases {
+		for _, f := range append(append([]string{}, c.Features...), c.Requires...) {
+			if _, ok := cat.Feature(f); !ok {
+				t.Errorf("%s: %q is not a feature in features.xml", c.ID, f)
+			}
+		}
+	}
+}
+
+func TestRowExpectationsAreWellFormed(t *testing.T) {
+	suite, _ := load(t)
+	for _, c := range suite.Cases {
+		if c.Expect.Kind != corpus.ExpectRows {
+			continue
+		}
+		for i, row := range c.Expect.Rows {
+			if len(row) != len(c.Expect.Columns) {
+				t.Errorf("%s: row %d has %d values for %d columns",
+					c.ID, i, len(row), len(c.Expect.Columns))
+			}
+		}
+		// An ordered expectation of more than one row is a claim that the
+		// engine must produce them in that order. Unless the statement sorts,
+		// that claim is not in the standard, and the case would be scoring a
+		// coin toss.
+		if !c.Expect.Unordered && len(c.Expect.Rows) > 1 && !mentionsOrderBy(c.Query) {
+			t.Errorf("%s: expects %d rows in order but the statement has no ORDER BY;"+
+				" either sort it or mark the expectation unordered",
+				c.ID, len(c.Expect.Rows))
+		}
+	}
+}
+
+func mentionsOrderBy(q string) bool {
+	return strings.Contains(strings.ToUpper(q), "ORDER BY")
+}
+
+func TestErrorExpectationsNameAStatus(t *testing.T) {
+	suite, cat := load(t)
+	for _, c := range suite.Cases {
+		if c.Expect.Kind != corpus.ExpectError {
+			continue
+		}
+		if c.Expect.GQLStatus == "" {
+			// Permitted by the model, but a condition case that does not say
+			// which condition it expects is measuring only that something
+			// went wrong, which every engine can achieve by accident.
+			if c.Kind == corpus.KindCondition {
+				t.Errorf("%s: a condition case must name the GQLSTATUS it expects", c.ID)
+			}
+			continue
+		}
+		if _, ok := cat.Status(c.Expect.GQLStatus); !ok {
+			t.Errorf("%s: GQLSTATUS %q is not in conditions.xml", c.ID, c.Expect.GQLStatus)
+		}
+	}
+}
+
+func TestMutatingCasesAreMarked(t *testing.T) {
+	suite, _ := load(t)
+	// A write that is not declared leaves the next case reading a graph that
+	// is not the fixture it named, and the failure surfaces somewhere else
+	// entirely. The check is textual because it has to catch the case the
+	// author forgot to think about, and it matches whole words: OFFSET ends
+	// in SET.
+	writes := regexp.MustCompile(`(?i)\b(INSERT|SET|REMOVE|DELETE|CREATE|DROP|SESSION)\b`)
+	for _, c := range suite.Cases {
+		if c.Mutating || c.Expect.Kind == corpus.ExpectReject {
+			continue
+		}
+		for _, s := range append([]string{c.Query}, c.Setup...) {
+			if m := writes.FindString(s); m != "" {
+				t.Errorf("%s: statement contains %q but the case is not marked mutating", c.ID, m)
+				break
+			}
+		}
+	}
+}
+
+func TestPerformanceCasesStillAssertAnAnswer(t *testing.T) {
+	suite, _ := load(t)
+	for _, c := range suite.Cases {
+		if c.Kind != corpus.KindPerformance {
+			continue
+		}
+		switch c.Expect.Kind {
+		case corpus.ExpectRows, corpus.ExpectAccept:
+		default:
+			t.Errorf("%s: a performance case expects %q; it should assert rows,"+
+				" or accept where the answer is not predictable", c.ID, c.Expect.Kind)
+		}
+		if c.Fixture == "" {
+			t.Errorf("%s: a performance case with no fixture measures the parser", c.ID)
+		}
+	}
+}
+
+func TestEveryFeatureFamilyIsCovered(t *testing.T) {
+	suite, cat := load(t)
+	claimed := map[string]bool{}
+	perFamily := map[string]int{}
+	for _, c := range suite.Cases {
+		for _, f := range c.Features {
+			if claimed[f] {
+				continue
+			}
+			claimed[f] = true
+			if feat, ok := cat.Feature(f); ok {
+				perFamily[feat.Family]++
+			}
+		}
+	}
+	// Not every one of the 228 features is testable through a portable
+	// statement, so this does not demand full coverage. It demands that no
+	// family is missed entirely, which is the failure mode of writing a
+	// corpus one clause at a time and stopping.
+	for _, fam := range cat.Families() {
+		if fam.Count > 0 && perFamily[fam.Prefix] == 0 {
+			t.Errorf("no case claims any of the %d features of family %s (%s)",
+				fam.Count, fam.Prefix, fam.Name)
+		}
+	}
+	t.Logf("%d of %d optional features claimed by at least one case", len(claimed), len(cat.Features))
+}

@@ -1,0 +1,105 @@
+version: 2
+
+project_name: gql-compat
+
+before:
+  hooks:
+    - go mod tidy
+    - go run ./cmd/gql-compat validate
+
+builds:
+  - id: gql-compat
+    main: ./cmd/gql-compat
+    binary: gql-compat
+    env:
+      # The whole tool is pure Go: the corpus and the ISO artifacts are
+      # embedded, gopsutil reads /proc and the Mach and Windows APIs without
+      # cgo, and the Neo4j driver speaks Bolt over a socket. A static binary
+      # is what lets a conformance run happen on a machine nobody prepared.
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      # A report states the tool version that produced it. Stamping these is
+      # what makes that statement true of a release binary.
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.FullCommit}}
+      - -X main.date={{.CommitDate}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE
+      # The corpus travels with the binary too, even though it is embedded:
+      # a reader checking a published score needs to see the cases, not
+      # only the numbers they produced.
+      - src: corpus/suite/*.yaml
+        dst: corpus
+      - src: iso/artifacts/SHA256SUMS
+        dst: iso
+
+checksum:
+  name_template: "checksums.txt"
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: Conformance corpus
+      regexp: '^.*?(corpus|iso)(\(.+\))??!?:.+$'
+      order: 0
+    - title: Measurement
+      regexp: '^.*?(metrics|runner)(\(.+\))??!?:.+$'
+      order: 1
+    - title: Adapters
+      regexp: '^.*?adapter(\(.+\))??!?:.+$'
+      order: 2
+    - title: Reporting
+      regexp: '^.*?report(\(.+\))??!?:.+$'
+      order: 3
+    - title: Other
+      order: 99
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  footer: |
+    ## Reading a report from this build
+
+    Reports carry a schema number and the tool version that wrote them. Two
+    reports are comparable when their schema numbers match; a version change
+    alone does not invalidate a comparison, but a schema change does.
+
+    This project is not affiliated with or endorsed by ISO, IEC, or any engine
+    vendor. A report it produces is a measurement, not a certification.

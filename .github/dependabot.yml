@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # The measurement layer moves together: gopsutil and golang.org/x/sys
+      # are the same read of the same kernel interfaces, and updating one
+      # without the other is how a platform's counters quietly stop working.
+      measurement:
+        patterns:
+          - github.com/shirou/gopsutil/*
+          - golang.org/x/sys
+      drivers:
+        patterns:
+          - github.com/neo4j/*
+    commit-message:
+      prefix: "deps"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"

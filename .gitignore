@@ -1,0 +1,15 @@
+# Built binary
+/gql-compat
+
+# Reports and coverage are outputs of a run, not sources. A published report
+# belongs in a release artifact or a repository of its own, with the engine
+# version and host it was measured on attached.
+/reports/
+/dist/
+cover.out
+*.out
+
+# Engines built locally for a run
+/.engines/
+
+.DS_Store

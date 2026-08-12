@@ -1,0 +1,570 @@
+# Optional pattern features: the G family.
+#
+# These are the features that separate a graph query language from a join
+# language — quantified paths, path modes, selective searches, the abbreviated
+# edge spellings — and they are where implementations diverge most. Several
+# cases need more than one feature to be expressible at all (an unbounded
+# quantifier to have something for a path mode to constrain, for instance) and
+# claim every feature they use.
+
+defaults:
+  kind: optional
+  fixture: chain
+  tags: [read, pattern]
+
+cases:
+  - id: optional/g043/full-edge-pointing-left
+    name: A left-pointing full edge pattern traverses an edge against its direction
+    features: [G043]
+    subclauses: ["16.7"]
+    productions: [full edge pattern, full edge pointing left]
+    query: |
+      MATCH (a:Step)<-[:LINK]-(b:Step)
+      WHERE a.step = 1
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[0]]
+
+  - id: optional/g043/full-edge-any-direction
+    name: An any-direction full edge pattern traverses an edge either way
+    features: [G043]
+    subclauses: ["16.7"]
+    productions: [full edge pattern, full edge any direction]
+    query: |
+      MATCH (a:Step)-[:LINK]-(b:Step)
+      WHERE a.step = 2
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[1], [3]]
+
+  - id: optional/g044/abbreviated-edge-right
+    name: The arrow abbreviation stands for an edge pattern with no filler
+    features: [G044]
+    subclauses: ["16.7"]
+    productions: [abbreviated edge pattern]
+    query: |
+      MATCH (a:Step)->(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[1]]
+
+  - id: optional/g044/abbreviated-edge-left
+    name: The reversed arrow abbreviation traverses against the direction
+    features: [G044]
+    subclauses: ["16.7"]
+    productions: [abbreviated edge pattern]
+    query: |
+      MATCH (a:Step)<-(b:Step)
+      WHERE a.step = 1
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[0]]
+
+  - id: optional/g045/abbreviated-edge-left-or-right
+    name: The double-headed abbreviation matches an edge in either direction
+    features: [G045]
+    subclauses: ["16.7"]
+    productions: [abbreviated edge pattern]
+    # ISO splits the abbreviations into a basic set (G044) and the complete
+    # set (G045) without listing which spelling falls where in a form this
+    # corpus can read. The plain arrows are claimed as basic and the
+    # directionless ones as complete; if that division proves wrong the fix is
+    # the feature code on these two cases, not the cases themselves.
+    query: |
+      MATCH (a:Step)<->(b:Step)
+      WHERE a.step = 2
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[1], [3]]
+
+  - id: optional/gh02/undirected-edge-pattern
+    name: An undirected edge pattern matches an edge stored without a direction
+    features: [GH02]
+    subclauses: ["16.7"]
+    productions: [full edge undirected, edge pattern]
+    fixture: undirected
+    query: |
+      MATCH (a:Peer)~[:FRIEND]~(b:Peer)
+      WHERE a.name = 'north'
+      RETURN b.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[south]]
+
+  - id: optional/g074/wildcard-label
+    name: The wildcard label matches an element whatever its labels
+    features: [G074]
+    subclauses: ["16.8"]
+    productions: [wildcard label, label primary]
+    fixture: social
+    query: |
+      MATCH (x:%)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[7]]
+
+  - id: optional/g004/path-variable
+    name: A path variable declaration binds the whole path as a value
+    features: [G004]
+    subclauses: ["16.4", "20.13"]
+    productions: [path variable declaration, path variable, path value expression]
+    query: |
+      MATCH pv = (a:Step)-[:LINK]->(b:Step)
+      RETURN COUNT(pv) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/g038/parenthesized-path-pattern
+    name: A parenthesized path pattern groups a path expression without changing it
+    features: [G038]
+    subclauses: ["16.7"]
+    productions: [parenthesized path pattern expression, path primary]
+    query: |
+      MATCH (a:Step)((x:Step)-[:LINK]->(y:Step))(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[1]]
+
+  - id: optional/g036/quantified-edge-fixed
+    name: A fixed quantifier on an edge pattern repeats it exactly n times
+    features: [G036, G060]
+    subclauses: ["16.11"]
+    productions: [graph pattern quantifier, fixed quantifier]
+    query: |
+      MATCH (a:Step)-[:LINK]->{2}(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[2]]
+
+  - id: optional/g060/quantified-edge-bounded
+    name: A general quantifier with both bounds repeats an edge pattern within a range
+    features: [G060, G036]
+    subclauses: ["16.11"]
+    productions: [general quantifier, lower bound, upper bound]
+    query: |
+      MATCH (a:Step)-[:LINK]->{1,3}(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[1], [2], [3]]
+
+  - id: optional/g061/quantified-edge-unbounded
+    name: The plus quantifier repeats an edge pattern as far as the graph allows
+    features: [G061, G036]
+    subclauses: ["16.11"]
+    productions: [graph pattern quantifier]
+    query: |
+      MATCH (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 0
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/g035/quantified-path
+    name: A quantifier on a parenthesized path repeats a multi-element pattern
+    features: [G035, G038, G060]
+    subclauses: ["16.7", "16.11"]
+    productions: [quantified path primary, parenthesized path pattern expression]
+    query: |
+      MATCH (a:Step)((x:Step)-[:LINK]->(y:Step)){2}(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[2]]
+
+  - id: optional/g037/questioned-path
+    name: A questioned path makes a path factor optional
+    features: [G037, G038]
+    subclauses: ["16.7"]
+    productions: [questioned path primary]
+    query: |
+      MATCH (a:Step)((x:Step)-[:LINK]->(y:Step))?(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[0], [1]]
+
+  - id: optional/g010/walk-path-mode
+    name: The WALK path mode places no constraint on repetition
+    features: [G010]
+    subclauses: ["16.6", "4.11.7"]
+    productions: [path mode, path mode prefix]
+    query: |
+      MATCH WALK (a:Step)-[:LINK]->(b:Step)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/g014/explicit-paths-keyword
+    name: The PATH keyword may follow a path mode without changing the result
+    features: [G014, G010]
+    subclauses: ["16.6"]
+    productions: [path mode prefix, path or paths]
+    query: |
+      MATCH WALK PATHS (a:Step)-[:LINK]->(b:Step)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/g011/trail-path-mode
+    name: TRAIL forbids a path from using one edge twice
+    features: [G011, G061, G036]
+    subclauses: ["16.6", "4.11.7"]
+    productions: [path mode]
+    fixture: triangle
+    tags: [recursive]
+    # Three edges in a cycle: from t1 a trail may take one, two or all three
+    # edges, and a fourth step would have to reuse the first edge.
+    query: |
+      MATCH TRAIL (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 1
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[3]]
+
+  - id: optional/g012/simple-path-mode
+    name: SIMPLE forbids a repeated node except where the path closes on itself
+    features: [G012, G061, G036]
+    subclauses: ["16.6", "4.11.7"]
+    productions: [path mode]
+    fixture: triangle
+    tags: [recursive]
+    query: |
+      MATCH SIMPLE (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 1
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[3]]
+
+  - id: optional/g013/acyclic-path-mode
+    name: ACYCLIC forbids a repeated node anywhere, including the closing one
+    features: [G013, G061, G036]
+    subclauses: ["16.6", "4.11.7"]
+    productions: [path mode]
+    fixture: triangle
+    tags: [recursive]
+    query: |
+      MATCH ACYCLIC (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 1
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[2]]
+
+  - id: optional/g015/all-path-search
+    name: An explicit ALL prefix keeps every path the pattern matches
+    features: [G015]
+    subclauses: ["16.6", "4.11.8"]
+    productions: [path search prefix, all path search]
+    query: |
+      MATCH ALL (a:Step)-[:LINK]->(b:Step)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/g016/any-path-search
+    name: ANY keeps one path per group of endpoints
+    features: [G016, G061, G036]
+    subclauses: ["16.6", "4.11.8"]
+    productions: [any path search]
+    tags: [recursive]
+    query: |
+      MATCH ANY (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 0 AND b.step = 5
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g017/all-shortest-path-search
+    name: ALL SHORTEST keeps every path of the shortest length between endpoints
+    features: [G017, G061, G036]
+    subclauses: ["16.6", "4.11.8"]
+    productions: [all shortest path search, shortest path search]
+    tags: [recursive]
+    query: |
+      MATCH ALL SHORTEST (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 0 AND b.step = 5
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g018/any-shortest-path-search
+    name: ANY SHORTEST keeps one path of the shortest length between endpoints
+    features: [G018, G061, G036]
+    subclauses: ["16.6", "4.11.8"]
+    productions: [any shortest path search]
+    tags: [recursive]
+    query: |
+      MATCH ANY SHORTEST (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 0 AND b.step = 5
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g019/counted-shortest-path-search
+    name: SHORTEST n keeps at most n of the shortest paths
+    features: [G019, G061, G036]
+    subclauses: ["16.6", "4.11.8"]
+    productions: [counted shortest path search, number of paths]
+    tags: [recursive]
+    query: |
+      MATCH SHORTEST 2 (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 0 AND b.step = 5
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g032/path-pattern-union
+    name: A path pattern union matches either alternative and binds the same variables
+    features: [G032]
+    subclauses: ["16.7"]
+    productions: [path pattern union, path pattern expression]
+    fixture: social
+    query: |
+      MATCH (a:Person)-[:KNOWS]->(b) | (a:Person)-[:WORKS_AT]->(b)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[8]]
+
+  - id: optional/g030/path-multiset-alternation
+    name: Multiset alternation keeps the matches of both operands
+    features: [G030]
+    subclauses: ["16.7"]
+    productions: [path multiset alternation, multiset alternation operator]
+    fixture: social
+    query: |
+      MATCH (a:Person)-[:KNOWS]->(b) |+| (a:Person)-[:WORKS_AT]->(b)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[8]]
+
+  - id: optional/g041/non-local-element-predicate
+    name: An element pattern predicate may read a variable bound elsewhere in the pattern
+    features: [G041]
+    subclauses: ["16.4"]
+    productions: [element pattern predicate]
+    query: |
+      MATCH (a:Step)-[:LINK]->(b:Step WHERE b.step > a.step)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/g080/simplified-path-pattern
+    name: A simplified path pattern spells a labelled traversal without brackets
+    features: [G080]
+    subclauses: ["16.12"]
+    productions: [simplified path pattern expression, simplified defaulting right]
+    query: |
+      MATCH (a:Step)-/ LINK /->(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[1]]
+
+  - id: optional/g002/different-edges-match-mode
+    name: DIFFERENT EDGES forbids one path from binding an edge twice
+    features: [G002]
+    subclauses: ["16.4", "4.11.9"]
+    productions: [match mode, different edges match mode]
+    fixture: triangle
+    query: |
+      MATCH DIFFERENT EDGES (a:Step)-[:LINK]->(b:Step)-[:LINK]->(c:Step)
+      WHERE a.step = 1
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g003/repeatable-elements-match-mode
+    name: REPEATABLE ELEMENTS states the default match mode explicitly
+    features: [G003]
+    subclauses: ["16.4", "4.11.9"]
+    productions: [match mode, repeatable elements match mode]
+    fixture: triangle
+    query: |
+      MATCH REPEATABLE ELEMENTS (a:Step)-[:LINK]->(b:Step)-[:LINK]->(c:Step)
+      WHERE a.step = 1
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g100/element-id
+    name: ELEMENT_ID returns an identifier for an element
+    features: [G100]
+    subclauses: ["20.10"]
+    productions: [element_id function]
+    fixture: social
+    tags: [expression]
+    # The value is implementation-defined, so the case asserts only that there
+    # is one. An expectation on its shape would be a test of the engine's id
+    # scheme rather than of the function.
+    query: |
+      MATCH (p:Person)
+      WHERE p.name = 'Alice'
+      RETURN ELEMENT_ID(p) IS NOT NULL AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/g110/is-directed-predicate
+    name: IS DIRECTED is true of an edge stored with a direction
+    features: [G110]
+    subclauses: ["19.8"]
+    productions: [directed predicate, directed predicate part 2]
+    fixture: social
+    query: |
+      MATCH (p:Person)-[k:KNOWS]->(q:Person)
+      WHERE k IS DIRECTED
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/g111/is-labeled-predicate
+    name: IS LABELED tests a label expression against a bound element
+    features: [G111]
+    subclauses: ["19.9"]
+    productions: [labeled predicate, labeled predicate part 2]
+    fixture: social
+    query: |
+      MATCH (x)
+      WHERE x IS LABELED Person
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/g112/is-source-of-predicate
+    name: IS SOURCE OF relates a node to an edge it starts
+    features: [G112]
+    subclauses: ["19.10"]
+    productions: [source/destination predicate, source predicate part 2]
+    fixture: social
+    query: |
+      MATCH (p:Person)-[k:KNOWS]->(q:Person)
+      WHERE p IS SOURCE OF k
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/g113/all-different-predicate
+    name: ALL_DIFFERENT is true when every named element is a distinct element
+    features: [G113]
+    subclauses: ["19.11"]
+    productions: [all_different predicate]
+    fixture: social
+    query: |
+      MATCH (p:Person)-[:KNOWS]->(q:Person)-[:KNOWS]->(r:Person)
+      WHERE ALL_DIFFERENT(p, q, r)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[4]]
+
+  - id: optional/g114/same-predicate
+    name: SAME is true when every named element is the same element
+    features: [G114]
+    subclauses: ["19.12"]
+    productions: [same predicate]
+    fixture: selfloop
+    query: |
+      MATCH (x:Peer)-[:FRIEND]->(y:Peer)
+      WHERE SAME(x, y)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g115/property-exists-predicate
+    name: PROPERTY_EXISTS tests for a property without reading its value
+    features: [G115]
+    subclauses: ["19.13"]
+    productions: [property_exists predicate]
+    fixture: social
+    query: |
+      MATCH (p:Person)
+      WHERE PROPERTY_EXISTS(p, name)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]

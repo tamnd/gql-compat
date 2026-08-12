@@ -1,0 +1,177 @@
+# Shared fixtures.
+#
+# A fixture is data, never statements: each adapter renders it into whatever
+# its engine loads. Fixtures are deliberately small and deliberately split
+# along capability lines, because a fixture that needed lists, temporals and
+# undirected edges at once would skip every case that used it on an engine
+# missing any one of the three. One capability per fixture keeps a skip
+# informative.
+#
+# The graphs here are acyclic on purpose. GQL's default match mode governs
+# whether an edge may repeat within one path, so a fixture containing a cycle
+# would make the row count of an ordinary two-hop case depend on a mode the
+# case is not about. Cases that are about match mode use the `triangle`
+# fixture, which has the cycle they need.
+
+fixtures:
+  - name: social
+    description: >-
+      Five people who know each other in a small acyclic web, plus two
+      companies they work at. The baseline graph for pattern, projection,
+      predicate and aggregate cases: two node labels, two edge types,
+      properties on both.
+    nodes:
+      - key: a
+        labels: [Person]
+        props: {name: Alice, age: 34, city: Berlin}
+      - key: b
+        labels: [Person]
+        props: {name: Bob, age: 27, city: Paris}
+      - key: c
+        labels: [Person]
+        props: {name: Carol, age: 41, city: Berlin}
+      - key: d
+        labels: [Person]
+        props: {name: Dave, age: 27, city: Lisbon}
+      - key: e
+        labels: [Person]
+        props: {name: Erin, age: 55, city: Paris}
+      - key: acme
+        labels: [Company]
+        props: {name: Acme, founded: 1993}
+      - key: globex
+        labels: [Company]
+        props: {name: Globex, founded: 2004}
+    edges:
+      - {key: k1, type: KNOWS, from: a, to: b, props: {since: 2015}}
+      - {key: k2, type: KNOWS, from: b, to: c, props: {since: 2017}}
+      - {key: k3, type: KNOWS, from: a, to: c, props: {since: 2019}}
+      - {key: k4, type: KNOWS, from: c, to: d, props: {since: 2020}}
+      - {key: k5, type: KNOWS, from: d, to: e, props: {since: 2021}}
+      - {key: w1, type: WORKS_AT, from: a, to: acme, props: {role: engineer}}
+      - {key: w2, type: WORKS_AT, from: b, to: acme, props: {role: analyst}}
+      - {key: w3, type: WORKS_AT, from: c, to: globex, props: {role: director}}
+
+  - name: unit
+    description: >-
+      One node and nothing else. Expression and literal cases match it to get
+      exactly one binding, so that what they measure is the expression and not
+      the engine's pattern matching.
+    nodes:
+      - key: u
+        labels: [Unit]
+        props: {}
+
+  - name: chain
+    description: >-
+      A six-node path, n0 through n5, joined by LINK. The graph for
+      variable-length and quantified path cases: every hop count has exactly
+      one answer, so an off-by-one in an engine's quantifier is visible as a
+      wrong row rather than as a wrong count.
+    nodes:
+      - {key: n0, labels: [Step], props: {step: 0}}
+      - {key: n1, labels: [Step], props: {step: 1}}
+      - {key: n2, labels: [Step], props: {step: 2}}
+      - {key: n3, labels: [Step], props: {step: 3}}
+      - {key: n4, labels: [Step], props: {step: 4}}
+      - {key: n5, labels: [Step], props: {step: 5}}
+    edges:
+      - {type: LINK, from: n0, to: n1}
+      - {type: LINK, from: n1, to: n2}
+      - {type: LINK, from: n2, to: n3}
+      - {type: LINK, from: n3, to: n4}
+      - {type: LINK, from: n4, to: n5}
+
+  - name: triangle
+    description: >-
+      Three nodes in a directed cycle. The only fixture where a path may
+      revisit an edge, which is what makes match modes and the TRAIL, SIMPLE
+      and ACYCLIC path modes observable.
+    nodes:
+      - {key: t1, labels: [Step], props: {step: 1}}
+      - {key: t2, labels: [Step], props: {step: 2}}
+      - {key: t3, labels: [Step], props: {step: 3}}
+    edges:
+      - {type: LINK, from: t1, to: t2}
+      - {type: LINK, from: t2, to: t3}
+      - {type: LINK, from: t3, to: t1}
+
+  - name: numbers
+    description: >-
+      Four nodes carrying the numeric and boolean values the arithmetic,
+      comparison and aggregate cases read. Values are chosen so that every
+      expected total is exact in binary floating point as well as in decimal.
+    nodes:
+      - {key: v1, labels: [Value], props: {n: 1, x: 0.5, flag: true, tag: alpha}}
+      - {key: v2, labels: [Value], props: {n: 2, x: 1.5, flag: false, tag: beta}}
+      - {key: v3, labels: [Value], props: {n: 3, x: 2.5, flag: true, tag: gamma}}
+      - {key: v4, labels: [Value], props: {n: 4, x: 3.5, flag: false, tag: delta}}
+
+  - name: nullable
+    description: >-
+      One node with a property explicitly set to null and one without the
+      property at all. GQL distinguishes the two only in an engine that can
+      store an explicit null, so the fixture declares the capability and the
+      cases that need it skip where it is missing.
+    nodes:
+      - {key: p1, labels: [Maybe], props: {id: 1, note: present}}
+      - {key: p2, labels: [Maybe], props: {id: 2, note: null}}
+
+  - name: listed
+    description: A node whose property is a list, for list value cases.
+    nodes:
+      - {key: l1, labels: [Bag], props: {xs: [1, 2, 3], name: bag}}
+
+  - name: dated
+    description: A node with date and duration typed properties, for temporal cases.
+    nodes:
+      - key: d1
+        labels: [Event]
+        props:
+          name: launch
+          on: {date: "2024-01-15"}
+          takes: {duration: "P2D"}
+
+  - name: multilabel
+    description: >-
+      One node wearing two labels and one wearing a single label, which is
+      what makes a label conjunction distinguishable from a label disjunction.
+    nodes:
+      - {key: m1, labels: [Person, Employee], props: {name: Mika}}
+      - {key: m2, labels: [Person], props: {name: Noor}}
+
+  - name: undirected
+    description: An undirected edge, which GQL has and several engines do not.
+    nodes:
+      - {key: u1, labels: [Peer], props: {name: north}}
+      - {key: u2, labels: [Peer], props: {name: south}}
+    edges:
+      - {type: FRIEND, from: u1, to: u2, undirected: true}
+
+  - name: selfloop
+    description: An edge whose endpoints are the same node.
+    nodes:
+      - {key: s1, labels: [Peer], props: {name: solo}}
+    edges:
+      - {type: FRIEND, from: s1, to: s1}
+
+  - name: parallel
+    description: Two edges of one type between one ordered pair of nodes.
+    nodes:
+      - {key: q1, labels: [Peer], props: {name: left}}
+      - {key: q2, labels: [Peer], props: {name: right}}
+    edges:
+      - {type: FRIEND, from: q1, to: q2, props: {rank: 1}}
+      - {type: FRIEND, from: q1, to: q2, props: {rank: 2}}
+
+  - name: blank
+    description: >-
+      No nodes and no edges. Write cases start here so that what they assert
+      afterwards is entirely the work of the statement under test.
+    nodes: []
+
+  - name: pair
+    description: Two people and nothing else, for write cases that need a target.
+    nodes:
+      - {key: w1, labels: [Person], props: {name: Ada, age: 36}}
+      - {key: w2, labels: [Person], props: {name: Linus, age: 54}}

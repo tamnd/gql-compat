@@ -1,0 +1,317 @@
+# GQLSTATUS conditions from conditions.xml.
+#
+# A condition case asserts two things at once: that the engine refuses the
+# statement, and that it says why in the five characters ISO assigns. An
+# engine that refuses without a GQLSTATUS still passes, on weaker evidence
+# that the runner records as `message` rather than `gqlstatus`, because a
+# report that scored the two the same would be hiding the difference it exists
+# to show.
+#
+# Several conditions can only be reached through optional syntax — there is no
+# mandatory way to write a negative LIMIT, and no mandatory logarithm to hand
+# a negative argument to. Those cases name the feature in `requires`, so an
+# engine that documents it as absent is skipped instead of being failed for a
+# syntax error at the point where the corpus was expecting a status code.
+#
+# Nothing here asserts an error message. Messages are natural language and
+# ISO says so; a corpus that matched on them would be testing a translation.
+
+defaults:
+  kind: condition
+  tags: [error]
+
+cases:
+  - id: condition/22012/division-by-zero
+    name: Dividing by zero raises data exception, division by zero
+    conditions: ["22012"]
+    subclauses: ["20.21"]
+    productions: [numeric value expression, term]
+    fixture: unit
+    query: |
+      RETURN 1 / 0 AS v
+    expect:
+      kind: error
+      gqlstatus: "22012"
+
+  - id: condition/22012/modulus-by-zero
+    name: A modulus with a zero divisor is the same condition as a division
+    conditions: ["22012"]
+    subclauses: ["20.22"]
+    productions: [modulus expression]
+    fixture: unit
+    requires: [GF01]
+    query: |
+      RETURN MOD(1, 0) AS v
+    expect:
+      kind: error
+      gqlstatus: "22012"
+
+  - id: condition/42001/invalid-syntax
+    name: A statement that is not in the grammar raises invalid syntax
+    conditions: ["42001"]
+    subclauses: ["14.11"]
+    productions: [return statement]
+    fixture: unit
+    # The RETURN has no return item list, so no reading of the grammar
+    # accepts it. A case whose text is merely unusual would be testing the
+    # engine's parser recovery instead of the condition.
+    query: |
+      MATCH (u:Unit) RETURN
+    expect:
+      kind: error
+      gqlstatus: "42001"
+
+  - id: condition/42001/unbalanced-parenthesis
+    name: An unterminated node pattern raises invalid syntax
+    conditions: ["42001"]
+    subclauses: ["16.4"]
+    productions: [node pattern]
+    fixture: unit
+    query: |
+      MATCH (u:Unit
+      RETURN 1 AS v
+    expect:
+      kind: error
+      gqlstatus: "42001"
+
+  - id: condition/42002/unbound-variable
+    name: Projecting a variable nothing bound raises invalid reference
+    conditions: ["42002"]
+    subclauses: ["20.5"]
+    productions: [binding variable reference]
+    fixture: unit
+    query: |
+      MATCH (u:Unit)
+      RETURN nothing AS v
+    expect:
+      kind: error
+      gqlstatus: "42002"
+
+  - id: condition/42002/unbound-variable-in-predicate
+    name: A where clause naming an unbound variable is an invalid reference
+    conditions: ["42002"]
+    subclauses: ["16.13", "20.5"]
+    productions: [binding variable reference, where clause]
+    fixture: social
+    query: |
+      MATCH (p:Person)
+      WHERE q.age > 30
+      RETURN p.name AS name
+    expect:
+      kind: error
+      gqlstatus: "42002"
+
+  - id: condition/42002/redeclared-variable
+    name: Binding one variable to two different element types is an invalid reference
+    conditions: ["42002"]
+    subclauses: ["16.4", "16.7"]
+    productions: [element variable declaration]
+    fixture: social
+    # `k` is declared as an edge and then as a node in the same graph pattern.
+    # ISO forbids the redeclaration outright rather than letting it bind
+    # whichever came last.
+    query: |
+      MATCH (p:Person)-[k:KNOWS]->(q:Person), (k:Person)
+      RETURN p.name AS name
+    expect:
+      kind: error
+      gqlstatus: "42002"
+
+  - id: condition/22g03/non-boolean-search-condition
+    name: A search condition that is not a boolean raises invalid value type
+    conditions: ["22G03"]
+    subclauses: ["19.1", "16.13"]
+    productions: [search condition, where clause]
+    fixture: social
+    # An engine that treats a non-zero number as true will return five rows
+    # here. That is a real difference from the standard and the report should
+    # show it, so the case asserts the condition rather than accepting either.
+    query: |
+      MATCH (p:Person)
+      WHERE p.age
+      RETURN p.name AS name
+    expect:
+      kind: error
+      gqlstatus: "22G03"
+
+  - id: condition/22g02/negative-limit
+    name: A negative LIMIT raises negative limit value
+    conditions: ["22G02"]
+    subclauses: ["14.9"]
+    productions: [limit clause, non-negative integer specification]
+    fixture: social
+    requires: [GQ13]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      LIMIT -1
+    expect:
+      kind: error
+      gqlstatus: "22G02"
+
+  - id: condition/22g02/negative-offset
+    name: A negative OFFSET is the same condition as a negative limit
+    conditions: ["22G02"]
+    subclauses: ["14.9"]
+    productions: [offset clause]
+    fixture: social
+    requires: [GQ12]
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      OFFSET -1
+    expect:
+      kind: error
+      gqlstatus: "22G02"
+
+  - id: condition/2201e/logarithm-of-zero
+    name: A natural logarithm of zero raises invalid argument for natural logarithm
+    conditions: ["2201E"]
+    subclauses: ["20.22"]
+    productions: [natural logarithm]
+    fixture: unit
+    requires: [GF03]
+    query: |
+      RETURN LN(0) AS v
+    expect:
+      kind: error
+      gqlstatus: "2201E"
+
+  - id: condition/2201f/power-with-invalid-arguments
+    name: Zero raised to a negative power raises invalid argument for power function
+    conditions: ["2201F"]
+    subclauses: ["20.22"]
+    productions: [power function]
+    fixture: unit
+    requires: [GF01]
+    query: |
+      RETURN POWER(0, -1) AS v
+    expect:
+      kind: error
+      gqlstatus: "2201F"
+
+  - id: condition/22018/invalid-character-value-for-cast
+    name: Casting a string that is not a number raises invalid character value for cast
+    conditions: ["22018"]
+    subclauses: ["20.8"]
+    productions: [cast specification, cast operand]
+    fixture: unit
+    requires: [GA05]
+    query: |
+      RETURN CAST('not a number' AS INT) AS v
+    expect:
+      kind: error
+      gqlstatus: "22018"
+
+  - id: condition/22007/invalid-date-format
+    name: A date literal that is not a date raises invalid date, time, or datetime format
+    conditions: ["22007"]
+    subclauses: ["21.2"]
+    productions: [date literal, date string]
+    fixture: unit
+    requires: [GV39]
+    tags: [error, temporal]
+    query: |
+      RETURN DATE '2024-13-45' AS v
+    expect:
+      kind: error
+      gqlstatus: "22007"
+
+  - id: condition/22g0h/invalid-duration-format
+    name: A duration literal that is not a duration raises invalid duration format
+    conditions: ["22G0H"]
+    subclauses: ["21.2"]
+    productions: [duration literal, duration string]
+    fixture: unit
+    requires: [GV41]
+    tags: [error, temporal]
+    query: |
+      RETURN DURATION 'not a duration' AS v
+    expect:
+      kind: error
+      gqlstatus: "22G0H"
+
+  - id: condition/22g0f/zero-paths-requested
+    name: Asking for zero shortest paths raises invalid number of paths or groups
+    conditions: ["22G0F"]
+    subclauses: ["16.6"]
+    productions: [counted shortest path search, number of paths]
+    fixture: chain
+    requires: [G019]
+    query: |
+      MATCH SHORTEST 0 (a:Step)-[:LINK]->{1,5}(b:Step)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: error
+      gqlstatus: "22G0F"
+
+  - id: condition/g1001/delete-node-with-edges
+    name: Deleting a node that still has edges raises edges still exist
+    conditions: ["G1001"]
+    subclauses: ["13.5"]
+    productions: [delete statement, delete item]
+    fixture: social
+    requires: [GD01]
+    tags: [error, write]
+    mutating: true
+    # NODETACH is the explicit spelling of the default, and naming it makes the
+    # case independent of an engine that has quietly made DETACH the default.
+    query: |
+      MATCH (p:Person {name: 'Alice'})
+      NODETACH DELETE p
+    expect:
+      kind: error
+      gqlstatus: "G1001"
+
+  - id: condition/22g0m/multiple-assignments-to-one-property
+    name: Assigning the same property twice in one statement is a multiple assignment
+    conditions: ["22G0M"]
+    subclauses: ["13.3"]
+    productions: [set item list, set property item]
+    fixture: pair
+    requires: [GD01]
+    tags: [error, write]
+    mutating: true
+    query: |
+      MATCH (p:Person {name: 'Ada'})
+      SET p.age = 1, p.age = 2
+      RETURN p.age AS age
+    expect:
+      kind: error
+      gqlstatus: "22G0M"
+
+  - id: condition/25g03/write-in-a-read-only-transaction
+    name: Writing inside a read-only transaction raises read-only GQL-transaction
+    conditions: ["25G03"]
+    subclauses: ["8.2"]
+    productions: [transaction access mode]
+    fixture: blank
+    requires: [GT01, GT02, GD01]
+    tags: [error, write, transaction]
+    mutating: true
+    setup:
+      - "START TRANSACTION READ ONLY"
+    query: |
+      INSERT (:Person {name: 'Zoe'})
+    expect:
+      kind: error
+      gqlstatus: "25G03"
+
+  - id: condition/01g11/null-eliminated-in-set-function
+    name: An aggregate that discarded a null completes with a warning
+    conditions: ["01G11"]
+    subclauses: ["20.9"]
+    productions: [general set function, general set function type]
+    fixture: nullable
+    tags: ["null", aggregate]
+    # This is a completion condition, not an exception: the statement succeeds
+    # and the answer counts only the non-null value. An engine that reports the
+    # warning and one that stays silent both produce this table, so the case
+    # asserts the answer and leaves the warning to the diagnostic record.
+    query: |
+      MATCH (m:Maybe)
+      RETURN COUNT(m.note) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]

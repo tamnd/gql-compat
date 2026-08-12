@@ -1,0 +1,388 @@
+# Optional value features: literal notations (GL), value types (GV),
+# functions (GF), and the GA and GB features about how a value is written and
+# compared.
+#
+# Numeric expectations here are all exactly representable in binary floating
+# point. The comparison the harness makes has no tolerance, because a
+# tolerance is a policy about precision and ISO specifies none; a case that
+# needed one would be asserting something the standard does not say.
+
+defaults:
+  kind: optional
+  fixture: unit
+  tags: [read, expression]
+
+cases:
+  - id: optional/gb02/double-minus-comment
+    name: A line starting with two minus signs is a comment
+    features: [GB02]
+    subclauses: ["21.3"]
+    productions: [comment, simple comment, simple comment introducer]
+    tags: [lexical]
+    query: |
+      -- this line is a comment
+      RETURN 1 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: optional/gb03/double-solidus-comment
+    name: A line starting with two solidi is a comment
+    features: [GB03]
+    subclauses: ["21.3"]
+    productions: [simple comment, simple comment introducer]
+    tags: [lexical]
+    query: |
+      // this line is a comment
+      RETURN 1 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: optional/gl01/hexadecimal-literal
+    name: A 0x literal denotes an integer in hexadecimal
+    features: [GL01]
+    subclauses: ["21.2"]
+    productions: [unsigned hexadecimal integer, unsigned integer]
+    tags: [lexical]
+    query: |
+      RETURN 0xFF AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[255]]
+
+  - id: optional/gl02/octal-literal
+    name: A 0o literal denotes an integer in octal
+    features: [GL02]
+    subclauses: ["21.2"]
+    productions: [unsigned octal integer]
+    tags: [lexical]
+    query: |
+      RETURN 0o17 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[15]]
+
+  - id: optional/gl03/binary-literal
+    name: A 0b literal denotes an integer in binary
+    features: [GL03]
+    subclauses: ["21.2"]
+    productions: [unsigned binary integer]
+    tags: [lexical]
+    query: |
+      RETURN 0b1010 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[10]]
+
+  - id: optional/gl04/exact-number-without-suffix
+    name: A number written with a decimal point and no suffix is an exact number
+    features: [GL04]
+    subclauses: ["21.2"]
+    productions: [exact numeric literal, unsigned decimal in common notation]
+    tags: [lexical]
+    query: |
+      RETURN 2.5 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[2.5]]
+
+  - id: optional/gl05/exact-number-with-suffix
+    name: The M suffix marks a literal as an exact number
+    features: [GL05]
+    subclauses: ["21.2"]
+    productions: [exact numeric literal, exact number suffix]
+    tags: [lexical]
+    query: |
+      RETURN 1.25M AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1.25]]
+
+  - id: optional/gl06/exact-number-scientific-with-suffix
+    name: Scientific notation with the M suffix is an exact number
+    features: [GL06]
+    subclauses: ["21.2"]
+    productions: [unsigned decimal in scientific notation, exact number suffix]
+    tags: [lexical]
+    query: |
+      RETURN 1.5E2M AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[150]]
+
+  - id: optional/gl07/approximate-number-with-suffix
+    name: The F suffix marks a literal as an approximate number
+    features: [GL07]
+    subclauses: ["21.2"]
+    productions: [approximate numeric literal, approximate number suffix]
+    tags: [lexical]
+    query: |
+      RETURN 2.5F AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[2.5]]
+
+  - id: optional/gl08/approximate-number-scientific-with-suffix
+    name: Scientific notation with the F suffix is an approximate number
+    features: [GL08]
+    subclauses: ["21.2"]
+    productions: [approximate numeric literal]
+    tags: [lexical]
+    query: |
+      RETURN 1.5E2F AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[150]]
+
+  - id: optional/gl11/opt-out-character-escaping
+    name: An at sign before a quoted string turns off escape processing
+    features: [GL11]
+    subclauses: ["21.2", "21.3"]
+    productions: [character string literal, no escape]
+    tags: [lexical]
+    query: |
+      RETURN @'a\nb' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["a\\nb"]]
+
+  - id: optional/ga05/cast-string-to-integer
+    name: CAST converts a character string to an integer
+    features: [GA05]
+    subclauses: ["20.8"]
+    productions: [cast specification, cast operand, cast target]
+    query: |
+      RETURN CAST('42' AS INT) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[42]]
+
+  - id: optional/ga05/cast-integer-to-string
+    name: CAST converts an integer to a character string
+    features: [GA05]
+    subclauses: ["20.8"]
+    productions: [cast specification, value type]
+    query: |
+      RETURN CAST(42 AS STRING) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["42"]]
+
+  - id: optional/ga06/value-type-predicate
+    name: A value type predicate tests a value against a type
+    features: [GA06]
+    subclauses: ["19.6"]
+    productions: [value type predicate, value type predicate part 2, typed]
+    query: |
+      RETURN (1 IS TYPED INT) AS a, ('x' IS NOT TYPED INT) AS b
+    expect:
+      kind: rows
+      columns: [a, b]
+      rows: [[true, true]]
+
+  - id: optional/gf01/floor-ceiling-absolute
+    name: FLOOR, CEIL and ABS operate on an exact number
+    features: [GF01]
+    subclauses: ["20.22"]
+    productions: [floor function, ceiling function, absolute value expression]
+    fixture: numbers
+    # ISO names GF01 "Enhanced numeric functions" and does not say which of
+    # subclause 20.22's functions are the enhanced ones. Trigonometry,
+    # logarithms, CARDINALITY and SIZE are carved out as GF02, GF03, GF12 and
+    # GF13, and CHAR_LENGTH and PATH_LENGTH read as basic, which leaves
+    # FLOOR, CEIL, ABS, MOD, POWER, SQRT and EXP for GF01. That is an
+    # inference, not a quotation, and an engine that disagrees will show up as
+    # a GF01 skip rather than as a failure.
+    query: |
+      MATCH (v:Value)
+      WHERE v.n = 3
+      RETURN FLOOR(v.x) AS down, CEIL(v.x) AS up, ABS(-v.x) AS size
+    expect:
+      kind: rows
+      columns: [down, up, size]
+      rows: [[2, 3, 2.5]]
+
+  - id: optional/gf01/power-square-root-modulus
+    name: POWER, SQRT and MOD are numeric value functions
+    features: [GF01]
+    subclauses: ["20.22"]
+    productions: [power function, square root, modulus expression]
+    query: |
+      RETURN POWER(2, 3) AS p, SQRT(16) AS r, MOD(7, 3) AS m
+    expect:
+      kind: rows
+      columns: [p, r, m]
+      rows: [[8, 4, 1]]
+
+  - id: optional/gf02/trigonometric-functions
+    name: SIN and COS are trigonometric functions of a numeric expression
+    features: [GF02]
+    subclauses: ["20.22"]
+    productions: [trigonometric function, trigonometric function name]
+    # Zero is the only argument whose sine and cosine every implementation
+    # must agree on to the last bit, and the comparison here has no tolerance.
+    query: |
+      RETURN SIN(0) AS s, COS(0) AS c
+    expect:
+      kind: rows
+      columns: [s, c]
+      rows: [[0, 1]]
+
+  - id: optional/gf03/logarithmic-functions
+    name: LN, LOG10 and LOG compute logarithms
+    features: [GF03]
+    subclauses: ["20.22"]
+    productions: [natural logarithm, common logarithm, general logarithm function]
+    query: |
+      RETURN LN(1) AS n, LOG10(100) AS c, LOG(2, 8) AS g
+    expect:
+      kind: rows
+      columns: [n, c, g]
+      rows: [[0, 2, 3]]
+
+  - id: optional/gf06/explicit-trim
+    name: The explicit TRIM form names what to trim and from which end
+    features: [GF06]
+    subclauses: ["20.24"]
+    productions: [trim function, trim operands, trim specification]
+    query: |
+      RETURN TRIM(LEADING 'x' FROM 'xxay') AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[ay]]
+
+  - id: optional/gf05/multi-character-trim
+    name: BTRIM, LTRIM and RTRIM trim a set of characters
+    features: [GF05]
+    subclauses: ["20.24"]
+    productions: [multi-character trim function]
+    query: |
+      RETURN LTRIM('xxay', 'x') AS l, RTRIM('xxay', 'y') AS r
+    expect:
+      kind: rows
+      columns: [l, r]
+      rows: [[ay, xxa]]
+
+  - id: optional/gf10/collect-list
+    name: COLLECT_LIST aggregates a column into one list value
+    features: [GF10, GF12]
+    subclauses: ["20.9"]
+    productions: [general set function, cardinality expression]
+    fixture: numbers
+    tags: [aggregate]
+    # The order of a collected list is not specified, so the case asserts its
+    # length. Asserting the elements would be asserting an accident.
+    query: |
+      MATCH (v:Value)
+      RETURN CARDINALITY(COLLECT_LIST(v.n)) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[4]]
+
+  - id: optional/gf11/percentile-disc
+    name: PERCENTILE_DISC is a binary set function over a column and a fraction
+    features: [GF11]
+    subclauses: ["20.9"]
+    productions: [binary set function, binary set function type]
+    fixture: numbers
+    tags: [aggregate]
+    query: |
+      MATCH (v:Value)
+      RETURN PERCENTILE_DISC(v.n, 1) AS p
+    expect:
+      kind: rows
+      columns: [p]
+      rows: [[4]]
+
+  - id: optional/gv50/list-value-constructor
+    name: A list value constructor builds a list from an enumeration
+    features: [GV50]
+    subclauses: ["20.17"]
+    productions: [list value constructor, list value constructor by enumeration, list element list]
+    tags: [list]
+    query: |
+      RETURN [1, 2, 3] AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[[1, 2, 3]]]
+
+  - id: optional/gf12/cardinality-of-list-property
+    name: CARDINALITY counts the elements of a stored list
+    features: [GF12, GV50]
+    subclauses: ["20.22"]
+    productions: [cardinality expression, cardinality expression argument]
+    fixture: listed
+    tags: [list]
+    query: |
+      MATCH (b:Bag)
+      RETURN CARDINALITY(b.xs) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[3]]
+
+  - id: optional/gf13/size-of-list-property
+    name: SIZE is the list-only spelling of the same count
+    features: [GF13, GV50]
+    subclauses: ["20.22"]
+    productions: [cardinality expression, list value expression]
+    fixture: listed
+    tags: [list]
+    query: |
+      MATCH (b:Bag)
+      RETURN SIZE(b.xs) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[3]]
+
+  - id: optional/gv39/date-literal-comparison
+    name: A date literal compares equal to a stored date
+    features: [GV39]
+    subclauses: ["21.2", "4.16.6.2"]
+    productions: [date literal, temporal literal]
+    fixture: dated
+    tags: [temporal]
+    query: |
+      MATCH (e:Event)
+      WHERE e.on = DATE '2024-01-15'
+      RETURN e.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[launch]]
+
+  - id: optional/gv41/duration-literal-comparison
+    name: A duration literal compares equal to a stored duration
+    features: [GV41]
+    subclauses: ["21.2", "4.16.6.3"]
+    productions: [duration literal]
+    fixture: dated
+    tags: [temporal]
+    query: |
+      MATCH (e:Event)
+      WHERE e.takes = DURATION 'P2D'
+      RETURN e.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[launch]]

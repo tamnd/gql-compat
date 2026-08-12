@@ -1,0 +1,138 @@
+name: Engines
+
+# The conformance run itself, against real databases.
+#
+# It is a separate workflow from CI because it answers a different question. CI
+# asks whether this tool works; this asks what an engine scores, and the answer
+# is allowed to be bad. Nothing here fails the build on a conformance failure —
+# an engine declining an optional feature is lawful, and even a mandatory
+# failure is a finding to publish rather than a broken pipeline. The reports are
+# the output.
+
+on:
+  schedule:
+    # Weekly. Engine versions move, and a score is only about the version that
+    # produced it.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      repeats:
+        description: "Timed executions per case"
+        default: "7"
+      neo4j_version:
+        description: "Neo4j image tag"
+        default: "5-community"
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.5"
+
+jobs:
+  neo4j:
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        image: neo4j:${{ github.event.inputs.neo4j_version || '5-community' }}
+        env:
+          NEO4J_AUTH: neo4j/gqlcompatci
+          NEO4J_server_memory_pagecache_size: 512M
+        ports:
+          - 7687:7687
+          - 7474:7474
+        options: >-
+          --health-cmd "wget -q -O /dev/null http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # Two runs, never added together. Conformance mode puts ISO's own text to
+      # the engine and is the only run whose result may be called conformance.
+      # Compat mode puts the engine's documented spelling of the same meaning
+      # and answers whether the engine can express the thing at all. A tool
+      # that reported one number for both would be hiding which question it
+      # answered.
+      - name: Conformance mode, ISO text
+        run: |
+          go run ./cmd/gql-compat run -adapter neo4j \
+            -uri bolt://localhost:7687 -user neo4j \
+            -mode conformance -repeats ${{ github.event.inputs.repeats || 7 }} \
+            -fail-on none -quiet -out ./reports/conformance
+        env:
+          GQL_COMPAT_PASSWORD: gqlcompatci
+
+      - name: Compatibility mode, the engine's own dialect
+        run: |
+          go run ./cmd/gql-compat run -adapter neo4j \
+            -uri bolt://localhost:7687 -user neo4j \
+            -mode compat -repeats ${{ github.event.inputs.repeats || 7 }} \
+            -fail-on none -quiet -out ./reports/compat
+        env:
+          GQL_COMPAT_PASSWORD: gqlcompatci
+
+      - name: Summary
+        run: |
+          {
+            echo "## Neo4j, conformance mode"
+            echo
+            sed -n '1,40p' reports/conformance/neo4j.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: neo4j-reports
+          path: reports/
+
+  zu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # zu lives in its own repository and ships no release binary yet, so the
+      # engine under test is built from source here. The checkout is pinned to
+      # a branch rather than a tag for the same reason; when zu tags a release
+      # this becomes a download.
+      - name: Check out zu
+        uses: actions/checkout@v7
+        continue-on-error: true
+        id: zu_src
+        with:
+          repository: tamnd/zu
+          path: .engines/zu
+
+      - name: Build zu
+        if: steps.zu_src.outcome == 'success'
+        working-directory: .engines/zu
+        run: cargo build --release -p zu-cli
+
+      - name: Run the corpus against zu
+        if: steps.zu_src.outcome == 'success'
+        run: |
+          go run ./cmd/gql-compat run -adapter zu \
+            -binary .engines/zu/target/release/zu \
+            -repeats ${{ github.event.inputs.repeats || 7 }} \
+            -fail-on none -quiet -out ./reports
+
+      - name: Summary
+        if: steps.zu_src.outcome == 'success'
+        run: |
+          {
+            echo "## zu, conformance mode"
+            echo
+            sed -n '1,40p' reports/zu.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v5
+        if: steps.zu_src.outcome == 'success'
+        with:
+          name: zu-reports
+          path: reports/
