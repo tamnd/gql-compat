@@ -157,6 +157,12 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 	}
 
 	caps := cfg.Driver.Capabilities()
+	// Refuse before the first case rather than publish a report in which
+	// silence and refusal look the same. See Capabilities.Undeclared.
+	if missing := caps.Undeclared(); len(missing) > 0 {
+		return nil, fmt.Errorf("adapter %s declares no answer for %v; a capability left out of the map is reported as unsupported and would be read as a finding about the engine",
+			cfg.Driver.Name(), missing)
+	}
 	rep.Engine = EngineInfo{
 		Adapter:          cfg.Driver.Name(),
 		Capabilities:     caps,
@@ -372,6 +378,17 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 func (e *executor) repeats(c *corpus.Case) int {
 	if c.Repeat > 0 {
 		return c.Repeat
+	}
+	// A mutating statement is not repeatable by construction: the second run
+	// sees the graph the first one left behind. Running one seven times and
+	// comparing the last answer measures the seventh application, and for
+	// `MATCH (p:Person {name: 'Ada'}) SET p = {name: 'Ada Lovelace'} RETURN …`
+	// the seventh application is a MATCH that finds nothing. That failure was
+	// published against Neo4j on 2026-08-12 and it was this harness's, not the
+	// engine's. Mutating cases run once unless the case asks for more, which is
+	// how the performance write cases opt in to a distribution.
+	if c.Mutating {
+		return 1
 	}
 	return e.cfg.Repeats
 }
