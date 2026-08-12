@@ -14,6 +14,7 @@ package fixture
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -47,6 +48,16 @@ const (
 	// CapNullProperties is the ability to store an explicit null, as opposed
 	// to an absent property.
 	CapNullProperties Capability = "null-properties"
+	// CapFloatValues is the ability to store an approximate numeric property.
+	// It is separate from CapNodeProperties because a column-oriented store
+	// may hold exact numbers and text and refuse doubles, and an engine that
+	// silently rounded one would answer arithmetic cases wrongly rather than
+	// decline them.
+	CapFloatValues Capability = "float-values"
+	// CapBooleanValues is the ability to store a boolean property. Engines
+	// that map properties onto a two-type column model — integer and string —
+	// have nowhere to put one that does not also change its type.
+	CapBooleanValues Capability = "boolean-values"
 	// CapUndirectedEdges is the ability to store an edge with no direction.
 	// GQL has them; Neo4j does not.
 	CapUndirectedEdges Capability = "undirected-edges"
@@ -64,6 +75,7 @@ var AllCapabilities = []Capability{
 	CapLabels, CapMultiLabel, CapNodeProperties, CapEdgeProperties,
 	CapEdgeTypes, CapMultipleEdgeTypes, CapMultipleNodeLabels,
 	CapTemporalValues, CapListValues, CapNullProperties,
+	CapFloatValues, CapBooleanValues,
 	CapUndirectedEdges, CapSelfLoops, CapParallelEdges,
 }
 
@@ -196,6 +208,15 @@ func markValueCaps(props map[string]any, req map[Capability]bool) {
 			req[CapNullProperties] = true
 		case []any:
 			req[CapListValues] = true
+		case bool:
+			req[CapBooleanValues] = true
+		case float32, float64:
+			// YAML gives an unquoted 0.5 a float and an unquoted 2 an int, so
+			// the distinction the engine cares about is already made by the
+			// time the fixture is parsed. A whole-numbered float stays a float:
+			// the fixture author wrote a decimal point, and an engine that can
+			// only hold exact numbers cannot honour that either way.
+			req[CapFloatValues] = true
 		case map[string]any:
 			// A typed literal, e.g. {date: "2024-01-01"}.
 			for k := range vv {
@@ -220,7 +241,7 @@ func (f *Fixture) RequiredList() []Capability {
 	for c := range req {
 		out = append(out, c)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	slices.Sort(out)
 	return out
 }
 

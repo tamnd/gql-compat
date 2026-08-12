@@ -9,11 +9,23 @@
 // describe the operating system's fork path rather than the database. The
 // shell pays those once, which is also how a real embedding uses it.
 //
-// The adapter's honest limitation is ingest. As of this writing zu's only
-// bulk loader takes a two-column edge list, so the engine can hold topology
-// and integer node keys and nothing else. That is declared in Capabilities
-// rather than worked around, and every case needing labels or properties is
-// skipped with the missing capability named. The skip count is the finding.
+// Ingest is the adapter's awkward part, and worth explaining. zu's bulk
+// loader, `zu copy`, takes a two-column edge list and nothing else, so a
+// fixture loaded that way keeps its topology and loses every label and every
+// property — which is to say the whole corpus becomes unrunnable. zu's other
+// documented ingest route is `zu convert file.db file.zu1`, reading a SQLite
+// database in zu's own schema, and that route carries labels, node properties
+// and typed edges. The adapter writes that SQLite file directly (see
+// sqlite.go) rather than reducing every fixture to an edge list.
+//
+// What the route cannot carry is declared in Capabilities and worked around
+// nowhere: one label per node, no edge properties, no doubles, booleans,
+// nulls, lists or temporals, and no edge between two different labels, since
+// zu binds a rel table to a single node table. Each of those is a limit of
+// zu's loader rather than of its query engine, and each shows up in the report
+// as a named skip rather than as a failure. The skip list is a finding in its
+// own right: it is the distance between what zu can evaluate and what zu can
+// be given.
 package zu
 
 import (
@@ -72,19 +84,44 @@ func (d *Driver) Version(ctx context.Context) (string, error) {
 
 // Capabilities declares what zu's storage can hold today.
 //
-// Everything absent here is absent because the bulk loader cannot express it,
-// not because the query engine could not evaluate it. When zu grows a loader
-// that takes labels and properties, these flags flip and a large block of
+// Everything absent here is absent because the loader cannot express it, not
+// because the query engine could not evaluate it — zu's own openCypher subset
+// passes scenarios over data this adapter has no way to hand it. When zu grows
+// an ingest path that takes the rest, these flags flip and a block of
 // currently skipped cases starts producing verdicts without a line of this
 // adapter changing.
 func (d *Driver) Capabilities() adapter.Capabilities {
 	return adapter.Capabilities{
 		Data: map[fixture.Capability]bool{
-			// An edge list gives every node one implicit label and every edge
-			// one implicit type, and preserves self-loops and parallel pairs
-			// as written.
+			// A node table is a label and a rel table is an edge type, so both
+			// arrive, along with several rel tables in one graph.
+			fixture.CapLabels:            true,
+			fixture.CapNodeProperties:    true,
+			fixture.CapEdgeTypes:         true,
+			fixture.CapMultipleEdgeTypes: true,
+			// The converter reads a rel table's endpoints straight through, so
+			// an edge to itself and a second edge over the same ordered pair
+			// both survive.
 			fixture.CapSelfLoops:     true,
 			fixture.CapParallelEdges: true,
+
+			// A node lives in exactly one node table, and a rel table binds to
+			// one node table at both ends, so a second label — on a node or in
+			// a graph — has nowhere to go.
+			fixture.CapMultiLabel:         false,
+			fixture.CapMultipleNodeLabels: false,
+			// The converter carries a rel's endpoints and drops its columns.
+			fixture.CapEdgeProperties: false,
+			// zu1 property columns are dense and uniformly integer or string:
+			// the loader refuses a null, a double, a boolean and anything
+			// structured, by name, at convert time.
+			fixture.CapNullProperties: false,
+			fixture.CapFloatValues:    false,
+			fixture.CapBooleanValues:  false,
+			fixture.CapListValues:     false,
+			fixture.CapTemporalValues: false,
+			// Every rel table is directed.
+			fixture.CapUndirectedEdges: false,
 		},
 		GQLStatus:          false,
 		Parameters:         true,
@@ -93,7 +130,10 @@ func (d *Driver) Capabilities() adapter.Capabilities {
 		Isolated:           true,
 		Notes: []string{
 			"driven through `zu shell --format jsonl`, one long-lived process per session",
-			"bulk load is an edge list only, so labels, properties, and typed edges are unavailable",
+			"loaded through `zu convert`, which reads a SQLite database in zu's schema; " +
+				"`zu copy` was not used because an edge list carries no labels or properties",
+			"the shell evaluates a read-only subset — MATCH, WHERE, CALL, UNWIND, WITH, RETURN — " +
+				"so every case that writes is answered with a parse error rather than a skip",
 			"errors carry no GQLSTATUS; condition cases fall back to message matching",
 		},
 	}
@@ -120,12 +160,25 @@ type session struct {
 	in   io.WriteCloser
 	out  *bufio.Reader
 	errs *bytes.Buffer
+	// load is the conversion process while one is running. The shell is down
+	// for the whole of a load, so without this the sampler would find no
+	// process to watch and the ingest row — the one measurement the load
+	// exists to produce — would come back empty.
+	load *exec.Cmd
 
 	closed bool
 }
 
-// Load writes the fixture as an edge list and asks zu to copy it into a fresh
-// file, then restarts the shell so the new file is the one being served.
+// Load writes the fixture into a database laid out the way zu's own SQLite
+// engine lays one out, asks zu to convert it into a fresh zu1 file, then
+// restarts the shell so the new file is the one being served.
+//
+// The conversion is the only route into zu that carries labels and properties:
+// `zu copy` takes a two-column edge list, which would reduce every fixture to
+// its topology. Both the wall time reported here and the disk the report
+// measures cover the conversion and not the SQLite write, because the SQLite
+// file is scaffolding this harness put there and not something zu would pay
+// for in use.
 func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadStats, error) {
 	if err := s.stopShell(); err != nil {
 		return adapter.LoadStats{}, err
@@ -134,93 +187,62 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 		return adapter.LoadStats{}, err
 	}
 
-	// zu identifies nodes by unsigned integer. Fixture keys are strings, and
-	// the corpus writes them as small decimal numbers precisely so that the
-	// identity a case asserts on survives into an engine with no property
-	// store. A key that is not a number is a fixture this engine cannot hold,
-	// and saying so is better than inventing a mapping the expectations would
-	// not know about.
-	edgesPath := filepath.Join(s.workdir, "edges.txt")
-	f, err := os.Create(edgesPath)
-	if err != nil {
+	// The staging file goes beside the graph rather than in it, and is removed
+	// before the measurement that follows: leaving it in the data directory
+	// would put SQLite's bytes into zu's disk figure.
+	stage := filepath.Join(s.workdir, "stage.db")
+	if err := os.RemoveAll(stage); err != nil {
 		return adapter.LoadStats{}, err
 	}
-	w := bufio.NewWriterSize(f, 1<<20)
-	for i, e := range fx.Edges {
-		from, err1 := strconv.ParseUint(e.From, 10, 64)
-		to, err2 := strconv.ParseUint(e.To, 10, 64)
-		if err1 != nil || err2 != nil {
-			_ = f.Close()
-			return adapter.LoadStats{}, fmt.Errorf(
-				"zu: edge %d names non-numeric keys (%q -> %q); this engine has no property store to hold string keys",
-				i, e.From, e.To)
-		}
-		fmt.Fprintf(w, "%d %d\n", from, to)
-	}
-	if err := w.Flush(); err != nil {
-		_ = f.Close()
-		return adapter.LoadStats{}, err
-	}
-	if err := f.Close(); err != nil {
-		return adapter.LoadStats{}, err
+	if err := writeFixtureDB(ctx, stage, fx); err != nil {
+		return adapter.LoadStats{}, fmt.Errorf("zu: staging fixture %s: %w", fx.Name, err)
 	}
 
-	// zu's loader derives the node count from the highest endpoint it sees,
-	// so a node whose key exceeds every endpoint simply does not arrive. That
-	// would make MATCH (n) RETURN count(n) disagree with the fixture and the
-	// case would be scored a conformance failure for a loader limitation.
-	// Refusing the fixture outright puts the finding where it belongs.
-	if n := isolatedTail(fx); n >= 0 {
-		return adapter.LoadStats{}, fmt.Errorf(
-			"zu: fixture %s has node %q above every edge endpoint; an edge-list load cannot carry it",
-			fx.Name, fx.Nodes[n].Key)
-	}
+	cmd := exec.CommandContext(ctx, s.driver.binary, "convert", stage, s.path)
+	var buf bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &buf, &buf
 
 	started := time.Now()
-	cmd := exec.CommandContext(ctx, s.driver.binary, "copy", edgesPath, s.path)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return adapter.LoadStats{}, fmt.Errorf("zu copy: %w: %s", err, strings.TrimSpace(string(out)))
+	err := cmd.Start()
+	if err == nil {
+		// Published while it runs so the sampler, which asks the session for a
+		// pid on every tick, measures the conversion rather than the gap where
+		// the shell used to be.
+		s.mu.Lock()
+		s.load = cmd
+		s.mu.Unlock()
+
+		err = cmd.Wait()
+
+		s.mu.Lock()
+		s.load = nil
+		s.mu.Unlock()
 	}
+	wall := time.Since(started)
+	out := buf.Bytes()
+	for _, junk := range []string{stage, stage + "-wal", stage + "-shm"} {
+		_ = os.RemoveAll(junk)
+	}
+	if err != nil {
+		return adapter.LoadStats{}, fmt.Errorf("zu convert: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+
 	stats := adapter.LoadStats{
 		Nodes:      len(fx.Nodes),
 		Edges:      len(fx.Edges),
-		EngineWall: time.Since(started),
+		EngineWall: wall,
 		Detail:     strings.TrimSpace(string(out)),
 	}
-	if err := s.startShell(ctx); err != nil {
+	if err := s.startShell(); err != nil {
 		return stats, err
 	}
 	return stats, nil
 }
 
-// isolatedTail returns the index of the first node whose numeric key is above
-// every edge endpoint, or -1 when every node will survive an edge-list load.
-func isolatedTail(fx *fixture.Fixture) int {
-	var highest uint64
-	seen := false
-	for _, e := range fx.Edges {
-		for _, k := range [2]string{e.From, e.To} {
-			if v, err := strconv.ParseUint(k, 10, 64); err == nil {
-				if !seen || v > highest {
-					highest, seen = v, true
-				}
-			}
-		}
-	}
-	for i, n := range fx.Nodes {
-		v, err := strconv.ParseUint(n.Key, 10, 64)
-		if err != nil {
-			continue
-		}
-		if !seen || v > highest {
-			return i
-		}
-	}
-	return -1
-}
-
-func (s *session) startShell(ctx context.Context) error {
+// startShell starts the shell. It takes no context on purpose: the process it
+// starts must outlive the load's deadline, which the caller already applied to
+// the conversion.
+func (s *session) startShell() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.startShellLocked()
@@ -400,14 +422,17 @@ func (s *session) Reset(ctx context.Context) error {
 	return os.RemoveAll(s.path)
 }
 
-// PID is the shell process the sampler watches.
+// PID is whichever process is currently doing the engine's work: the loader
+// during a load, the shell the rest of the time, and nothing in between.
 func (s *session) PID() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cmd == nil || s.cmd.Process == nil {
-		return 0
+	for _, c := range [2]*exec.Cmd{s.load, s.cmd} {
+		if c != nil && c.Process != nil {
+			return c.Process.Pid
+		}
 	}
-	return s.cmd.Process.Pid
+	return 0
 }
 
 // DataDir is the directory holding the graph file.
