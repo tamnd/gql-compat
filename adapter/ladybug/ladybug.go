@@ -33,7 +33,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -43,6 +42,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tamnd/gql-compat/adapter"
@@ -55,8 +55,12 @@ func init() { adapter.Register("ladybug", New) }
 const (
 	// graphName is the ANY graph every session works inside. Ladybug reserves
 	// the name "main" for the schema-typed default graph, so the harness needs
-	// one of its own and drops it on reset.
+	// one of its own.
 	graphName = "gqlcompat"
+	// dbExt is the suffix on the database file. The engine puts each graph in
+	// a sibling file that keeps it, so graph-000.lbug brings along
+	// graph-000.gqlcompat.lbug, and removeStore relies on that shape.
+	dbExt = ".lbug"
 	// keyProp carries the fixture's node key. An ANY graph has no primary key
 	// and no index, so this is how the edge phase and the expectations find a
 	// node again; convertValue strips it back out of every result.
@@ -141,10 +145,14 @@ func (d *Driver) Capabilities() adapter.Capabilities {
 		MultipleStatements: true,
 		Isolated:           true,
 		Notes: []string{
-			"driven through the `lbug` shell in jsonlines mode, one long-lived process per session",
+			"driven through the `lbug` shell in jsonlines mode, one short-lived process per exchange, because the shell block-buffers a pipe and demands a terminal handshake under a pty",
+			"a process launch is about 57ms and is a floor under every latency reported here; see the report's measurement floor",
 			"data is held in a `CREATE GRAPH " + graphName + " ANY` schemaless graph, so nodes keep real label sets and dynamic properties",
 			"the shell has no parameter binding, so parameterised cases are skipped rather than inlined",
 			"errors carry no GQLSTATUS; condition cases fall back to message matching",
+			"the shell's JSON writer cannot print a STRING read out of an ANY graph and dies trying, so those cases are errors and not failures; csv mode prints the same value correctly, which is how the harness knows it is the writer",
+			"DROP GRAPH is refused by the engine's own file removal check, so a reset is a new database file rather than a dropped graph",
+			"a keyed edge ingest is a scan per edge, because an ANY graph has no index the harness can put a key in; the hundred-thousand-node fixture takes minutes",
 		},
 	}
 }
@@ -154,7 +162,7 @@ func (d *Driver) Open(ctx context.Context, workdir string) (adapter.Session, err
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		return nil, err
 	}
-	return &session{driver: d, workdir: workdir, path: filepath.Join(workdir, "graph.lbug")}, nil
+	return &session{driver: d, workdir: workdir, path: dbPath(workdir, 0)}, nil
 }
 
 // Close releases driver-level state, of which there is none.
@@ -166,67 +174,132 @@ type session struct {
 	path    string
 
 	mu     sync.Mutex
-	cmd    *exec.Cmd
-	in     io.WriteCloser
-	out    *bufio.Reader
-	errs   *bytes.Buffer
 	serial int
 	closed bool
+	// gen counts resets. Each one moves the session to a database file that
+	// has never existed, because that is the only reset this engine honours.
+	gen int
+	// created records that the ANY graph exists, so the prelude of every
+	// later exchange can be two statements rather than three.
+	created bool
+	// pid is the shell process currently running, or 0. It is atomic rather
+	// than guarded by mu because the sampler reads it from another goroutine
+	// while Exec holds the lock for the whole call.
+	pid atomic.Int64
 }
 
-// start brings the shell up and puts it inside a fresh ANY graph. The caller
-// holds s.mu.
-func (s *session) startLocked(ctx context.Context) error {
-	if s.cmd != nil {
-		return nil
-	}
-	// The process outlives any single statement's deadline, so it is not
-	// started against the caller's context: a slow query must abort the read,
-	// not kill the process the next case needs.
-	//nolint:noctx // deliberate: see above.
-	cmd := exec.Command(s.driver.binary, s.path,
-		"-m", "jsonlines", "--no_stats", "--no_progress_bar")
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	s.errs = &bytes.Buffer{}
-	cmd.Stderr = s.errs
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("ladybug: %w", err)
-	}
-	s.cmd, s.in, s.out = cmd, stdin, bufio.NewReaderSize(stdout, 1<<20)
+// The shell block-buffers stdout whenever it is not writing to a terminal, so
+// a statement sent down a pipe produces no output at all until the buffer
+// fills or the process exits, and under a pty it runs a line editor that
+// answers cursor-position queries before it will read anything. Neither is a
+// transport, so this adapter does not keep a REPL alive. Each exchange is one
+// short-lived process reading a script on stdin, and the database on disk is
+// what carries state from one to the next.
+//
+// The cost of that is a process launch per exchange, about 57 ms on the
+// machine this was written on, and it is a floor under every latency this
+// adapter reports. It is not hidden: Capabilities names it, and the report's
+// measurement floor section is where a reader is meant to find it.
 
-	// The first exchange also drains the shell's banner, which the sentinel
-	// swallows along with anything else printed before it.
-	//
-	// A reopened database already has the graph, and that is not an error
-	// worth failing a run over; anything else is, because a session that is
-	// not inside the ANY graph would silently run every case against the
-	// schema-typed default one.
-	rep, err := s.roundTripLocked(ctx, "CREATE GRAPH "+graphName+" ANY")
+// exchange is one script sent to one process: a list of statements, each of
+// which gets its own reply.
+func (s *session) runLocked(ctx context.Context, stmts []string) ([]*reply, error) {
+	if len(stmts) == 0 {
+		return nil, nil
+	}
+	var buf bytes.Buffer
+	markers := make([]string, len(stmts))
+	for i, stmt := range stmts {
+		s.serial++
+		markers[i] = fmt.Sprintf("gqlcompat-eos-%d", s.serial)
+		buf.WriteString(terminate(stmt))
+		buf.WriteString("\nRETURN '")
+		buf.WriteString(markers[i])
+		buf.WriteString("' AS __gqlcompat;\n")
+	}
+
+	cmd := exec.CommandContext(ctx, s.driver.binary, s.path,
+		"-m", "jsonlines", "--no_stats", "--no_progress_bar")
+	cmd.Stdin = bytes.NewReader(buf.Bytes())
+	var out, errs bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errs
+	if err := cmd.Start(); err != nil {
+		return nil, &adapter.Failure{Fatal: true, Message: "ladybug: " + err.Error()}
+	}
+	if p := cmd.Process; p != nil {
+		s.pid.Store(int64(p.Pid))
+	}
+	err := cmd.Wait()
+	s.pid.Store(0)
 	if err != nil {
-		_ = s.stopLocked()
-		return fmt.Errorf("ladybug: creating graph: %w", err)
+		// A cancelled context is the case's timeout, not a broken engine. The
+		// process is already gone and the database is on disk, so unlike the
+		// REPL this replaced there is nothing to discard and nothing fatal.
+		if ctx.Err() != nil {
+			return nil, &adapter.Failure{Timeout: true, Message: ctx.Err().Error()}
+		}
+		// The shell exits non-zero on a statement error as well as on a real
+		// failure, and the difference is in the output rather than the code,
+		// so a non-zero exit with parseable output is not by itself an error.
+		if out.Len() == 0 {
+			return nil, &adapter.Failure{Fatal: true, Message: fmt.Sprintf(
+				"ladybug: %v (stderr: %s)", err, strings.TrimSpace(errs.String()))}
+		}
 	}
-	if rep.errText != "" && !alreadyExists(rep.errText) {
-		_ = s.stopLocked()
-		return fmt.Errorf("ladybug: creating graph: %s", rep.errText)
+	// The shell's own crashes go to stderr while its rows go to stdout, so the
+	// two have to be read together: the output alone shows a script that
+	// stopped, and only stderr says why it stopped.
+	return split(bufio.NewReaderSize(bytes.NewReader(out.Bytes()), 1<<20), markers, errs.String())
+}
+
+// prelude is what every exchange runs before the caller's statements, to put
+// the process inside the ANY graph. It is not free and it is not optional: a
+// fresh process opens the schema-typed default graph, and a case that ran
+// there would be measured against a model the standard never asked for.
+func (s *session) preludeLocked() []string {
+	if s.created {
+		return []string{"USE GRAPH " + graphName}
 	}
-	rep, err = s.roundTripLocked(ctx, "USE GRAPH "+graphName)
+	return []string{"CREATE GRAPH " + graphName + " ANY", "USE GRAPH " + graphName}
+}
+
+// roundTripLocked runs one statement inside the ANY graph and returns its
+// reply. The caller holds s.mu.
+func (s *session) roundTripLocked(ctx context.Context, stmt string) (*reply, error) {
+	reps, err := s.batchLocked(ctx, []string{stmt})
 	if err != nil {
-		_ = s.stopLocked()
-		return fmt.Errorf("ladybug: selecting graph: %w", err)
+		return nil, err
 	}
-	if rep.errText != "" {
-		_ = s.stopLocked()
-		return fmt.Errorf("ladybug: selecting graph: %s", rep.errText)
+	return reps[0], nil
+}
+
+// batchLocked runs several statements in one process, which is what makes a
+// fixture load cost one launch rather than one per batch.
+func (s *session) batchLocked(ctx context.Context, stmts []string) ([]*reply, error) {
+	pre := s.preludeLocked()
+	reps, err := s.runLocked(ctx, append(append([]string{}, pre...), stmts...))
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	if len(reps) != len(pre)+len(stmts) {
+		return nil, &adapter.Failure{Transport: true, Message: fmt.Sprintf(
+			"the shell answered %d of %d statements", len(reps), len(pre)+len(stmts))}
+	}
+	for i, rep := range reps[:len(pre)] {
+		if rep.errText == "" {
+			continue
+		}
+		// CREATE GRAPH is tolerated when the graph is already there, which
+		// happens whenever a database outlives the session that made it.
+		if i == 0 && !s.created && alreadyExists(rep.errText) {
+			continue
+		}
+		return nil, &adapter.Failure{Fatal: true, Message: fmt.Sprintf(
+			"ladybug: %s: %s", pre[i], rep.errText)}
+	}
+	s.created = true
+	return reps[len(pre):], nil
 }
 
 func alreadyExists(msg string) bool {
@@ -234,30 +307,82 @@ func alreadyExists(msg string) bool {
 	return strings.Contains(m, "already exists") || strings.Contains(m, "duplicate")
 }
 
-func notFound(msg string) bool {
-	m := strings.ToLower(msg)
-	return strings.Contains(m, "does not exist") || strings.Contains(m, "not found") ||
-		strings.Contains(m, "cannot find")
+// split turns one process's whole output into one reply per marker.
+//
+// The shell prints rows and errors into a single stream with no framing, so
+// the markers a script interleaves between its statements are what put the
+// boundaries back. A statement that errors does not stop the script, which is
+// why a batch can be read as a list of independent answers.
+func split(r *bufio.Reader, markers []string, stderr string) ([]*reply, error) {
+	reps := make([]*reply, 0, len(markers))
+	cur := &reply{}
+	var errLines []string
+	next := 0
+	truncated := func() error {
+		return truncatedOutput(next, len(markers), append(errLines, strings.TrimSpace(stderr)))
+	}
+	for next < len(markers) {
+		line, err := r.ReadBytes('\n')
+		if len(line) == 0 && err != nil {
+			return nil, truncated()
+		}
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			if err != nil {
+				return nil, truncated()
+			}
+			continue
+		}
+		if bytes.Contains(trimmed, []byte(markers[next])) {
+			cur.errText = strings.TrimSpace(strings.Join(errLines, "\n"))
+			reps = append(reps, cur)
+			cur, errLines, next = &reply{}, nil, next+1
+			continue
+		}
+		if trimmed[0] == '{' {
+			obj, derr := decodeObject(trimmed)
+			if derr != nil {
+				// A line that starts like JSON and is not JSON is the shell
+				// saying something the adapter does not model; keeping it as
+				// text is better than dropping it.
+				errLines = append(errLines, string(trimmed))
+				continue
+			}
+			cur.lines = append(cur.lines, obj)
+			continue
+		}
+		errLines = append(errLines, strings.TrimPrefix(string(trimmed), "Error: "))
+	}
+	return reps, nil
 }
 
-func (s *session) stopLocked() error {
-	if s.cmd == nil {
-		return nil
+// serializerCrash is what the shell prints, and then dies of, when its JSON
+// writer is handed a value it cannot write.
+const serializerCrash = "unexpected character, expected a valid root value"
+
+// truncatedOutput explains a script that stopped answering.
+//
+// Ladybug 0.19.1 cannot print a STRING that came out of an ANY graph in either
+// JSON mode. The engine computes the row, the writer then tries to parse the
+// value as JSON, fails on the first character and takes the process down, so
+// the rest of the script is never run. Every other output mode prints the same
+// value correctly, which is what makes this the shell rather than the engine:
+// `MATCH (n:T) RETURN n.s` answers "x" in csv mode and kills the process in
+// jsonlines mode, from the same store on the same statement.
+//
+// The distinction is not pedantic. Charged to the engine it reads as a query
+// this database cannot answer, which is false. Marked as transport it becomes
+// an error, stays out of the pass rate, and is counted where it belongs, in a
+// row of the report that says the harness could not read the answer.
+func truncatedOutput(done, want int, errLines []string) error {
+	if strings.Contains(strings.Join(errLines, "\n"), serializerCrash) {
+		return &adapter.Failure{Transport: true, Fatal: false, Message: "the shell's JSON writer " +
+			"died on a value the engine computed: a STRING read out of an ANY graph cannot be " +
+			"printed in jsonlines mode, though csv mode prints it correctly"}
 	}
-	if s.in != nil {
-		_, _ = io.WriteString(s.in, ":quit\n")
-		_ = s.in.Close()
-	}
-	done := make(chan error, 1)
-	go func() { done <- s.cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		_ = s.cmd.Process.Kill()
-		<-done
-	}
-	s.cmd, s.in, s.out = nil, nil, nil
-	return nil
+	return &adapter.Failure{Transport: true, Message: fmt.Sprintf(
+		"the shell stopped answering after %d of %d statements: %s",
+		done, want, strings.TrimSpace(strings.Join(errLines, "\n")))}
 }
 
 // reply is one statement's output, bounded by a sentinel.
@@ -270,89 +395,6 @@ type reply struct {
 	errText string
 }
 
-// roundTripLocked sends one statement followed by a unique sentinel and reads
-// until the sentinel comes back.
-//
-// The shell is a REPL: it prints rows and errors to one stream with no framing
-// and no end-of-result marker. A sentinel query whose value nothing else can
-// produce is what turns that stream back into request/response, and the
-// counter is what stops a timed-out statement's late output being read as the
-// next statement's answer.
-func (s *session) roundTripLocked(ctx context.Context, stmt string) (*reply, error) {
-	s.serial++
-	marker := fmt.Sprintf("gqlcompat-eof-%d", s.serial)
-
-	var buf bytes.Buffer
-	buf.WriteString(terminate(stmt))
-	buf.WriteString("\nRETURN '")
-	buf.WriteString(marker)
-	buf.WriteString("' AS __gqlcompat;\n")
-	if _, err := s.in.Write(buf.Bytes()); err != nil {
-		return nil, s.fatalLocked(fmt.Errorf("ladybug: write: %w", err))
-	}
-
-	type read struct {
-		rep *reply
-		err error
-	}
-	ch := make(chan read, 1)
-	go func() {
-		rep, err := readUntil(s.out, marker)
-		ch <- read{rep, err}
-	}()
-
-	select {
-	case <-ctx.Done():
-		// One pipe, one reader: a statement that outran its deadline has left
-		// output nobody will consume, and the only safe recovery is to discard
-		// the process.
-		_ = s.stopLocked()
-		return nil, &adapter.Failure{Timeout: true, Fatal: true, Message: ctx.Err().Error()}
-	case r := <-ch:
-		if r.err != nil {
-			return nil, s.fatalLocked(fmt.Errorf("ladybug: read: %w (stderr: %s)",
-				r.err, strings.TrimSpace(s.errs.String())))
-		}
-		return r.rep, nil
-	}
-}
-
-// readUntil consumes lines up to and including the sentinel row.
-func readUntil(r *bufio.Reader, marker string) (*reply, error) {
-	rep := &reply{}
-	var errLines []string
-	for {
-		line, err := r.ReadBytes('\n')
-		if err != nil {
-			if len(line) == 0 {
-				return nil, err
-			}
-			return nil, fmt.Errorf("truncated output before sentinel: %q", string(line))
-		}
-		trimmed := bytes.TrimSpace(line)
-		if len(trimmed) == 0 {
-			continue
-		}
-		if bytes.Contains(trimmed, []byte(marker)) {
-			rep.errText = strings.TrimSpace(strings.Join(errLines, "\n"))
-			return rep, nil
-		}
-		if trimmed[0] == '{' {
-			obj, err := decodeObject(trimmed)
-			if err != nil {
-				// A line that starts like JSON and is not JSON is the shell
-				// saying something the adapter does not model; keeping it as
-				// text is better than dropping it.
-				errLines = append(errLines, string(trimmed))
-				continue
-			}
-			rep.lines = append(rep.lines, obj)
-			continue
-		}
-		errLines = append(errLines, strings.TrimPrefix(string(trimmed), "Error: "))
-	}
-}
-
 // terminate appends the semicolon the REPL needs to consider a statement
 // finished, without touching one that already has it.
 func terminate(stmt string) string {
@@ -363,20 +405,12 @@ func terminate(stmt string) string {
 	return t + ";"
 }
 
-func (s *session) fatalLocked(err error) error {
-	_ = s.stopLocked()
-	return &adapter.Failure{Fatal: true, Message: err.Error()}
-}
-
 // Exec runs one statement.
 func (s *session) Exec(ctx context.Context, stmt string, params map[string]any) (*adapter.Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(params) > 0 {
 		return nil, fmt.Errorf("ladybug: %w: the shell has no parameter binding", adapter.ErrUnsupported)
-	}
-	if err := s.startLocked(ctx); err != nil {
-		return nil, err
 	}
 	rep, err := s.roundTripLocked(ctx, stmt)
 	if err != nil {
@@ -572,8 +606,13 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 	if err := s.resetLocked(ctx); err != nil {
 		return adapter.LoadStats{}, err
 	}
-	started := time.Now()
-
+	// The whole load is one script in one process. Under the REPL this
+	// replaced the batching existed to save round trips; now it saves process
+	// launches, and the difference matters more: a hundred-thousand-node
+	// fixture is 196 node statements, which would otherwise be 196 launches
+	// and eleven seconds of nothing but opening a database.
+	var stmts []string
+	var phases []string
 	for chunk := range slices.Chunk(fx.Nodes, nodeBatch) {
 		var b strings.Builder
 		b.WriteString("CREATE ")
@@ -583,9 +622,8 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 			}
 			writeNodePattern(&b, n)
 		}
-		if err := s.execLoad(ctx, b.String(), "node"); err != nil {
-			return adapter.LoadStats{}, err
-		}
+		stmts = append(stmts, b.String())
+		phases = append(phases, "node")
 	}
 
 	byType := map[string][]fixture.Edge{}
@@ -599,8 +637,20 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 			if err != nil {
 				return adapter.LoadStats{}, err
 			}
-			if err := s.execLoad(ctx, stmt, "edge"); err != nil {
-				return adapter.LoadStats{}, err
+			stmts = append(stmts, stmt)
+			phases = append(phases, "edge")
+		}
+	}
+
+	started := time.Now()
+	if len(stmts) > 0 {
+		reps, err := s.batchLocked(ctx, stmts)
+		if err != nil {
+			return adapter.LoadStats{}, err
+		}
+		for i, rep := range reps {
+			if rep.errText != "" {
+				return adapter.LoadStats{}, fmt.Errorf("ladybug: %s load: %s", phases[i], rep.errText)
 			}
 		}
 	}
@@ -611,17 +661,6 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 		EngineWall: time.Since(started),
 		Detail:     fmt.Sprintf("%d node batches, %d edge types", (len(fx.Nodes)+nodeBatch-1)/nodeBatch, len(types)),
 	}, nil
-}
-
-func (s *session) execLoad(ctx context.Context, stmt, phase string) error {
-	rep, err := s.roundTripLocked(ctx, stmt)
-	if err != nil {
-		return err
-	}
-	if rep.errText != "" {
-		return fmt.Errorf("ladybug: %s load: %s", phase, rep.errText)
-	}
-	return nil
 }
 
 func writeNodePattern(b *strings.Builder, n fixture.Node) {
@@ -796,9 +835,24 @@ func quote(s string) string {
 	return b.String()
 }
 
-// Reset drops the working graph and makes a new one. Dropping is cheaper and
-// more complete than deleting rows, and it also discards whatever dynamic
-// property columns the previous fixture caused the ANY graph to grow.
+// Reset throws the database away and starts a new one.
+//
+// The obvious reset is DROP GRAPH, and it does not work. Ladybug 0.19.1 gets
+// as far as deleting the graph's file and then refuses itself, with "Path
+// /tmp/.../graph.gqlcompat.lbug is not within the allowed list of files to be
+// removed", and what is left behind is a catalog and a disk that disagree.
+// The next process sometimes finds the graph with every row still in it and
+// sometimes finds no graph of that name at all. Neither is a reset, and the
+// failure is silent in the only way that matters: a run that trusted it
+// loaded the social fixture on top of itself and read four KNOWS edges where
+// the case expected two, which reads in a report as an engine that cannot
+// count rather than a harness that cannot clean up.
+//
+// So a reset is a new database file. Nothing in a catalog survives a path
+// that has never existed, and the old files are removed so the disk figures
+// stay about the fixture rather than about every fixture before it. The cost
+// is a create and a delete, both of which disappear under the process launch
+// that carries them.
 func (s *session) Reset(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -806,50 +860,58 @@ func (s *session) Reset(ctx context.Context) error {
 }
 
 func (s *session) resetLocked(ctx context.Context) error {
-	if err := s.startLocked(ctx); err != nil {
+	old := s.path
+	s.gen++
+	s.path = dbPath(s.workdir, s.gen)
+	s.created = false
+	// The new database is opened here rather than left to the first statement
+	// of the case, so that creating a store is not billed to a query.
+	if _, err := s.batchLocked(ctx, []string{"RETURN 1 AS __gqlcompat_reset"}); err != nil {
 		return err
 	}
-	steps := []struct {
-		stmt     string
-		tolerate func(string) bool
-	}{
-		{"USE GRAPH main", nil},
-		{"DROP GRAPH " + graphName, notFound},
-		{"CREATE GRAPH " + graphName + " ANY", alreadyExists},
-		{"USE GRAPH " + graphName, nil},
+	return removeStore(old)
+}
+
+// dbPath names generation n of the session's database.
+func dbPath(workdir string, gen int) string {
+	return filepath.Join(workdir, fmt.Sprintf("graph-%03d%s", gen, dbExt))
+}
+
+// removeStore deletes a database and everything the engine put beside it. A
+// graph lives in its own file named after the database and itself, so
+// graph-000.lbug is accompanied by graph-000.gqlcompat.lbug, and a write-ahead
+// file can outlive the process that wrote it.
+func removeStore(path string) error {
+	matches, err := filepath.Glob(strings.TrimSuffix(path, dbExt) + "*")
+	if err != nil {
+		return err
 	}
-	for _, step := range steps {
-		rep, err := s.roundTripLocked(ctx, step.stmt)
-		if err != nil {
+	for _, m := range matches {
+		if err := os.RemoveAll(m); err != nil {
 			return err
-		}
-		if rep.errText != "" && (step.tolerate == nil || !step.tolerate(rep.errText)) {
-			return fmt.Errorf("ladybug: reset (%s): %s", step.stmt, rep.errText)
 		}
 	}
 	return nil
 }
 
-// PID is the shell process the sampler watches.
-func (s *session) PID() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cmd == nil || s.cmd.Process == nil {
-		return 0
-	}
-	return s.cmd.Process.Pid
-}
+// PID is the shell process the sampler watches, or 0 between exchanges.
+//
+// Unlike a server adapter this one does have a process to point at, but it is
+// a different process for every statement and it exists only while that
+// statement runs. What the sampler sees is therefore the cost of opening the
+// database, running the statement and closing it again, which is the honest
+// shape of an embedded engine driven this way and not a resident set anyone
+// should read as steady state.
+func (s *session) PID() int { return int(s.pid.Load()) }
 
 // DataDir is the directory holding the database.
 func (s *session) DataDir() string { return s.workdir }
 
-// Close stops the shell.
+// Close marks the session finished. There is no process to stop: every
+// exchange already waited for its own.
 func (s *session) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		return nil
-	}
 	s.closed = true
-	return s.stopLocked()
+	return nil
 }

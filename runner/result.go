@@ -295,6 +295,7 @@ type RunInfo struct {
 	Repeats        int           `json:"repeats"`
 	Warmups        int           `json:"warmups"`
 	Timeout        time.Duration `json:"timeout_ns"`
+	LoadTimeout    time.Duration `json:"load_timeout_ns"`
 	SampleInterval time.Duration `json:"sample_interval_ns"`
 	Selector       string        `json:"selector,omitempty"`
 	WorkDir        string        `json:"workdir,omitempty"`

@@ -8,6 +8,11 @@ name: Engines
 # an engine declining an optional feature is lawful, and even a mandatory
 # failure is a finding to publish rather than a broken pipeline. The reports are
 # the output.
+#
+# Three engines run here and each one gets its own job, its own report and its
+# own artifact. Nothing downstream adds them together. Two engines that skipped
+# different cases have different denominators, so a combined table would be a
+# ranking of who declined the most rather than of who conforms.
 
 on:
   schedule:
@@ -22,6 +27,9 @@ on:
       neo4j_version:
         description: "Neo4j image tag"
         default: "5-community"
+      ladybug_version:
+        description: "Ladybug release to download"
+        default: "0.19.1"
 
 permissions:
   contents: read
@@ -135,4 +143,56 @@ jobs:
         if: steps.zu_src.outcome == 'success'
         with:
           name: zu-reports
+          path: reports/
+
+  ladybug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # Ladybug ships a CLI tarball per platform, so there is nothing to build.
+      # The version is pinned rather than tracked, because a score belongs to
+      # the version that produced it and a silent upgrade would move the number
+      # without moving anything in this repository.
+      - name: Install the Ladybug shell
+        run: |
+          curl -fsSL -o /tmp/lbug.tar.gz \
+            "https://github.com/LadybugDB/ladybug/releases/download/v${LADYBUG_VERSION}/lbug_cli-linux-x86_64.tar.gz"
+          tar -xzf /tmp/lbug.tar.gz -C /usr/local/bin
+          chmod +x /usr/local/bin/lbug
+          lbug --version
+        env:
+          LADYBUG_VERSION: ${{ github.event.inputs.ladybug_version || '0.19.1' }}
+
+      # One process per statement is the transport, so a run here costs a
+      # process launch per exchange and the wall clock is longer than the
+      # engine is slow. That is a property of the shell and it is declared in
+      # the report rather than subtracted from it.
+      #
+      # The load timeout is raised because this engine's ingest is a scan per
+      # edge on a schemaless graph, so the hundred thousand element fixtures
+      # take minutes rather than seconds. Raised, not removed: a load that runs
+      # forever is a finding about the engine, and it is recorded as an error
+      # on the cases that needed the fixture.
+      - name: Run the corpus against Ladybug
+        run: |
+          go run ./cmd/gql-compat run -adapter ladybug \
+            -repeats ${{ github.event.inputs.repeats || 7 }} \
+            -load-timeout 10m \
+            -fail-on none -quiet -out ./reports/ladybug
+
+      - name: Summary
+        run: |
+          {
+            echo "## Ladybug, conformance mode"
+            echo
+            sed -n '1,40p' reports/ladybug/ladybug.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ladybug-reports
           path: reports/

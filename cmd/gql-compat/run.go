@@ -84,6 +84,7 @@ Adapters in this binary: %s
 		repeats  = fs.Int("repeats", 7, "timed executions per case")
 		warmups  = fs.Int("warmups", 1, "discarded executions before the timed ones; never applied to a mutating case")
 		timeout  = fs.Duration("timeout", 30*time.Second, "limit for one statement")
+		loadwait = fs.Duration("load-timeout", 0, "limit for one fixture load (default ten times -timeout)")
 		interval = fs.Duration("sample-interval", 5*time.Millisecond, "how often the process sampler reads")
 
 		workdir     = fs.String("workdir", "", "where engine state goes; empty uses a temporary directory")
@@ -162,6 +163,7 @@ Adapters in this binary: %s
 		Repeats:        *repeats,
 		Warmups:        *warmups,
 		Timeout:        *timeout,
+		LoadTimeout:    *loadwait,
 		SampleInterval: *interval,
 		WorkDir:        *workdir,
 		KeepWorkDir:    *keepWorkDir,

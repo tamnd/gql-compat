@@ -136,6 +136,17 @@ type Failure struct {
 	// it before the next case instead of running the rest of the suite
 	// against a dead process.
 	Fatal bool
+	// Transport marks a failure of the harness's own plumbing rather than of
+	// the engine. A shell that computes the right answer and then cannot
+	// print it is not an engine that got the query wrong, and a driver that
+	// loses the connection is not an engine that refused the statement.
+	//
+	// The runner treats it the way it treats a timeout: no answer was
+	// obtained, so the case is an error and stays out of the pass rate
+	// instead of being charged to the engine. An adapter should set it only
+	// when it can tell the difference, and should say in Message what broke,
+	// because a reader who cannot see the plumbing has only that sentence.
+	Transport bool
 }
 
 func (f *Failure) Error() string {
