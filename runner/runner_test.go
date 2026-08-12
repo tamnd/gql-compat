@@ -455,9 +455,7 @@ func TestATimeoutIsAskedOnceEvenWhenTheCaseExpectsARefusal(t *testing.T) {
 			Latency: time.Second,
 		}
 	})
-	start := time.Now()
 	rep := run(t, mute, runner.Config{Repeats: 8, Warmups: 4, Timeout: 20 * time.Millisecond})
-	elapsed := time.Since(start)
 
 	r := result(t, rep, "condition/22012/divide")
 	if r.Outcome != runner.Error {
@@ -466,10 +464,12 @@ func TestATimeoutIsAskedOnceEvenWhenTheCaseExpectsARefusal(t *testing.T) {
 	if r.Stats.Count != 1 {
 		t.Errorf("the case was timed %d times, want 1: a repetition after a timeout costs the whole timeout again", r.Stats.Count)
 	}
-	// Twelve executions of a 20ms timeout is 240ms; two is 40ms. The bound is
-	// loose enough for a loaded machine and still far under the old cost.
-	if elapsed > 150*time.Millisecond {
-		t.Errorf("the run took %v; a warmup and a repetition at a 20ms timeout should not approach the twelve the config asks for", elapsed)
+	// The case's own wall, not the run's, so an instrumented build's overhead
+	// on the other cases does not decide this. Twelve executions of a 20ms
+	// timeout is 240ms and two is 40ms, so the bound is loose enough for a
+	// loaded machine under -race and still far under the old cost.
+	if r.Wall > 150*time.Millisecond {
+		t.Errorf("the case took %v; a warmup and a repetition at a 20ms timeout should not approach the twelve the config asks for", r.Wall)
 	}
 }
 
