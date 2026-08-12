@@ -1,0 +1,353 @@
+# Decisions about the cases every engine failed.
+#
+# The queue this answers comes from `gql-compat consensus`, which lists the
+# cases that every engine judging them failed. A case on that list is a
+# candidate for having been written wrong, and nothing more: three engines
+# failing the same case is a reason to read it, not a verdict on it. Nothing in
+# this file changes any pass rate, and no engine's score moves because a case
+# was disposed one way or the other.
+#
+# One entry per queued case, and every entry is a claim somebody checked.
+# verdict is one of:
+#
+#   corpus-bug     the case is wrong and gets fixed
+#   shared-gap     the case is right and the engines really do lack the feature
+#   ambiguous      the standard can be read both ways and the case picked one
+#   harness-limit  the engines are fine, this project cannot measure the thing
+#
+# The queue below is from the run of 2026-08-13: Neo4j 2026.07.1, zu 0.0.1 and
+# Ladybug 0.19.1, 262 cases each, conformance mode. Fifty of the fifty one
+# entries came out shared-gap, which is the expected shape for a corpus that is
+# mostly optional features: nobody implements FOR ... WITH ORDINALITY, and
+# three engines agreeing about that says nothing about the case.
+#
+# Two things are worth saying about the fifty that are not corpus bugs. The
+# first is that the standard's spelling is the thing being measured, so an
+# engine that has the capability under another syntax still fails, and the note
+# says so where that is what happened. The second is the known limit of the
+# method: all three engines grew out of Cypher, so agreement between them is
+# weaker evidence than agreement between three unrelated parsers would be, and
+# the 21.3 identifier cases below are exactly where that bites.
+
+version: 1
+dispositions:
+  - case: grammar/delimited-identifier-double-quoted
+    verdict: shared-gap
+    note: >-
+      All three read a double quoted string as a string literal rather than as
+      a delimited identifier, which is Cypher's rule and not GQL's. The BNF has
+      <delimited identifier> ::= <double quoted character sequence> | <accent
+      quoted character sequence>, so the two forms are interchangeable and the
+      case is right. Neo4j's own GQL appendix lists 21.3 as unsupported and
+      gives this exact shape as an example, so for that engine it is a declared
+      divergence. This is the clearest instance of the consensus limit: three
+      Cypher descendants agreeing about quoting is one lineage, not three
+      opinions.
+    decided: 2026-08-13
+  - case: grammar/reject-delimited-identifier-as-variable
+    verdict: shared-gap
+    note: >-
+      All three accept a backticked variable, which Cypher admits and GQL does
+      not: <element variable> ::= <binding variable> ::= <regular identifier>
+      has one alternative and no delimited form. Same lineage caveat as the
+      case above.
+    decided: 2026-08-13
+  - case: grammar/reject-keyword-as-bare-identifier
+    verdict: shared-gap
+    note: >-
+      All three accept RETURN 1 AS MATCH. The exclusion of reserved words from
+      <regular identifier> is in the Syntax Rules prose rather than in the
+      productions, so the machine readable artifact alone does not settle it,
+      but Neo4j's appendix does, listing 21.3 as unsupported and naming the
+      differing reserved word list. The case stands.
+    decided: 2026-08-13
+  - case: optional/g002/different-edges-match-mode
+    verdict: shared-gap
+    note: >-
+      No engine parses a match mode prefix at all. Three different parse errors
+      at three different offsets, which is what a genuinely absent feature
+      looks like.
+    decided: 2026-08-13
+  - case: optional/g012/simple-path-mode
+    verdict: shared-gap
+    note: >-
+      zu says the SIMPLE path mode is not supported yet and suggests ACYCLIC,
+      which is an engine declaring the gap in its own words. The other two do
+      not parse the prefix.
+    decided: 2026-08-13
+  - case: optional/g030/path-multiset-alternation
+    verdict: shared-gap
+    note: >-
+      Only two engines judged it, so this entry is thin evidence by the
+      package's own rule. Neither parses the path alternation bar. zu skipped
+      the fixture.
+    decided: 2026-08-13
+  - case: optional/g032/path-pattern-union
+    verdict: shared-gap
+    note: >-
+      Two judging engines, same bar, same absence. Thin for the same reason as
+      G030 and recorded rather than acted on.
+    decided: 2026-08-13
+  - case: optional/g037/questioned-path
+    verdict: shared-gap
+    note: >-
+      The questioned path suffix is unparsed everywhere. zu reports an
+      unexpected character, which is a lexer that has never seen the token.
+    decided: 2026-08-13
+  - case: optional/g038/parenthesized-path-pattern
+    verdict: shared-gap
+    note: >-
+      Neo4j gets furthest, parsing the juxtaposition and then refusing it
+      because it only supports juxtaposition for quantified path patterns. That
+      is a partial implementation of the feature and not a misreading of the
+      case.
+    decided: 2026-08-13
+  - case: optional/g044/abbreviated-edge-left
+    verdict: shared-gap
+    note: >-
+      The abbreviated edge patterns need no bracket, and all three parsers
+      demand one. The case is a single MATCH with no room to be wrong.
+    decided: 2026-08-13
+  - case: optional/g044/abbreviated-edge-right
+    verdict: shared-gap
+    note: Same absence as the left form, same shape of parse error in all three.
+    decided: 2026-08-13
+  - case: optional/g045/abbreviated-edge-left-or-right
+    verdict: shared-gap
+    note: Same absence again, this time for the undirected abbreviation.
+    decided: 2026-08-13
+  - case: optional/g080/simplified-path-pattern
+    verdict: shared-gap
+    note: >-
+      The slash delimited simplified path pattern is not in any of the three
+      grammars. Each fails at the slash.
+    decided: 2026-08-13
+  - case: optional/g100/element-id
+    verdict: shared-gap
+    note: >-
+      Neo4j and Ladybug both have an element identity concept and neither
+      spells it ELEMENT_ID, so the function is unknown to both catalogues. The
+      capability exists behind another name, which is a fair thing for a
+      conformance case to fail on: the standard's spelling is what is being
+      measured. Two judging engines, so thin.
+    decided: 2026-08-13
+  - case: optional/g110/is-directed-predicate
+    verdict: shared-gap
+    note: >-
+      The interesting one. Ladybug does not parse IS DIRECTED. Neo4j parses it
+      and returns 0 where 5 was expected, because in Cypher 25 x IS Label is
+      the label expression predicate, so k IS DIRECTED asks whether the edge
+      has type DIRECTED and answers no. The engine accepts the statement and
+      means something else by it, which is worth knowing and is not a defect in
+      the case. Two judging engines, so thin.
+    decided: 2026-08-13
+  - case: optional/g112/is-source-of-predicate
+    verdict: shared-gap
+    note: >-
+      Neither judging engine parses IS SOURCE OF. Neo4j fails on OF, which is
+      the same label expression collision as G110 one token later.
+    decided: 2026-08-13
+  - case: optional/g113/all-different-predicate
+    verdict: shared-gap
+    note: ALL_DIFFERENT is in neither engine's function catalogue.
+    decided: 2026-08-13
+  - case: optional/g114/same-predicate
+    verdict: shared-gap
+    note: >-
+      SAME is in no engine's function catalogue, and all three say so in almost
+      the same words. Three judging engines here, which is as strong as this
+      signal gets, and it still only says the function is absent.
+    decided: 2026-08-13
+  - case: optional/gb02/double-minus-comment
+    verdict: shared-gap
+    note: >-
+      GQL's double minus comment is not a comment in any of the three lexers;
+      each takes the minus as the start of a statement. The case is one line
+      and cites GB02 correctly.
+    decided: 2026-08-13
+  - case: optional/gc01/create-schema
+    verdict: shared-gap
+    note: >-
+      No engine has a catalog schema at an absolute directory path. There is
+      nothing here to mistake for a spelling problem: none of the three has the
+      object at all.
+    decided: 2026-08-13
+  - case: optional/gc04/create-graph
+    verdict: corpus-bug
+    note: >-
+      The case writes CREATE PROPERTY GRAPH, and PROPERTY is optional in the
+      production: CREATE { [ PROPERTY ] GRAPH [ IF NOT EXISTS ] | OR REPLACE [
+      PROPERTY ] GRAPH }. Ladybug accepts CREATE GRAPH gg ANY and refuses
+      CREATE PROPERTY GRAPH gg ANY, so the case reports an engine that
+      implements GC04 as not implementing it. The case tests the optional
+      keyword and the feature at once and cannot tell which one failed. Fixed
+      by writing the case in the minimal spelling and adding a second case for
+      the PROPERTY keyword, so the two are measured separately.
+    decided: 2026-08-13
+  - case: optional/ge03/let-value-expression
+    verdict: shared-gap
+    note: LET ... IN ... END is absent from all three expression grammars.
+    decided: 2026-08-13
+  - case: optional/gf01/power-square-root-modulus
+    verdict: shared-gap
+    note: >-
+      POWER, SQRT and MOD under those names are in no engine's catalogue. Neo4j
+      has the operations, spelled differently, which is the same standard
+      spelling point as G100.
+    decided: 2026-08-13
+  - case: optional/gf03/logarithmic-functions
+    verdict: shared-gap
+    note: >-
+      LOG in GQL takes a base and an argument. Neo4j rejects the two argument
+      form as too many parameters and Ladybug's binder wants one DOUBLE, so
+      both have a one argument LOG and neither has the general logarithm. zu
+      has no LN. The case is right about the signature.
+    decided: 2026-08-13
+  - case: optional/gg03/graph-type-inline
+    verdict: shared-gap
+    note: >-
+      Checked against the PROPERTY keyword problem next door and it is not that
+      one: Ladybug refuses the inline graph type in the short spelling too, at
+      the opening brace. The feature is absent in all three.
+    decided: 2026-08-13
+  - case: optional/gl03/binary-literal
+    verdict: shared-gap
+    note: 0b1010 is not a literal in any of the three lexers.
+    decided: 2026-08-13
+  - case: optional/gl05/exact-number-with-suffix
+    verdict: shared-gap
+    note: >-
+      The M suffix on an exact numeric literal is unlexed everywhere. Neo4j
+      calls it an invalid literal number, which is a lexer that got as far as
+      the digits.
+    decided: 2026-08-13
+  - case: optional/gl06/exact-number-scientific-with-suffix
+    verdict: shared-gap
+    note: Same suffix, same absence, scientific notation instead of common.
+    decided: 2026-08-13
+  - case: optional/gl11/opt-out-character-escaping
+    verdict: shared-gap
+    note: The at sign prefix that opts out of escaping is unlexed in all three.
+    decided: 2026-08-13
+  - case: optional/gp02/implicit-variable-scope
+    verdict: shared-gap
+    note: >-
+      Neo4j returns 15 rows where 3 were expected, which is the Cartesian
+      product of five people and three employments: its unscoped subquery does
+      not import the outer variables, so the inner MATCH (p) binds a fresh p.
+      That is Cypher's scoping rule rather than 15.2's, and it is a real
+      divergence rather than a case that expects the wrong number. Ladybug does
+      not parse the inline call. Two judging engines, so thin.
+    decided: 2026-08-13
+  - case: optional/gp05/typed-value-variable-definition
+    verdict: shared-gap
+    note: Neither judging engine has a value variable definition, typed or not.
+    decided: 2026-08-13
+  - case: optional/gp05/value-variable-definition
+    verdict: shared-gap
+    note: Same absence as the typed form.
+    decided: 2026-08-13
+  - case: optional/gp07/value-variable-from-a-subquery
+    verdict: shared-gap
+    note: >-
+      Follows GP05: with no value variable there is nothing to bind a subquery
+      to.
+    decided: 2026-08-13
+  - case: optional/gp11/graph-variable-definition
+    verdict: shared-gap
+    note: No engine binds a graph to a variable.
+    decided: 2026-08-13
+  - case: optional/gp16/at-schema-clause
+    verdict: shared-gap
+    note: The AT schema clause needs a catalog schema, which neither judging engine has.
+    decided: 2026-08-13
+  - case: optional/gp18/catalog-and-data-statement-mixing
+    verdict: shared-gap
+    note: >-
+      Follows from GC04 and GC01 being absent: there is no catalog statement
+      here to mix with a data statement.
+    decided: 2026-08-13
+  - case: optional/gq01/use-current-graph
+    verdict: shared-gap
+    note: >-
+      Neo4j looks up a graph literally named CURRENT_PROPERTY_GRAPH and does
+      not find one, so it has the syntax and not the meaning. Ladybug does not
+      parse the statement.
+    decided: 2026-08-13
+  - case: optional/gq02/otherwise
+    verdict: shared-gap
+    note: OTHERWISE is in neither judging engine's grammar.
+    decided: 2026-08-13
+  - case: optional/gq04/except-distinct
+    verdict: shared-gap
+    note: >-
+      Neither judging engine has EXCEPT. Neo4j has UNION only, which is the
+      documented state of Cypher's set operators.
+    decided: 2026-08-13
+  - case: optional/gq05/except-all
+    verdict: shared-gap
+    note: Same absence as EXCEPT DISTINCT.
+    decided: 2026-08-13
+  - case: optional/gq06/intersect-distinct
+    verdict: shared-gap
+    note: Same absence, INTERSECT this time.
+    decided: 2026-08-13
+  - case: optional/gq07/intersect-all
+    verdict: shared-gap
+    note: Same absence as INTERSECT DISTINCT.
+    decided: 2026-08-13
+  - case: optional/gq11/for-with-ordinality
+    verdict: shared-gap
+    note: >-
+      Three judging engines and no FOR statement in any of them. zu and Ladybug
+      do not have the keyword at all; Neo4j parses FOR and then fails on the
+      ordinality variable.
+    decided: 2026-08-13
+  - case: optional/gq18/scalar-subquery
+    verdict: shared-gap
+    note: RETURN VALUE { ... } is unparsed in both judging engines.
+    decided: 2026-08-13
+  - case: optional/gq19/graph-pattern-yield
+    verdict: shared-gap
+    note: The YIELD clause after a graph pattern is absent in both judging engines.
+    decided: 2026-08-13
+  - case: optional/gq21/optional-match-block
+    verdict: shared-gap
+    note: >-
+      Neo4j has OPTIONAL MATCH and not the braced OPTIONAL block, and says so
+      by expecting CALL or MATCH after OPTIONAL. The capability is adjacent and
+      the syntax is not the standard's.
+    decided: 2026-08-13
+  - case: optional/gq24/for-with-offset
+    verdict: shared-gap
+    note: Same missing FOR statement as GQ11, offset instead of ordinality.
+    decided: 2026-08-13
+  - case: optional/gs06/session-reset-graph
+    verdict: shared-gap
+    note: >-
+      Three judging engines and no session reset command in any of them. Note
+      that this one does contain PROPERTY GRAPH, but unlike GC04 the keyword is
+      not optional in <session reset command>, so there is no shorter spelling
+      an engine could be passing under.
+    decided: 2026-08-13
+  - case: optional/gv39/date-literal-comparison
+    verdict: shared-gap
+    note: >-
+      Both judging engines have dates and neither has the DATE 'yyyy-mm-dd'
+      literal; Neo4j spells it date('...'). Standard spelling again, and the
+      case is testing the literal rather than the type.
+    decided: 2026-08-13
+  - case: optional/gv41/duration-literal-comparison
+    verdict: shared-gap
+    note: Same as GV39 for DURATION 'P2D', which Neo4j spells duration('P2D').
+    decided: 2026-08-13
+  - case: performance/recursion/shortest-path-across-a-lattice
+    verdict: shared-gap
+    note: >-
+      Two judging engines, and thin for a third reason: Neo4j timed out on this
+      case rather than answering, which is a finding of its own and is in the
+      Neo4j report. Of the two that answered, Ladybug has no SHORTEST prefix,
+      and zu demands ANY SHORTEST or ALL SHORTEST where the standard also
+      admits SHORTEST followed by a count. The case is right and zu's message
+      is the engine describing its own restriction.
+    decided: 2026-08-13
