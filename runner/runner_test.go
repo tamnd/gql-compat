@@ -441,6 +441,90 @@ func TestTimeoutIsAnErrorNotAFailure(t *testing.T) {
 	}
 }
 
+func TestATimeoutIsAskedOnceEvenWhenTheCaseExpectsARefusal(t *testing.T) {
+	// The Ladybug shell treats an unterminated string literal as an incomplete
+	// statement and waits for the rest of it, so the two cases that assert such
+	// a literal is rejected timed out instead. Both expect a refusal, and a
+	// refusal was the outcome the repeat loop was willing to keep collecting,
+	// so each of them was asked eight times and spent 240s of a 1138s run. The
+	// verdict after the first timeout is already an error and no repetition can
+	// change it.
+	mute := engine(t, func(c *fake.Config) {
+		c.Answers["RETURN 1 / 0 AS v"] = fake.Answer{
+			Failure: &adapter.Failure{GQLStatus: "22012", Message: "division by zero"},
+			Latency: time.Second,
+		}
+	})
+	start := time.Now()
+	rep := run(t, mute, runner.Config{Repeats: 8, Warmups: 4, Timeout: 20 * time.Millisecond})
+	elapsed := time.Since(start)
+
+	r := result(t, rep, "condition/22012/divide")
+	if r.Outcome != runner.Error {
+		t.Fatalf("outcome %s: %s", r.Outcome, r.Reason)
+	}
+	if r.Stats.Count != 1 {
+		t.Errorf("the case was timed %d times, want 1: a repetition after a timeout costs the whole timeout again", r.Stats.Count)
+	}
+	// Twelve executions of a 20ms timeout is 240ms; two is 40ms. The bound is
+	// loose enough for a loaded machine and still far under the old cost.
+	if elapsed > 150*time.Millisecond {
+		t.Errorf("the run took %v; a warmup and a repetition at a 20ms timeout should not approach the twelve the config asks for", elapsed)
+	}
+}
+
+func TestTransportBreakageIsAnErrorNotAFailure(t *testing.T) {
+	// An adapter whose plumbing broke has not learned anything about the
+	// engine. The case that provoked this is a shell that computes the right
+	// answer and then dies printing it, which as a failure reads as a query
+	// the database cannot answer and is simply untrue.
+	broken := engine(t, func(c *fake.Config) {
+		c.Answers["MATCH (p:Person) RETURN p.name AS name"] = fake.Answer{
+			Failure: &adapter.Failure{Transport: true, Message: "the shell's JSON writer died"}}
+	})
+	rep := run(t, broken, runner.Config{Repeats: 1})
+	r := result(t, rep, "mandatory/test/right-answer")
+	if r.Outcome != runner.Error {
+		t.Fatalf("outcome %s, want error", r.Outcome)
+	}
+	if !strings.Contains(r.Reason, "JSON writer") {
+		t.Errorf("reason %q should carry the adapter's own words", r.Reason)
+	}
+	// The same suite against the same engine with working plumbing, so that
+	// what is compared is the breakage and not the corpus.
+	base := run(t, engine(t, nil), runner.Config{Repeats: 1})
+	if rep.Totals.Fail != base.Totals.Fail {
+		t.Errorf("failures went from %d to %d; broken plumbing must not be charged to the engine",
+			base.Totals.Fail, rep.Totals.Fail)
+	}
+}
+
+func TestAnIngestThatNeverFinishesIsAFindingNotAHang(t *testing.T) {
+	// Ladybug spent six minutes on a hundred-thousand-node fixture and was
+	// still going, with no bound on a load and therefore no report at the end
+	// of it. A load gets its own patience, larger than a statement's, and when
+	// it runs out the cases that wanted the fixture say why.
+	slow := engine(t, func(c *fake.Config) { c.LoadLatency = time.Minute })
+	rep := run(t, slow, runner.Config{Repeats: 1, LoadTimeout: 10 * time.Millisecond})
+	var errs int
+	for i := range rep.Cases {
+		if r := &rep.Cases[i]; r.Outcome == runner.Error && strings.Contains(r.Reason, "did not finish within") {
+			errs++
+		}
+	}
+	if errs == 0 {
+		t.Fatal("no case reported the fixture that would not load")
+	}
+	if rep.Totals.Fail != 0 {
+		t.Errorf("%d failures; a fixture the harness gave up on is not a wrong answer", rep.Totals.Fail)
+	}
+	// The second case that wants the same fixture gets the first case's
+	// answer, or a suite of a hundred pays the timeout a hundred times.
+	if rep.Run.Wall > 5*time.Second {
+		t.Errorf("run took %s; a failed load should be attempted once", rep.Run.Wall)
+	}
+}
+
 func TestRunNeedsADriver(t *testing.T) {
 	if _, err := runner.Run(context.Background(), runner.Config{}); err == nil {
 		t.Fatal("a run with no driver should not start")

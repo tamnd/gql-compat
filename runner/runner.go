@@ -73,6 +73,15 @@ type Config struct {
 	Warmups int
 	// Timeout bounds one statement.
 	Timeout time.Duration
+	// LoadTimeout bounds one fixture load, which is not one statement and can
+	// legitimately take much longer. It exists because an ingest that never
+	// finishes is a finding about the engine and not a reason for the harness
+	// to sit still: Ladybug's schemaless graph has no key index, so the
+	// harness's keyed edge ingest is a scan per edge and the hundred-thousand
+	// node fixture ran for six minutes without loading. Bounded, that is an
+	// error on the cases that needed the fixture, with the reason attached.
+	// Unbounded, it is a run that never ends and a report nobody gets.
+	LoadTimeout time.Duration
 	// SampleInterval is how often the process sampler reads. Below about a
 	// millisecond the sampler starts to cost more than it measures.
 	SampleInterval time.Duration
@@ -100,6 +109,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Timeout <= 0 {
 		c.Timeout = 30 * time.Second
+	}
+	if c.LoadTimeout <= 0 {
+		// Ten statements' worth of patience, on the theory that a fixture is
+		// many statements and a load that wants more than that is telling the
+		// reader something.
+		c.LoadTimeout = 10 * c.Timeout
 	}
 	if c.SampleInterval <= 0 {
 		c.SampleInterval = 5 * time.Millisecond
@@ -148,6 +163,7 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 			Repeats:        cfg.Repeats,
 			Warmups:        cfg.Warmups,
 			Timeout:        cfg.Timeout,
+			LoadTimeout:    cfg.LoadTimeout,
 			SampleInterval: cfg.SampleInterval,
 			Selector:       cfg.SelectorText,
 			WorkDir:        workdir,
@@ -216,6 +232,9 @@ type executor struct {
 	// seq numbers session directories so a rebuilt session never inherits the
 	// previous one's files, which would corrupt the disk measurement.
 	seq int
+	// failedLoads remembers a fixture the engine could not ingest, so the
+	// twelfth case that wants it is not a twelfth wait for the same answer.
+	failedLoads map[string]error
 }
 
 func (e *executor) close() {
@@ -412,6 +431,9 @@ func (e *executor) ensureLoaded(ctx context.Context, sess adapter.Session, fx *f
 	if e.loaded == fx.Name && !e.dirty {
 		return sess, nil, nil
 	}
+	if err, ok := e.failedLoads[fx.Name]; ok {
+		return nil, nil, err
+	}
 	if e.dirty && !e.caps.Isolated {
 		// The engine has no reset, so the only way back to a known graph is a
 		// new session. That cost is real and shows up in this case's wall
@@ -428,10 +450,26 @@ func (e *executor) ensureLoaded(ctx context.Context, sess adapter.Session, fx *f
 	sampler := samplerFor(sess, e.cfg.SampleInterval)
 	sampler.Start()
 	start := time.Now()
-	stats, err := sess.Load(ctx, fx)
+	lctx, cancel := context.WithTimeout(ctx, e.cfg.LoadTimeout)
+	stats, err := sess.Load(lctx, fx)
+	cancel()
 	wall := time.Since(start)
 	proc := sampler.Stop()
 	if err != nil {
+		// A load the harness cut off is reported as that and not as whatever
+		// the adapter's plumbing said on the way down, because the fixture is
+		// named here and the adapter does not know what it was waiting for.
+		if lctx.Err() != nil && ctx.Err() == nil {
+			err = fmt.Errorf("it did not finish within %s (%d nodes, %d edges)",
+				e.cfg.LoadTimeout, len(fx.Nodes), len(fx.Edges))
+		}
+		// A fixture that could not be loaded will not load for the next case
+		// either, and each attempt costs the whole timeout. The first attempt
+		// is the measurement; the rest of the cases get its answer.
+		if e.failedLoads == nil {
+			e.failedLoads = map[string]error{}
+		}
+		e.failedLoads[fx.Name] = err
 		return nil, nil, err
 	}
 	if stats.Nodes != len(fx.Nodes) || stats.Edges != len(fx.Edges) {
@@ -491,8 +529,11 @@ func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.
 	r.Warmups = warmups
 	for range warmups {
 		wctx, cancel := context.WithTimeout(ctx, timeout)
-		_, _ = sess.Exec(wctx, stmt, c.Params)
+		_, err := sess.Exec(wctx, stmt, c.Params)
 		cancel()
+		if timedOut(err) {
+			break
+		}
 	}
 
 	sampler := samplerFor(sess, e.cfg.SampleInterval)
@@ -523,6 +564,14 @@ func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.
 			e.discard()
 			break
 		}
+		if timedOut(err) {
+			// The verdict is already an error whatever the remaining
+			// repetitions do, and each of them costs the whole timeout again.
+			// Two cases on which the Ladybug shell waited for a continuation
+			// line spent 240s each in a 1138s run of 2026-08-12 for the eight
+			// identical timeouts nobody read.
+			break
+		}
 		if err != nil && !expectsFailure(c) {
 			// A case that was supposed to return rows and did not will fail
 			// identically on every repetition; running six more of them buys
@@ -538,6 +587,16 @@ func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.
 	r.Process = series.Process
 	r.Disk = series.Disk
 	judge(c, last, lastErr, e.caps, r)
+}
+
+// timedOut reports whether the harness cut the statement off rather than the
+// engine answering it. It is separate from expectsFailure because a case that
+// expects a refusal is still not expecting silence: an engine that never
+// replied has not refused anything, and repeating the question only spends the
+// timeout again.
+func timedOut(err error) bool {
+	f := adapter.AsFailure(err)
+	return f != nil && f.Timeout
 }
 
 func expectsFailure(c *corpus.Case) bool {
@@ -574,6 +633,13 @@ func judge(c *corpus.Case, res *adapter.Result, err error, caps adapter.Capabili
 			// engine's conformance, so it is an error and not a rejection.
 			r.Outcome = Error
 			r.Reason = "timed out"
+			return
+		case f.Transport:
+			// The plumbing broke, which says nothing about the engine either.
+			// The adapter's own words are the reason, because only the
+			// adapter knows which part of the plumbing it was.
+			r.Outcome = Error
+			r.Reason = f.Message
 			return
 		}
 	}
