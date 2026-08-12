@@ -218,19 +218,48 @@ func TestRightStatusIsStrongerEvidenceThanRefusal(t *testing.T) {
 		t.Fatalf("outcome %s evidence %q, want pass on gqlstatus", r.Outcome, r.Evidence)
 	}
 
-	// The same refusal from an engine that reports no status is still a pass —
-	// it did refuse — but on weaker evidence, and the totals count it.
+	// The same refusal from an engine that reports no status is not evidence
+	// at all, and must not be scored as one.
+	//
+	// This was a pass on weak evidence until a real run made the consequence
+	// plain: zu reports no GQLSTATUS, refused all twelve condition cases it
+	// was asked, and the coverage table printed codes as `supported` on the
+	// strength of refusals that had nothing to do with the condition —
+	// 22G0M, multiple assignments to one property, "passed" because the
+	// engine's SET is unimplemented. Every engine can refuse a statement, so
+	// a bare refusal distinguishes no engine from any other.
 	silent := engine(t, func(c *fake.Config) {
 		c.Capabilities.GQLStatus = false
 		c.Answers["RETURN 1 / 0 AS v"] = fake.Answer{Failure: &adapter.Failure{Message: "cannot divide"}}
 	})
 	rep = run(t, silent, runner.Config{})
 	r = result(t, rep, "condition/22012/divide")
-	if r.Outcome != runner.Pass || r.Evidence != runner.EvidenceRejected {
-		t.Fatalf("outcome %s evidence %q, want pass on refusal alone", r.Outcome, r.Evidence)
+	if r.Outcome != runner.Skip || r.Skip != runner.SkipNoGQLStatus {
+		t.Fatalf("outcome %s skip %q, want a no-gqlstatus skip", r.Outcome, r.Skip)
 	}
-	if r.Reason == "" {
-		t.Error("a pass that could not verify the status should say so")
+	if !strings.Contains(r.Reason, "22012") {
+		t.Errorf("the skip must name the code it could not verify: %q", r.Reason)
+	}
+	// A skip is never a pass, so it cannot lift the rate.
+	if got := rep.Totals.ByKind["condition"]; got.Pass != 0 || got.Skip == 0 {
+		t.Errorf("condition totals %+v: the unverifiable case must be skipped, not passed", got)
+	}
+}
+
+// TestAnEngineThatPromisesStatusCodesMustProduceOne is the other half of the
+// rule above. Declining to report GQLSTATUS is lawful — GB01 is optional — but
+// declaring the capability and then refusing a specified condition without a
+// code is a failure of the case, not an absence of evidence.
+func TestAnEngineThatPromisesStatusCodesMustProduceOne(t *testing.T) {
+	mute := engine(t, func(c *fake.Config) {
+		c.Answers["RETURN 1 / 0 AS v"] = fake.Answer{Failure: &adapter.Failure{Message: "cannot divide"}}
+	})
+	r := result(t, run(t, mute, runner.Config{}), "condition/22012/divide")
+	if r.Outcome != runner.Fail {
+		t.Fatalf("outcome %s, want fail", r.Outcome)
+	}
+	if !strings.Contains(r.Reason, "22012") {
+		t.Errorf("the failure must name the code the standard specifies: %q", r.Reason)
 	}
 }
 

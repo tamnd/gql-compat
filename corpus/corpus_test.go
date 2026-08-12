@@ -1,9 +1,12 @@
 package corpus_test
 
 import (
+	"fmt"
+	"io/fs"
 	"regexp"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/tamnd/gql-compat/corpus"
 	"github.com/tamnd/gql-compat/iso"
@@ -223,4 +226,62 @@ func TestEveryFeatureFamilyIsCovered(t *testing.T) {
 		}
 	}
 	t.Logf("%d of %d optional features claimed by at least one case", len(claimed), len(cat.Features))
+}
+
+// TestACaseCannotReadAPropertyItsFixtureNeverGenerates is a regression test
+// for a corpus bug that cost an engine three failures it had not earned:
+// three performance cases queried n.p0 and n.p1 against a fixture declared
+// with no properties at all, and the engine's entirely correct "unknown
+// property" was published against it. Neither the engine nor a reader of the
+// report can tell that apart from a real defect, so the corpus must refuse to
+// load in that state.
+func TestACaseCannotReadAPropertyItsFixtureNeverGenerates(t *testing.T) {
+	cat, err := iso.Load()
+	if err != nil {
+		t.Fatalf("loading the ISO catalogue: %v", err)
+	}
+	known := iso.Codes{Catalog: cat}
+
+	const doc = `
+fixtures:
+  - name: two-props
+    description: A chain with p0 and p1.
+    generated: {shape: path, nodes: 10, properties: %d, seed: 1}
+cases:
+  - id: performance/filter/reads-p1
+    name: Reads the second selectivity property
+    kind: performance
+    fixture: two-props
+    subclauses: ["14.6"]
+    query: |
+      MATCH (n:N)
+      WHERE n.p1 = 3 AND n.name <> '.p9'
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+`
+	// Two properties are p0 and p1, so the case is legitimate.
+	if _, _, err := corpus.Load(oneFile(fmt.Sprintf(doc, 2)), known); err != nil {
+		t.Fatalf("a case reading p1 from a fixture with two properties must load: %v", err)
+	}
+	// One property is p0 only, so p1 will never exist.
+	_, _, err = corpus.Load(oneFile(fmt.Sprintf(doc, 1)), known)
+	if err == nil {
+		t.Fatal("a case reading p1 from a fixture with one property must not load")
+	}
+	for _, want := range []string{"reads-p1", "p1", "two-props"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error must name %q so the fix is obvious; got: %v", want, err)
+		}
+	}
+	// The `.p9` inside a string literal must not be read as a property.
+	if strings.Contains(err.Error(), "p9") {
+		t.Errorf("text inside a string literal was mistaken for a property read: %v", err)
+	}
+}
+
+func oneFile(body string) fs.FS {
+	return fstest.MapFS{"suite.yaml": &fstest.MapFile{Data: []byte(body)}}
 }

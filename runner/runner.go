@@ -298,6 +298,20 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 			return r
 		}
 	}
+	// A case that names the condition it expects cannot be judged by an engine
+	// that names none. Every engine can refuse a statement, and most of the
+	// ones that refuse a division by zero refuse it because they never parsed
+	// the division at all. Scoring the refusal as a pass credited zu with
+	// supporting 22007, invalid date format, on the strength of a parse error
+	// twelve characters earlier — and the coverage table then printed the code
+	// as `supported`, which is the strongest word this report has.
+	if c.Expect.Kind == corpus.ExpectError && c.Expect.GQLStatus != "" &&
+		c.Expect.ErrorContains == "" && !e.caps.GQLStatus {
+		r.Outcome, r.Skip = Skip, SkipNoGQLStatus
+		r.Reason = "the case expects GQLSTATUS " + c.Expect.GQLStatus +
+			" and the engine reports no GQLSTATUS, so a refusal proves nothing about the condition"
+		return r
+	}
 
 	var fx *fixture.Fixture
 	if c.Fixture != "" {
@@ -645,14 +659,21 @@ func judgeError(c *corpus.Case, caps adapter.Capabilities, r *CaseResult) {
 		return
 	}
 
-	// The engine rejected the statement and there is nothing further to check
-	// against. That is a pass, at the weakest evidence the harness records,
-	// and the report says which passes rest on it.
-	r.Outcome, r.Evidence = Pass, EvidenceRejected
-	if c.Expect.GQLStatus != "" {
-		r.Reason = "rejected, but the engine reports no GQLSTATUS, so " +
-			c.Expect.GQLStatus + " could not be verified"
+	// The engine declares that it reports GQLSTATUS and then reported none for
+	// a condition the standard gives a code. That is a failure of the thing
+	// the case tests, not an absence of evidence: the case reached an engine
+	// able to answer it and got no answer.
+	if c.Expect.GQLStatus != "" && caps.GQLStatus {
+		r.Outcome, r.Evidence = Fail, EvidenceStatus
+		r.Reason = "rejected without a GQLSTATUS, and the standard specifies " + c.Expect.GQLStatus
+		return
 	}
+
+	// A case that asked only that the statement fail, and it did. The weakest
+	// evidence the harness records, and the report says which passes rest on
+	// it. A condition case cannot reach here: one that names a code is skipped
+	// before it runs when the engine reports none.
+	r.Outcome, r.Evidence = Pass, EvidenceRejected
 }
 
 func capList(caps []fixture.Capability) string {

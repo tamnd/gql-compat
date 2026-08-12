@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -96,11 +98,73 @@ func Load(root fs.FS, known KnownCodes) (*Suite, *fixture.Set, error) {
 		if c.Fixture == "" {
 			continue
 		}
-		if _, ok := fxs.Get(c.Fixture); !ok {
+		f, ok := fxs.Get(c.Fixture)
+		if !ok {
 			return nil, nil, fmt.Errorf("%s: case %s names unknown fixture %q", c.Source, c.ID, c.Fixture)
+		}
+		if err := checkGeneratedProperties(c, f); err != nil {
+			return nil, nil, err
 		}
 	}
 	return suite, fxs, nil
+}
+
+// generatedProperty finds the pN properties a statement reads.
+//
+// A generated fixture holds exactly `id` and p0..p(Properties-1) on every
+// node, so a reference to a higher-numbered one names a property that will
+// never exist. The scan runs over the statement with quoted strings removed,
+// which is the only place a `.p3` could appear without being a property read.
+var generatedProperty = regexp.MustCompile(`\.p([0-9]+)\b`)
+
+// checkGeneratedProperties rejects a case that reads a selectivity property
+// its fixture was not generated with.
+//
+// This is a corpus bug that costs an engine a failure it did not earn: three
+// performance cases once queried n.p0 and n.p1 against a fixture declared
+// without any properties at all, and the engine's entirely correct "unknown
+// property" was published as a failure against it. The engine cannot detect
+// the difference and neither can a reader of the report, so the corpus must
+// not be able to load in that state.
+func checkGeneratedProperties(c *Case, f *fixture.Fixture) error {
+	if f.Generated == nil {
+		return nil
+	}
+	for _, stmt := range append([]string{c.Query}, c.Setup...) {
+		for _, m := range generatedProperty.FindAllStringSubmatch(stripLiterals(stmt), -1) {
+			n, err := strconv.Atoi(m[1])
+			if err != nil || n < f.Generated.Properties {
+				continue
+			}
+			return fmt.Errorf("%s: case %s reads %s, but fixture %q is generated with %d propert%s per node",
+				c.Source, c.ID, m[0][1:], f.Name, f.Generated.Properties,
+				map[bool]string{true: "y", false: "ies"}[f.Generated.Properties == 1])
+		}
+	}
+	return nil
+}
+
+// stripLiterals blanks out single- and double-quoted spans so that text
+// inside a string literal cannot be mistaken for a property read.
+func stripLiterals(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	var quote rune
+	for _, r := range s {
+		switch {
+		case quote == 0 && (r == '\'' || r == '"' || r == '`'):
+			quote = r
+			b.WriteByte(' ')
+		case quote != 0 && r == quote:
+			quote = 0
+			b.WriteByte(' ')
+		case quote != 0:
+			b.WriteByte(' ')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func mergeTags(defaults, own []string) []string {

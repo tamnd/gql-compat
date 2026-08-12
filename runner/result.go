@@ -94,6 +94,12 @@ const (
 	// something else, so running it would measure the missing feature again
 	// under another case's name.
 	SkipRequires SkipReason = "required-feature"
+	// SkipNoGQLStatus is a condition case put to an engine that reports no
+	// GQLSTATUS. Feature GB01 is optional, so not reporting codes is lawful;
+	// what is not lawful is calling the resulting refusal evidence. Any engine
+	// can decline a statement, and an engine that never implemented the
+	// function under test declines it for a reason the case is not about.
+	SkipNoGQLStatus SkipReason = "no-gqlstatus"
 	// SkipSelected is a case excluded by the run's selector, recorded only
 	// when the caller asked for the full list.
 	SkipSelected SkipReason = "not-selected"

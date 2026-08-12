@@ -30,8 +30,12 @@ fixtures:
     generated: {shape: path, nodes: 10000, seed: 1}
 
   - name: perf-path-100k
-    description: The same chain at a hundred thousand nodes.
-    generated: {shape: path, nodes: 100000, seed: 1}
+    description: >-
+      The same chain at a hundred thousand nodes, with the two selectivity
+      properties the filter and grouping cases need: p0 splits the graph into
+      ten buckets and p1 into a hundred, so a predicate's selectivity is known
+      before the query runs rather than measured from the answer.
+    generated: {shape: path, nodes: 100000, properties: 2, seed: 1}
 
   - name: perf-star-10k
     description: >-
