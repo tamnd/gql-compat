@@ -218,6 +218,13 @@ cases:
       columns: [n]
       rows: [[5]]
 
+  # PROPERTY is optional in <create graph statement> and in <drop graph
+  # statement>, so these four cases write the shorter spelling and the case
+  # below them tests the keyword on its own. Written the other way round, as
+  # they were until the consensus review of 2026-08-13, an engine that
+  # implements CREATE GRAPH and not CREATE PROPERTY GRAPH is reported as not
+  # implementing GC04 at all, and the report cannot say which of the two it
+  # failed. Ladybug 0.19.1 is exactly that engine.
   - id: optional/gc04/create-graph
     name: CREATE GRAPH adds a graph with an open graph type to the catalog
     features: [GC04, GG01]
@@ -226,7 +233,23 @@ cases:
     tags: [write, catalog]
     mutating: true
     query: |
-      CREATE PROPERTY GRAPH gqlcompat_create ANY
+      CREATE GRAPH gqlcompat_create ANY
+    expect:
+      kind: accept
+
+  - id: optional/gc04/create-property-graph-keyword
+    name: The PROPERTY keyword is optional and both spellings must be accepted
+    features: [GC04, GG01]
+    subclauses: ["12.4"]
+    productions: [create graph statement, catalog graph parent and name, open graph type]
+    tags: [write, catalog]
+    mutating: true
+    # CREATE { [ PROPERTY ] GRAPH [ IF NOT EXISTS ] | OR REPLACE [ PROPERTY ]
+    # GRAPH }, so this is the same statement as the case above with one more
+    # word in it. Separating them is what lets the report say that an engine
+    # has the feature and not the longer spelling.
+    query: |
+      CREATE PROPERTY GRAPH gqlcompat_create_property ANY
     expect:
       kind: accept
 
@@ -238,9 +261,9 @@ cases:
     tags: [write, catalog]
     mutating: true
     setup:
-      - "CREATE PROPERTY GRAPH gqlcompat_ifne ANY"
+      - "CREATE GRAPH gqlcompat_ifne ANY"
     query: |
-      CREATE PROPERTY GRAPH IF NOT EXISTS gqlcompat_ifne ANY
+      CREATE GRAPH IF NOT EXISTS gqlcompat_ifne ANY
     expect:
       kind: accept
 
@@ -252,9 +275,9 @@ cases:
     tags: [write, catalog]
     mutating: true
     setup:
-      - "CREATE PROPERTY GRAPH gqlcompat_drop ANY"
+      - "CREATE GRAPH gqlcompat_drop ANY"
     query: |
-      DROP PROPERTY GRAPH gqlcompat_drop
+      DROP GRAPH gqlcompat_drop
     expect:
       kind: accept
 

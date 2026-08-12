@@ -12,7 +12,8 @@ name: Engines
 # Three engines run here and each one gets its own job, its own report and its
 # own artifact. Nothing downstream adds them together. Two engines that skipped
 # different cases have different denominators, so a combined table would be a
-# ranking of who declined the most rather than of who conforms.
+# ranking of who declined the most rather than of who conforms; comparing them
+# is the consensus command's job and it works from the separate reports.
 
 on:
   schedule:
@@ -195,4 +196,59 @@ jobs:
       - uses: actions/upload-artifact@v5
         with:
           name: ladybug-reports
+          path: reports/
+
+  # The one job that reads more than one engine's report, and it produces no
+  # score. It lists the cases every engine that judged them failed, which is a
+  # queue of cases to read rather than a finding about any database. It runs
+  # even when an engine job failed, because a comparison of the two engines
+  # that did report is still worth having and the output says how many engines
+  # it had.
+  consensus:
+    runs-on: ubuntu-latest
+    needs: [neo4j, zu, ladybug]
+    if: always()
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: actions/download-artifact@v6
+        with:
+          path: ./artifacts
+
+      # Only conformance reports are compared. A compat mode report answers a
+      # different question, and putting the two in one comparison would produce
+      # agreement between an engine asked ISO's spelling and an engine asked
+      # its own.
+      - name: Compare the reports
+        run: |
+          set -eu
+          reports=""
+          for f in ./artifacts/neo4j-reports/conformance/neo4j.json \
+                   ./artifacts/zu-reports/zu.json \
+                   ./artifacts/ladybug-reports/ladybug/ladybug.json; do
+            [ -f "$f" ] && reports="$reports $f"
+          done
+          count=$(echo $reports | wc -w)
+          if [ "$count" -lt 2 ]; then
+            echo "only $count report(s) available, nothing to compare" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          go run ./cmd/gql-compat consensus \
+            -dispositions ./corpus/dispositions.yaml \
+            -out ./reports -format text $reports | tee /tmp/consensus.txt
+          {
+            echo "## Corpus review queue"
+            echo
+            echo '```'
+            cat /tmp/consensus.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v5
+        if: hashFiles('reports/consensus.json') != ''
+        with:
+          name: consensus
           path: reports/

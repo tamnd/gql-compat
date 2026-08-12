@@ -13,6 +13,7 @@
 //	gql-compat list      -kind condition
 //	gql-compat iso       features
 //	gql-compat validate  -corpus ./corpus/suite
+//	gql-compat consensus reports/neo4j/neo4j.json reports/zu/zu.json reports/ladybug/ladybug.json
 //	gql-compat version
 package main
 
@@ -89,6 +90,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return cmdISO(args[1:])
 	case "validate":
 		return cmdValidate(args[1:])
+	case "consensus":
+		return cmdConsensus(args[1:])
 	case "version", "-version", "--version":
 		printVersion(os.Stdout)
 		return nil
@@ -118,6 +121,8 @@ func usage(w *os.File) {
   iso        print the vendored ISO catalogue: features, conditions,
              productions, subclauses, implementation-defined items
   validate   load a corpus and check every ISO reference in it
+  consensus  compare two or more reports and queue the cases every
+             engine failed for corpus review
   version    print the version
 
 Run "gql-compat <subcommand> -h" for that subcommand's flags.

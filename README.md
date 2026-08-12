@@ -7,7 +7,7 @@ and what it costs the engine to do so.
 $ gql-compat run -adapter zu -binary ./zu -out ./reports
 ```
 
-262 cases citing ISO's own artifacts, run against one engine, scored by kind
+263 cases citing ISO's own artifacts, run against three engines, scored by kind
 and reported five ways with a full cost measurement attached to every case.
 
 Both a **command-line tool** and a **Go library**. There is no `internal/`
@@ -56,12 +56,12 @@ grammar does not define, or a GQLSTATUS the standard does not, will not load.
 
 ```
 $ gql-compat validate
-262 cases loaded; every ISO reference in them resolves.
+263 cases loaded; every ISO reference in them resolves.
 
 COVERAGE              CLAIMED  ISO TOTAL
 optional features     117      228
 GQLSTATUS codes       15       68
-grammar productions   298      814
+grammar productions   300      814
 normative subclauses  94       317
 ```
 
@@ -256,6 +256,41 @@ other four are views of it.
 
 CSV column order is a contract: new columns go on the end, so a script that
 plots column 31 of last month's run finds the same quantity there this month.
+
+## Comparing engines, and the one thing that comparison is for
+
+```
+$ gql-compat consensus reports/neo4j/neo4j.json reports/zu/zu.json reports/ladybug/ladybug.json
+```
+
+Not a leaderboard. The command reads two or more reports and lists, per case,
+which engines passed and which failed, and the only thing it computes is the
+set of cases that **every engine judging them failed**. Those go on a corpus
+review queue, because a case that three unrelated engines all fail is more
+likely to have been written wrong than to have found the same bug three times.
+
+Three rules keep it honest, and all three are tested:
+
+- Nothing it produces enters any pass rate. A queued case is not excused and
+  not penalised; it is listed for someone to read.
+- A skip is not agreement, and neither is an error. An engine that declined a
+  case did not judge it.
+- Two engines agreeing is a coin flip, and the output says so in those words
+  until there are three.
+
+Decisions live in [`corpus/dispositions.yaml`](corpus/dispositions.yaml), one
+per queued case, each with a verdict from a closed set and a written reason. A
+verdict of `corpus-bug` means the case gets fixed, and where the loader could
+have caught the mistake it becomes a load rule too. The first review, in August
+2026, ran 51 cases and found one: `optional/gc04/create-graph` wrote `CREATE
+PROPERTY GRAPH` where `PROPERTY` is optional in the production, so an engine
+that implements `CREATE GRAPH` was being reported as not implementing the
+feature at all.
+
+The method has a limit, and it is printed with every report rather than kept in
+the documentation: consensus only detects a shared misreading between engines
+that are actually independent. Three engines that all grew out of Cypher will
+agree about Cypher.
 
 ## Reproducibility
 
