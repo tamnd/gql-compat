@@ -186,13 +186,20 @@ cases:
     mutating: true
     setup:
       - "MATCH (p:Person {name: 'Carol'}) DETACH DELETE p"
+    # The social fixture has five KNOWS edges and Carol sits on three of them
+    # (b->c, a->c, c->d), so detaching her leaves a->b and d->e. The expected
+    # value here read 3 until the Neo4j run of 2026-08-12 answered 2 and the
+    # edge list was counted by hand; 3 was never a possible answer and no
+    # engine could have produced it. A corpus bug that only shows up on the
+    # first engine able to run the case is the argument for running the corpus
+    # against more than one engine.
     query: |
       MATCH ()-[k:KNOWS]->()
       RETURN COUNT(*) AS n
     expect:
       kind: rows
       columns: [n]
-      rows: [[3]]
+      rows: [[2]]
 
   - id: optional/gd01/delete-edge
     name: Deleting an edge leaves both of its endpoints in place
