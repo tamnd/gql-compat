@@ -12,7 +12,7 @@ package metrics
 import (
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"time"
 )
 
@@ -119,6 +119,12 @@ type ProcessDelta struct {
 	ReadOps    int64 `json:"read_ops"`
 	WriteOps   int64 `json:"write_ops"`
 	IOOK       bool  `json:"io_available"`
+	// IOOpsOK is separate because the byte counts and the operation counts do
+	// not come from the same place on every platform. macOS reports the bytes
+	// out of rusage_info and has nothing to say about the number of calls, so
+	// an engine measured there would otherwise publish a confident zero for a
+	// figure the system never offered.
+	IOOpsOK bool `json:"io_ops_available"`
 
 	// MinorFaults and MajorFaults separate a page that was already in memory
 	// from one that had to come off a device. A major fault during a query
@@ -168,10 +174,22 @@ func (d DiskDelta) AllocGrowth() int64 { return d.AllocAfter - d.AllocBefore }
 // other: an engine can buy a fast scan with a slow, wide write, and a report
 // that only timed queries would call that free.
 type Load struct {
-	Wall  time.Duration `json:"wall_ns"`
-	Nodes int           `json:"nodes"`
-	Edges int           `json:"edges"`
+	// Wall is everything the harness waited for: the adapter's own preparation
+	// as well as the engine's work.
+	Wall time.Duration `json:"wall_ns"`
+	// EngineWall is the part of Wall the engine itself spent, when the adapter
+	// can separate the two. An adapter that has to translate the fixture into
+	// something its engine will accept — writing a staging file, encoding a
+	// client-side batch, starting a process — is paying a harness cost, and
+	// charging it to the engine would make the same store look slower behind a
+	// clumsier route in. Zero means the adapter did not distinguish them, and
+	// then Wall is the only figure there is.
+	EngineWall time.Duration `json:"engine_wall_ns"`
+	Nodes      int           `json:"nodes"`
+	Edges      int           `json:"edges"`
 
+	// The rates are per second of IngestWall, so they describe the engine
+	// wherever the adapter told us which part was the engine.
 	NodesPerSec float64 `json:"nodes_per_sec"`
 	EdgesPerSec float64 `json:"edges_per_sec"`
 
@@ -187,17 +205,33 @@ type Load struct {
 	BytesPerNode float64 `json:"bytes_per_node"`
 }
 
+// IngestWall is the time the rates are computed against: the engine's own, if
+// the adapter reported it, and otherwise the whole wait.
+func (l *Load) IngestWall() time.Duration {
+	if l.EngineWall > 0 {
+		return l.EngineWall
+	}
+	return l.Wall
+}
+
 // Compute fills the derived rates on a Load.
 func (l *Load) Compute() {
-	secs := l.Wall.Seconds()
+	secs := l.IngestWall().Seconds()
 	if secs > 0 {
 		l.NodesPerSec = float64(l.Nodes) / secs
 		l.EdgesPerSec = float64(l.Edges) / secs
 	}
-	size := l.Disk.Growth()
-	if size <= 0 {
-		size = l.Disk.BytesAfter
-	}
+	// Density is computed from what is on disk after the load, not from the
+	// growth across it. An engine that replaces its store — which is what a
+	// bulk loader does — shows a growth that is the new graph minus the old
+	// one, and can show a negative for a load that followed a larger graph.
+	// That made the same fixture report two different densities depending on
+	// what happened to be loaded before it, which is a property of the run
+	// order and not of the encoding. A data directory is only ever measured
+	// when it holds this graph and nothing else; an engine whose store is not
+	// on this machine reports no disk at all, and no density with it. Growth
+	// is still reported beside this, where a reader can see it for what it is.
+	size := l.Disk.BytesAfter
 	if l.Edges > 0 && size > 0 {
 		l.BitsPerEdge = float64(size*8) / float64(l.Edges)
 	}
@@ -227,7 +261,7 @@ func (s *Series) Summarize() Stats {
 		totalCells += x.Cells
 		totalBytes += x.Bytes
 	}
-	sort.Slice(durs, func(i, j int) bool { return durs[i] < durs[j] })
+	slices.Sort(durs)
 
 	st.Min, st.Max = durs[0], durs[len(durs)-1]
 	st.P50 = percentile(durs, 0.50)
@@ -249,7 +283,7 @@ func (s *Series) Summarize() Stats {
 	for i, d := range durs {
 		devs[i] = time.Duration(math.Abs(float64(d) - med))
 	}
-	sort.Slice(devs, func(i, j int) bool { return devs[i] < devs[j] })
+	slices.Sort(devs)
 	st.MAD = percentile(devs, 0.50)
 
 	if secs := st.Total.Seconds(); secs > 0 {
@@ -269,13 +303,7 @@ func percentile(sorted []time.Duration, q float64) time.Duration {
 	if len(sorted) == 0 {
 		return 0
 	}
-	rank := int(math.Ceil(q*float64(len(sorted)))) - 1
-	if rank < 0 {
-		rank = 0
-	}
-	if rank >= len(sorted) {
-		rank = len(sorted) - 1
-	}
+	rank := min(max(int(math.Ceil(q*float64(len(sorted))))-1, 0), len(sorted)-1)
 	return sorted[rank]
 }
 

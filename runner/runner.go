@@ -412,11 +412,12 @@ func (e *executor) ensureLoaded(ctx context.Context, sess adapter.Session, fx *f
 	}
 
 	load := &metrics.Load{
-		Wall:    wall,
-		Nodes:   stats.Nodes,
-		Edges:   stats.Edges,
-		Process: proc,
-		Disk:    metrics.After(dir, disk),
+		Wall:       wall,
+		EngineWall: stats.EngineWall,
+		Nodes:      stats.Nodes,
+		Edges:      stats.Edges,
+		Process:    proc,
+		Disk:       metrics.After(dir, disk),
 	}
 	load.Compute()
 	e.loaded, e.dirty = fx.Name, false
@@ -516,8 +517,14 @@ func expectsFailure(c *corpus.Case) bool {
 // engine runs in it. An engine on the far end of a socket has no process here
 // to watch, and a zero pid produces a sampler that reports nothing available
 // rather than reporting zeros.
+// samplerFor watches whatever process the session currently owns, asking it
+// again on every tick rather than once at the start. A Load that restarts the
+// engine — which is how an adapter with a bulk loader reloads — would
+// otherwise be measured through the pid of the process it was about to
+// replace, and the ingest row would report the shell's idle cost instead of
+// the loader's work.
 func samplerFor(sess adapter.Session, interval time.Duration) *metrics.Sampler {
-	return metrics.NewSampler(sess.PID(), interval)
+	return metrics.NewSamplerFunc(sess.PID, interval)
 }
 
 // judge decides the verdict and records the evidence behind it.

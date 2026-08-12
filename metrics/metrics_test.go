@@ -4,7 +4,10 @@ import (
 	"errors"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +146,69 @@ func TestAnUnreadableDirectoryIsUnavailableNotZero(t *testing.T) {
 	d := metrics.Before(filepath.Join(t.TempDir(), "does-not-exist"))
 	if d.OK {
 		t.Errorf("a missing directory reported as measured: %+v", d)
+	}
+}
+
+// TestSamplerCreditsWorkDoneByAProcessThatDidNotSurviveTheWindow is the
+// bulk-load case in miniature. An adapter that reloads by stopping its shell,
+// running a converter, and starting a fresh shell spends nearly all of the
+// window's CPU in a process that is gone by the time Stop takes its final
+// reading. A sampler that subtracts endpoints reports the new shell's first
+// few milliseconds; one that banks each process reports the converter.
+func TestSamplerCreditsWorkDoneByAProcessThatDidNotSurviveTheWindow(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the busy loop below is a POSIX shell")
+	}
+	var mu sync.Mutex
+	var current *exec.Cmd
+	pid := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		if current == nil || current.Process == nil {
+			return 0
+		}
+		return current.Process.Pid
+	}
+	start := func(script string) *exec.Cmd {
+		cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", script)
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("starting %q: %v", script, err)
+		}
+		mu.Lock()
+		current = cmd
+		mu.Unlock()
+		return cmd
+	}
+	stop := func(cmd *exec.Cmd) {
+		mu.Lock()
+		current = nil
+		mu.Unlock()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}
+
+	s := metrics.NewSamplerFunc(pid, time.Millisecond)
+	s.Start()
+	// The work: a process that burns a core and then dies, exactly as a
+	// converter does.
+	busy := start("while :; do :; done")
+	time.Sleep(300 * time.Millisecond)
+	stop(busy)
+	// The gap, and then the replacement, which does nothing at all.
+	time.Sleep(20 * time.Millisecond)
+	idle := start("sleep 30")
+	time.Sleep(20 * time.Millisecond)
+	d := s.Stop()
+	stop(idle)
+
+	if !d.CPUOK {
+		t.Skip("this platform does not expose per-process CPU time")
+	}
+	// 300 ms of spinning on a loaded CI box still leaves well over 100 ms of
+	// CPU. The threshold is loose on purpose: the point is that the figure is
+	// the converter's, not that it is exact.
+	if got := d.CPUUser + d.CPUSys; got < 100*time.Millisecond {
+		t.Errorf("CPU over the window was %v, want the busy process's share of 300ms", got)
 	}
 }
 

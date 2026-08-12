@@ -99,7 +99,12 @@ func headline(rep *runner.Report) string {
 		parts = append(parts, fmt.Sprintf("%d were skipped because the engine declared it could not hold the fixture or accept the case's shape", t.Skip))
 	}
 	if t.Error > 0 {
-		parts = append(parts, fmt.Sprintf("%d could not be judged because the harness or the session failed", t.Error))
+		// Not "the harness failed": the commonest error by far is a setup
+		// statement the engine refused, which is the engine's answer and not a
+		// malfunction of this tool. Naming a culprit the summary cannot know
+		// sends a reader to debug the wrong program; the failure list below
+		// gives the reason for each one.
+		parts = append(parts, fmt.Sprintf("%d never reached a verdict — the case, its setup, or the session did not complete", t.Error))
 	}
 	if t.WeakEvidence > 0 {
 		parts = append(parts, fmt.Sprintf("%d passes rest on error-text matching rather than a GQLSTATUS and are the weakest evidence here", t.WeakEvidence))
@@ -395,8 +400,9 @@ func writeLoads(b io.Writer, rep *runner.Report) {
 	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
 	p("## Ingest\n\n")
 	p("One row per fixture load. Cases that reused a graph another case had already loaded contribute nothing here, which is why these times must not be summed into a per-case cost.\n\n")
-	p("| Fixture | Triggered by | Nodes | Edges | Wall | nodes/s | edges/s | Apparent Δ | Allocated Δ | bits/edge | bytes/node | RSS peak | CPU |\n")
-	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	p("**Wall** is everything the harness waited for; **engine** is the part of it the engine itself spent, where the adapter can separate the two, and is what the rates are computed against. The gap between them is this harness's cost of getting the fixture in — a staging file, an encoded batch, a process start — and belongs to the route rather than to the store.\n\n")
+	p("| Fixture | Triggered by | Nodes | Edges | Wall | Engine | nodes/s | edges/s | Apparent Δ | Allocated Δ | bits/edge | bytes/node | RSS peak | CPU |\n")
+	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
 	for i := range loads {
 		c := loads[i]
 		l := c.Load
@@ -404,8 +410,12 @@ func writeLoads(b io.Writer, rep *runner.Report) {
 		if l.Process.CPUOK {
 			cpu = metrics.Format(l.Process.CPUUser + l.Process.CPUSys)
 		}
-		p("| %s | `%s` | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
-			c.Fixture, c.ID, l.Nodes, l.Edges, metrics.Format(l.Wall),
+		engine := "—"
+		if l.EngineWall > 0 {
+			engine = metrics.Format(l.EngineWall)
+		}
+		p("| %s | `%s` | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+			c.Fixture, c.ID, l.Nodes, l.Edges, metrics.Format(l.Wall), engine,
 			num(l.NodesPerSec), num(l.EdgesPerSec),
 			dashSigned(l.Disk.OK, l.Disk.Growth()), dashSigned(l.Disk.OK, l.Disk.AllocGrowth()),
 			dashFloat(l.Disk.OK, l.BitsPerEdge), dashFloat(l.Disk.OK, l.BytesPerNode),

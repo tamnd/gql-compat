@@ -38,7 +38,7 @@ var csvColumns = []string{
 	"disk_alloc_before_bytes", "disk_alloc_after_bytes", "disk_alloc_growth_bytes",
 	"disk_files",
 
-	"load_wall_ns", "load_nodes", "load_edges",
+	"load_wall_ns", "load_engine_wall_ns", "load_nodes", "load_edges",
 	"load_nodes_per_sec", "load_edges_per_sec",
 	"load_disk_growth_bytes", "load_bits_per_edge", "load_bytes_per_node",
 	"load_rss_peak_bytes", "load_cpu_user_ns", "load_cpu_sys_ns",
@@ -93,7 +93,7 @@ func csvRow(c *runner.CaseResult) []string {
 		when(p.MemoryOK, i64(p.VMSPeak)), when(p.MemoryOK, i64(p.SwapPeak)),
 		when(p.MemoryOK, itoa(int(p.NumThread))),
 		when(p.IOOK, i64(p.ReadBytes)), when(p.IOOK, i64(p.WriteBytes)),
-		when(p.IOOK, i64(p.ReadOps)), when(p.IOOK, i64(p.WriteOps)),
+		when(p.IOOpsOK, i64(p.ReadOps)), when(p.IOOpsOK, i64(p.WriteOps)),
 		when(p.FaultsOK, i64(p.MinorFaults)), when(p.FaultsOK, i64(p.MajorFaults)),
 		when(p.CtxOK, i64(p.VoluntaryCS)), when(p.CtxOK, i64(p.InvoluntaryCS)),
 		itoa(p.Samples),
@@ -107,7 +107,7 @@ func csvRow(c *runner.CaseResult) []string {
 
 	if l := c.Load; l != nil {
 		row = append(row,
-			dur(l.Wall), itoa(l.Nodes), itoa(l.Edges),
+			dur(l.Wall), when(l.EngineWall > 0, dur(l.EngineWall)), itoa(l.Nodes), itoa(l.Edges),
 			ftoa(l.NodesPerSec), ftoa(l.EdgesPerSec),
 			when(l.Disk.OK, i64(l.Disk.Growth())),
 			when(l.Disk.OK, ftoa(l.BitsPerEdge)), when(l.Disk.OK, ftoa(l.BytesPerNode)),
@@ -118,7 +118,7 @@ func csvRow(c *runner.CaseResult) []string {
 	} else {
 		// This case reused a fixture another case loaded. Blank is right:
 		// zero would say the load was free.
-		row = append(row, "", "", "", "", "", "", "", "", "", "", "")
+		row = append(row, "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 
 	row = append(row,
