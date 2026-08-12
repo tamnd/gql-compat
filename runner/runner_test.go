@@ -133,15 +133,20 @@ func table(col string, values ...any) *rows.Table {
 // on the third.
 func engine(t *testing.T, adjust func(*fake.Config)) adapter.Driver {
 	t.Helper()
-	caps := adapter.Capabilities{
-		Data: map[fixture.Capability]bool{
-			fixture.CapLabels:            true,
-			fixture.CapNodeProperties:    true,
-			fixture.CapEdgeTypes:         true,
-			fixture.CapMultipleEdgeTypes: true,
-		},
-		GQLStatus: true,
+	// Every capability is named, including the ones this engine does not have.
+	// The runner refuses a map with a hole in it, because a hole reads as "no"
+	// and there is no way afterwards to tell a limitation from an oversight.
+	supported := map[fixture.Capability]bool{
+		fixture.CapLabels:            true,
+		fixture.CapNodeProperties:    true,
+		fixture.CapEdgeTypes:         true,
+		fixture.CapMultipleEdgeTypes: true,
 	}
+	data := make(map[fixture.Capability]bool, len(fixture.AllCapabilities))
+	for _, c := range fixture.AllCapabilities {
+		data[c] = supported[c]
+	}
+	caps := adapter.Capabilities{Data: data, GQLStatus: true}
 	cfg := fake.Config{
 		Capabilities: caps,
 		Answers: map[string]fake.Answer{
@@ -180,6 +185,24 @@ func result(t *testing.T, rep *runner.Report, id string) *runner.CaseResult {
 	}
 	t.Fatalf("no result for %s", id)
 	return nil
+}
+
+// The Neo4j adapter shipped with float-values and boolean-values missing from
+// its map and the run of 2026-08-12 published "no" against an engine that
+// supports both, skipping four cases to get there. A missing key and a key set
+// to false are the same value in Go and they are not the same claim, so the
+// run stops before it can print one as the other.
+func TestAnUndeclaredCapabilityStopsTheRunRatherThanReadingAsNo(t *testing.T) {
+	d := engine(t, func(c *fake.Config) {
+		delete(c.Capabilities.Data, fixture.CapFloatValues)
+	})
+	_, err := load(t).Run(t.Context(), d, runner.Config{Repeats: 1, WorkDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("a run started against an adapter that never mentioned float-values")
+	}
+	if !strings.Contains(err.Error(), string(fixture.CapFloatValues)) {
+		t.Errorf("error %q does not name the capability that was left out", err)
+	}
 }
 
 func TestCorrectAnswerPasses(t *testing.T) {

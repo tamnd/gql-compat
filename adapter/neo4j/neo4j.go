@@ -18,7 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
+	"os"
 	"strings"
 	"time"
 
@@ -84,17 +84,102 @@ func (d *Driver) Version(ctx context.Context) (string, error) {
 	}
 	s := d.driver.NewSession(ctx, neo.SessionConfig{DatabaseName: d.database})
 	defer func() { _ = s.Close(ctx) }()
+	// dbms.components() returns one row per component, and since 2025 that is
+	// at least two: the kernel and the Cypher language version. Asking for a
+	// single record made the version read "unknown: Result contains more than
+	// one record" against 2026.07. Every row is kept and joined, because the
+	// Cypher version is part of what a conformance claim has to be pinned to:
+	// the same kernel speaks Cypher 5 and Cypher 25 and they are not the same
+	// language.
 	res, err := s.Run(ctx, "CALL dbms.components() YIELD name, versions, edition "+
-		"RETURN name + ' ' + versions[0] + ' ' + edition AS v", nil)
+		"RETURN name AS name, versions AS versions, edition AS edition", nil)
 	if err != nil {
 		return "", err
 	}
-	rec, err := res.Single(ctx)
+	recs, err := res.Collect(ctx)
 	if err != nil {
 		return "", err
 	}
-	v, _ := rec.Get("v")
-	return fmt.Sprint(v), nil
+	parts := make([]string, 0, len(recs))
+	for _, rec := range recs {
+		name, _ := rec.Get("name")
+		versions, _ := rec.Get("versions")
+		edition, _ := rec.Get("edition")
+		part := fmt.Sprint(name) + " " + joinVersions(versions)
+		if e := fmt.Sprint(edition); e != "" && e != "<nil>" {
+			part += " " + e
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return "", errors.New("neo4j: dbms.components() returned no rows")
+	}
+
+	// The language the database parses by default is part of the version, and
+	// getting it wrong invalidates a whole run, so it is checked here rather
+	// than reported and left to the reader. See defaultLanguage.
+	if lang := d.defaultLanguage(ctx, s); lang != "" {
+		parts = append(parts, "default language "+lang)
+		if lang != cypher25 && os.Getenv(anyLanguageEnv) == "" {
+			return "", fmt.Errorf("neo4j: database %q parses %s by default, and this corpus is GQL text: the server answers a GQL construct it understands perfectly well with %q and the harness records a syntax error, so the run would measure the language version rather than the engine. Run `ALTER DATABASE %s SET DEFAULT LANGUAGE %s`, or set %s=1 to measure %s deliberately",
+				d.database, lang,
+				"The query is parsable in `CYPHER 25`, but it is run in `CYPHER 5`",
+				d.database, cypher25, anyLanguageEnv, lang)
+		}
+	}
+	return strings.Join(parts, ", "), nil
+}
+
+// cypher25 is the language version this adapter expects to measure. Cypher 25
+// is the version Neo4j's GQL conformance appendix documents; Cypher 5 predates
+// the alignment and rejects a large part of the GQL surface outright.
+const cypher25 = "CYPHER 25"
+
+// anyLanguageEnv opts out of the check above, for someone who wants the older
+// language measured on purpose. It is an environment variable rather than a
+// flag for the same reason the password is: it is not something to leave in a
+// shell history as though it were an ordinary run.
+const anyLanguageEnv = "GQL_COMPAT_NEO4J_ANY_LANGUAGE"
+
+// defaultLanguage reports the database's default query language, or "" if the
+// server is too old to have one.
+//
+// A server that predates Cypher 25 has no defaultLanguage column and nothing
+// to check, because the only language it speaks is the one it speaks. That is
+// why this returns no error: every failure here means the same thing, which is
+// that there is no language version to report, and the check exists to catch a
+// misconfiguration rather than to become a new reason a run cannot start
+// against a server that is simply older.
+func (d *Driver) defaultLanguage(ctx context.Context, s neo.Session) string {
+	res, err := s.Run(ctx, "SHOW DATABASES YIELD name, defaultLanguage "+
+		"WHERE name = $name RETURN defaultLanguage AS lang", map[string]any{"name": d.database})
+	if err != nil {
+		return ""
+	}
+	recs, err := res.Collect(ctx)
+	if err != nil || len(recs) == 0 {
+		return ""
+	}
+	lang, _ := recs[0].Get("lang")
+	if lang == nil {
+		return ""
+	}
+	return fmt.Sprint(lang)
+}
+
+// joinVersions renders the versions list of one component. It is a list
+// because a component can speak more than one version at once, which Cypher
+// does, so taking element zero would silently drop half the answer.
+func joinVersions(v any) string {
+	list, ok := v.([]any)
+	if !ok {
+		return fmt.Sprint(v)
+	}
+	out := make([]string, len(list))
+	for i, item := range list {
+		out[i] = fmt.Sprint(item)
+	}
+	return strings.Join(out, "/")
 }
 
 // Capabilities declares Neo4j's data model.
@@ -117,6 +202,13 @@ func (d *Driver) Capabilities() adapter.Capabilities {
 			fixture.CapListValues:         true,
 			fixture.CapSelfLoops:          true,
 			fixture.CapParallelEdges:      true,
+			// These two were left out of the map until the run of 2026-08-12,
+			// and a missing key reads as false, so the report said Neo4j could
+			// not hold a float or a boolean and skipped four cases on the
+			// strength of it. Both are mandatory GQL property types and the
+			// Cypher manual lists both as supported.
+			fixture.CapFloatValues:   true,
+			fixture.CapBooleanValues: true,
 			// Neo4j stores an absent property rather than a null one; a null
 			// assigned by SET removes the property.
 			fixture.CapNullProperties:  false,
@@ -182,8 +274,10 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 
 	byLabels := map[string][]map[string]any{}
 	for _, n := range fx.Nodes {
-		props := map[string]any{"_key": n.Key}
-		maps.Copy(props, n.Props)
+		props, err := boltProps(map[string]any{"_key": n.Key}, n.Props)
+		if err != nil {
+			return adapter.LoadStats{}, fmt.Errorf("neo4j: node %s: %w", n.Key, err)
+		}
 		byLabels[labelKey(n.Labels)] = append(byLabels[labelKey(n.Labels)], props)
 	}
 	for labels, batch := range byLabels {
@@ -195,8 +289,10 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 
 	byType := map[string][]map[string]any{}
 	for _, e := range fx.Edges {
-		props := map[string]any{}
-		maps.Copy(props, e.Props)
+		props, err := boltProps(map[string]any{}, e.Props)
+		if err != nil {
+			return adapter.LoadStats{}, fmt.Errorf("neo4j: edge %s->%s: %w", e.From, e.To, err)
+		}
 		byType[e.Type] = append(byType[e.Type], map[string]any{
 			"from": e.From, "to": e.To, "props": props,
 		})
@@ -220,6 +316,67 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 		EngineWall: time.Since(started),
 		Detail:     fmt.Sprintf("%d label sets, %d edge types", len(byLabels), len(byType)),
 	}, nil
+}
+
+// boltProps copies a fixture's properties into a parameter map the driver can
+// send, turning the fixture's tagged temporal literals into the driver's
+// temporal types on the way.
+//
+// It exists because of a load failure in the run of 2026-08-12: the props were
+// copied verbatim and {duration: "P2D"} reached the server as a map, which
+// Bolt has no property type for. Two cases errored and the two temporal
+// features they cover went unmeasured against an engine that supports both.
+// The reading of the literal is fixture's, not this adapter's, so that every
+// engine loads the same value.
+func boltProps(into, props map[string]any) (map[string]any, error) {
+	for k, v := range props {
+		t, ok := fixture.AsTemporal(v)
+		if !ok {
+			into[k] = v
+			continue
+		}
+		conv, err := boltTemporal(t)
+		if err != nil {
+			return nil, fmt.Errorf("property %s: %w", k, err)
+		}
+		into[k] = conv
+	}
+	return into, nil
+}
+
+// boltTemporal maps one fixture temporal onto the driver type Bolt carries for
+// it. A local kind is sent as the driver's local type rather than as an
+// instant, because a timestamp with no zone that arrives as one has silently
+// acquired a zone.
+func boltTemporal(t fixture.Temporal) (any, error) {
+	if t.Kind == fixture.KindDuration {
+		d, err := t.Duration()
+		if err != nil {
+			return nil, err
+		}
+		return dbtype.Duration{
+			Months: int64(d.Months), Days: int64(d.Days),
+			Seconds: d.Seconds, Nanos: d.Nanos,
+		}, nil
+	}
+	at, err := t.Time()
+	if err != nil {
+		return nil, err
+	}
+	switch t.Kind {
+	case fixture.KindDate:
+		return dbtype.Date(at), nil
+	case fixture.KindLocalTime:
+		return dbtype.LocalTime(at), nil
+	case fixture.KindTime:
+		return dbtype.Time(at), nil
+	case fixture.KindLocalDateTime:
+		return dbtype.LocalDateTime(at), nil
+	case fixture.KindDateTime:
+		return at, nil
+	default:
+		return nil, fmt.Errorf("neo4j: no Bolt type for %s", t.Kind)
+	}
 }
 
 func labelKey(labels []string) string {

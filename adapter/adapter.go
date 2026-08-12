@@ -67,6 +67,30 @@ type Capabilities struct {
 // Has reports whether the engine supports a data capability.
 func (c Capabilities) Has(cap fixture.Capability) bool { return c.Data[cap] }
 
+// Undeclared returns the data capabilities this adapter never mentioned, in
+// AllCapabilities order.
+//
+// Data is a map and a missing key reads as false, so an adapter that forgets
+// one is indistinguishable from an adapter that has thought about it and said
+// no. The difference matters: the second is a finding about the engine and the
+// first is a bug in the adapter, and both come out of the report as the same
+// word. It has already happened once. The Neo4j adapter shipped without
+// float-values or boolean-values in its map and the run of 2026-08-12 skipped
+// four cases and printed "no" twice against an engine that supports both.
+//
+// The rule here is the one 06 §1 applies to metrics: not measured is not zero,
+// and not declared is not "no". A caller that gets a non-empty result should
+// refuse to run rather than publish the ambiguity.
+func (c Capabilities) Undeclared() []fixture.Capability {
+	var out []fixture.Capability
+	for _, x := range fixture.AllCapabilities {
+		if _, ok := c.Data[x]; !ok {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
 // DataList returns the supported data capabilities in AllCapabilities order.
 func (c Capabilities) DataList() []fixture.Capability {
 	var out []fixture.Capability

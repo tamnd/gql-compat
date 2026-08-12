@@ -57,12 +57,31 @@ cases:
     expect:
       kind: accept
 
+  # The four cases below were rewritten after the Neo4j run of 2026-08-12. The
+  # grammar draws a line the first version of this file missed: a delimited
+  # identifier is admitted wherever the BNF writes <identifier>, and a variable
+  # is not one of those places. <element variable> resolves to <binding
+  # variable> and <binding variable> ::= <regular identifier>, with no
+  # alternative, while <label name>, <property name> and <return item alias>
+  # all resolve to <identifier> ::= <regular identifier> | <delimited
+  # identifier>. Neo4j's conformance appendix states the same line from the
+  # other side, under subclause 21.1: "GQL allows identifiers that are not
+  # variables to be delimited with both backticks and quotes. Cypher only
+  # allows backticks." The qualifier "that are not variables" is doing real
+  # work and this file had not noticed it.
+
   - id: grammar/delimited-identifier-accent
-    name: An accent-quoted identifier may contain characters a regular one may not
+    name: An accent-quoted identifier may stand where the grammar writes an identifier
     subclauses: ["21.3"]
-    productions: [delimited identifier, accent quoted character sequence]
+    productions: [label name, delimited identifier, accent quoted character sequence]
+    # This case used to put the accent-quoted identifier in the variable slot,
+    # where the grammar does not admit one, and every engine tested accepted it
+    # because Cypher allows backticked variables. It was scoring a pass for a
+    # construct ISO has no production for, which is the one thing a grammar
+    # case exists to prevent. The identifier now sits in a label name, where
+    # <identifier> really does reach <delimited identifier>.
     query: |
-      MATCH (`odd name`:Unit)
+      MATCH (u:`Unit`)
       RETURN 1 AS v
     expect:
       kind: accept
@@ -70,20 +89,45 @@ cases:
   - id: grammar/delimited-identifier-double-quoted
     name: A double-quoted identifier is the other delimited form
     subclauses: ["21.3"]
-    productions: [delimited identifier, double quoted character sequence]
-    # An engine that reads double quotes as a string literal will take this as
-    # a node pattern containing a value and refuse it, or worse, accept it as
-    # something else. Both are worth knowing.
+    productions: [label name, delimited identifier, double quoted character sequence]
+    # <delimited identifier> ::= <double quoted character sequence> | <accent
+    # quoted character sequence>, so the two forms are interchangeable and an
+    # engine that takes one and refuses the other is reading double quotes as a
+    # string literal. Both zu and Neo4j refuse it. For Neo4j that is a declared
+    # gap rather than a defect found here: the appendix quoted above says
+    # Cypher allows only backticks, and gives MATCH (n) RETURN n."a prop" as an
+    # example of GQL that Cypher will not take. Engine finding, vendor
+    # acknowledged.
     query: |
-      MATCH ("odd name":Unit)
+      MATCH (u:"Unit")
       RETURN 1 AS v
     expect:
       kind: accept
 
+  - id: grammar/reject-delimited-identifier-as-variable
+    name: A variable is a regular identifier and cannot be delimited
+    subclauses: ["21.3"]
+    productions: [binding variable, element variable, regular identifier]
+    # The rule the accent case used to get wrong, asserted directly. There is
+    # no reading of the BNF that admits a delimited identifier here: the chain
+    # is <element variable> ::= <binding variable> ::= <regular identifier>,
+    # one alternative and no more. Cypher accepts backticked variables, so this
+    # is expected to fail on Neo4j and on anything else that grew out of
+    # Cypher. That is the divergence being reported.
+    query: |
+      MATCH (`odd name`:Unit)
+      RETURN 1 AS v
+    expect:
+      kind: reject
+
   - id: grammar/delimited-identifier-holds-a-keyword
     name: Delimiting an identifier lets it be spelled like a keyword
     subclauses: ["21.3"]
-    productions: [delimited identifier, binding variable]
+    productions: [return item alias, identifier, delimited identifier]
+    # <return item alias> ::= AS <identifier>, and <identifier> admits the
+    # delimited form, so the alias slot is one of the places a reserved word
+    # may be spelled out. The productions field used to say binding variable,
+    # which is the slot this case is specifically not testing.
     query: |
       RETURN 1 AS `MATCH`
     expect:
@@ -92,25 +136,30 @@ cases:
   - id: grammar/reject-keyword-as-bare-identifier
     name: A reserved word is not a regular identifier
     subclauses: ["21.3"]
-    productions: [regular identifier, binding variable]
+    productions: [regular identifier, return item alias]
+    # MATCH is in <reserved word> in the BNF. The exclusion of reserved words
+    # from <regular identifier> lives in the Syntax Rules prose rather than in
+    # the productions, so the machine-readable artifact alone does not settle
+    # it, but Neo4j's appendix does: subclause 21.3 is on its list of mandatory
+    # features Cypher does not support, with the note that GQL reserves words
+    # that cannot be used as unquoted variable names, labels and property
+    # names, and that Cypher's list differs. Both engines accept this. Engine
+    # finding, vendor acknowledged.
     query: |
       RETURN 1 AS MATCH
     expect:
       kind: reject
 
-  - id: grammar/reject-trailing-semicolon
-    name: A statement terminator is not part of the GQL grammar
-    subclauses: ["21.3"]
-    productions: [GQL-program, token]
-    # No production in ISO/IEC 39075 admits a semicolon, so a conforming
-    # implementation has nothing to do with one. Almost every engine accepts
-    # it anyway, inherited from SQL clients. That divergence is the point of
-    # this case; it is reported, not scored as a defect of the engine's
-    # usefulness.
-    query: |
-      MATCH (u:Unit) RETURN 1 AS v;
-    expect:
-      kind: reject
+  # grammar/reject-trailing-semicolon was removed after the Neo4j run of
+  # 2026-08-12. The semicolon character appears nowhere in the 814 productions
+  # and <GQL-program> has no terminator, so the case was right that ISO does
+  # not define it, but being undefined is not the same as being forbidden.
+  # Subclause 24.5.3 lets an implementation add constructs it documents, and
+  # every engine tested takes a trailing semicolon, so scoring a fail for it
+  # was scoring a preference. The header of this file already says refusal
+  # cases are deliberately not near the boundary, and that one was sitting on
+  # it. The observation is worth keeping and it belongs in the
+  # implementation-defined section, which is M5.
 
   - id: grammar/reject-dangling-edge-pattern
     name: An edge pattern with no node after it is not a path pattern

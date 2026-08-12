@@ -115,7 +115,7 @@ func Load(root fs.FS, known KnownCodes) (*Suite, *fixture.Set, error) {
 // node, so a reference to a higher-numbered one names a property that will
 // never exist. The scan runs over the statement with quoted strings removed,
 // which is the only place a `.p3` could appear without being a property read.
-var generatedProperty = regexp.MustCompile(`\.p([0-9]+)\b`)
+var generatedProperty = regexp.MustCompile(`\.p(\d+)\b`)
 
 // checkGeneratedProperties rejects a case that reads a selectivity property
 // its fixture was not generated with.

@@ -117,6 +117,13 @@ func (d *Driver) Capabilities() adapter.Capabilities {
 			fixture.CapListValues:         true,
 			fixture.CapSelfLoops:          true,
 			fixture.CapParallelEdges:      true,
+			// An ANY graph's property map holds whatever value it is given, so
+			// these two are the same yes as the rest. They were missing from
+			// this map, which is not the same as being false, and the runner
+			// now refuses a map with a hole in it rather than print the
+			// omission as a limitation of the engine.
+			fixture.CapFloatValues:   true,
+			fixture.CapBooleanValues: true,
 			// An ANY graph's property map has no slot for a property whose
 			// value is null; writing one is indistinguishable from omitting it.
 			fixture.CapNullProperties: false,
