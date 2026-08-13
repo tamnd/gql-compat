@@ -356,21 +356,52 @@ func writeLatency(b io.Writer, rep *runner.Report) {
 	}
 	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
 	p("## Latency, per case\n\n")
-	p("Every case ran %d times after %d warmup%s. Percentiles are nearest-rank over that many samples and are not interpolated: with this few samples an interpolated p99 would be an invention.\n\n",
-		rep.Run.Repeats, rep.Run.Warmups, plural(rep.Run.Warmups))
-	p("| Case | n | min | p50 | p90 | p99 | max | mean | stddev | MAD | rows | q/s | rows/s |\n")
-	p("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	p("A read case ran %d time%s after %d warmup%s. Percentiles are nearest-rank over that many samples and are not interpolated: with this few samples an interpolated p99 would be an invention.\n\n",
+		rep.Run.Repeats, plural(rep.Run.Repeats), rep.Run.Warmups, plural(rep.Run.Warmups))
+	p("**How** is the treatment that produced the samples. `series` is that default. `restored` is a statement that changes the graph, measured with the fixture rebuilt before each execution so that every sample is its first application; the rebuilds are outside the samples, and the process and storage figures for such a case describe its last execution. `cold-once` is a statement that changes the graph and could not be repeated that way, which is one sample and no distribution.\n\n")
+	p("| Case | how | n | min | p50 | p90 | p99 | max | mean | stddev | MAD | rows | q/s | rows/s |\n")
+	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
 	for i := range ran {
 		c := ran[i]
 		s := c.Stats
-		p("| `%s` | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
-			c.ID, s.Count,
+		p("| `%s` | %s | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+			c.ID, timingCell(c), s.Count,
 			metrics.Format(s.Min), metrics.Format(s.P50), metrics.Format(s.P90),
 			metrics.Format(s.P99), metrics.Format(s.Max), metrics.Format(s.Mean),
 			metrics.Format(s.StdDev), metrics.Format(s.MAD),
 			num(s.MeanRows), num(s.QueriesPerSec), num(s.RowsPerSec))
 	}
 	p("\n")
+	timingNotes(b, ran)
+}
+
+// timingCell names the treatment. A reader comparing two rows is entitled to
+// know that one of them is a single cold sample before drawing anything from
+// the comparison.
+func timingCell(c *runner.CaseResult) string {
+	if c.Timing == "" {
+		return string(runner.TimingSeries)
+	}
+	return string(c.Timing)
+}
+
+// timingNotes is the arithmetic behind every treatment the runner had to choose
+// rather than apply, one line per case, printed under the table it explains.
+func timingNotes(b io.Writer, cases []*runner.CaseResult) {
+	var lines []string
+	for _, c := range cases {
+		if n := c.TimingNote; n != "" {
+			lines = append(lines, fmt.Sprintf("- `%s`: %s\n", c.ID, n))
+		}
+	}
+	if len(lines) == 0 {
+		return
+	}
+	fmt.Fprint(b, "Where a case did not get the default treatment, this is why:\n\n")
+	for _, l := range lines {
+		fmt.Fprint(b, l)
+	}
+	fmt.Fprint(b, "\n")
 }
 
 func writeResources(b io.Writer, rep *runner.Report) {
@@ -416,8 +447,9 @@ func writeLoads(b io.Writer, rep *runner.Report) {
 	p("## Ingest\n\n")
 	p("One row per fixture load. Cases that reused a graph another case had already loaded contribute nothing here, which is why these times must not be summed into a per-case cost.\n\n")
 	p("**Wall** is everything the harness waited for; **engine** is the part of it the engine itself spent, where the adapter can separate the two, and is what the rates are computed against. The gap between them is this harness's cost of getting the fixture in — a staging file, an encoded batch, a process start — and belongs to the route rather than to the store.\n\n")
-	p("| Fixture | Triggered by | Nodes | Edges | Wall | Engine | nodes/s | edges/s | Apparent Δ | Allocated Δ | bits/edge | bytes/node | RSS peak | CPU |\n")
-	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	p("%s\n\n", floorSentence(rep))
+	p("| Fixture | Triggered by | Nodes | Edges | Wall | Engine | nodes/s | edges/s | Apparent Δ | Allocated Δ | × floor | bits/edge | bytes/node | RSS peak | CPU |\n")
+	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
 	for i := range loads {
 		c := loads[i]
 		l := c.Load
@@ -429,14 +461,72 @@ func writeLoads(b io.Writer, rep *runner.Report) {
 		if l.EngineWall > 0 {
 			engine = metrics.Format(l.EngineWall)
 		}
-		p("| %s | `%s` | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+		p("| %s | `%s` | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 			c.Fixture, c.ID, l.Nodes, l.Edges, metrics.Format(l.Wall), engine,
 			num(l.NodesPerSec), num(l.EdgesPerSec),
 			dashSigned(l.Disk.OK, l.Disk.Growth()), dashSigned(l.Disk.OK, l.Disk.AllocGrowth()),
-			dashFloat(l.Disk.OK, l.BitsPerEdge), dashFloat(l.Disk.OK, l.BytesPerNode),
+			floorCell(l), dashFloat(l.DensityOK, l.BitsPerEdge), dashFloat(l.DensityOK, l.BytesPerNode),
 			dashBytes(l.Process.MemoryOK, l.Process.RSSPeak), cpu)
 	}
 	p("\n")
+	if notes := densityNotes(loadsOf(loads)); len(notes) > 0 {
+		p("Where the density columns hold a dash, the run declined to divide:\n\n")
+		for _, n := range notes {
+			p("- %s\n", n)
+		}
+		p("\n")
+	}
+}
+
+// floorSentence explains the empty store the density columns are checked
+// against, and says so even when there is no empty store to report. A reader
+// who cannot see the check has to know to make it, and the whole point of the
+// check is that nobody did.
+func floorSentence(rep *runner.Report) string {
+	es := rep.Engine.EmptyStore
+	if !es.OK {
+		reason := es.Note
+		if reason == "" {
+			reason = "the run did not measure one"
+		}
+		return fmt.Sprintf("The bits/edge and bytes/node columns are withheld throughout, because they are the whole store divided by the graph and this run does not know how much of the store is the engine's own preallocation: %s.", reason)
+	}
+	return fmt.Sprintf("The × floor column is the loaded store over this engine's empty one, which weighs %s across %d files with no graph in it. Below %g× the store is mostly that floor, dividing it by the fixture measures the preallocation, and bits/edge and bytes/node are withheld rather than printed. A load that clears the floor is checked once more, per element, because an engine whose empty store is measured before it has written anything understates its own fixed cost: a graph whose single node or single edge appears to weigh more than the whole empty store is measuring allocation, and its density is withheld too. That second check catches the shares that are absurd rather than the ones that are merely inflated, so a small fixture that clears both is still worth reading beside a large one rather than on its own.",
+		metrics.FormatBytes(es.Bytes), es.Files, metrics.DensityFloor)
+}
+
+func floorCell(l *metrics.Load) string {
+	if l.FloorRatio <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f×", l.FloorRatio)
+}
+
+// loadsOf pulls the loads out of the cases that triggered them.
+func loadsOf(cases []runner.CaseResult) []*metrics.Load {
+	out := make([]*metrics.Load, 0, len(cases))
+	for i := range cases {
+		if cases[i].Load != nil {
+			out = append(out, cases[i].Load)
+		}
+	}
+	return out
+}
+
+// densityNotes collects the distinct reasons density was withheld, in the order
+// they first appear. Nine loads of the same engine usually share one reason,
+// and printing it nine times would bury it.
+func densityNotes(loads []*metrics.Load) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, l := range loads {
+		if l.DensityOK || l.DensityNote == "" || seen[l.DensityNote] {
+			continue
+		}
+		seen[l.DensityNote] = true
+		out = append(out, l.DensityNote)
+	}
+	return out
 }
 
 // ExplorationHeading is the section a grammar walk gets. It is a description of

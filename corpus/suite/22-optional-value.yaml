@@ -386,3 +386,120 @@ cases:
       unordered: true
       columns: [name]
       rows: [[launch]]
+
+  - id: optional/gl09/float-number-suffix
+    name: An F suffix writes a literal as single precision
+    features: [GL09]
+    subclauses: ["21.2", "4.16.5.5"]
+    productions: [approximate numeric literal, approximate number suffix]
+    tags: [lexical, numeric]
+    # 1.5 is exact in both single and double precision, so the row is the same
+    # whichever the engine widens to and the only thing the case measures is
+    # whether the suffix parses.
+    query: |
+      RETURN 1.5F AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1.5]]
+
+  - id: optional/gl10/double-number-suffix
+    name: A D suffix writes a literal as double precision
+    features: [GL10]
+    subclauses: ["21.2", "4.16.5.5"]
+    productions: [approximate numeric literal, approximate number suffix]
+    tags: [lexical, numeric]
+    query: |
+      RETURN 1.5D AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1.5]]
+
+  - id: optional/ga04/comparing-values-of-different-types
+    name: Universal comparison orders values that are not of one type
+    features: [GA04]
+    subclauses: ["22.20", "19.3"]
+    productions: [comparison predicate, comparison predicate part 2]
+    # ISO gives value types a precedence so that any two values can be ordered,
+    # and an engine without the feature raises 22G04 instead. Which of the two
+    # values this engine calls smaller depends on that precedence, so the case
+    # asserts only that the comparison was answered rather than refused; the
+    # 22G04 case in 31-conditions-value.yaml is the other half of the pair.
+    query: |
+      RETURN 1 < 'a' AS v
+    expect:
+      kind: accept
+
+  - id: optional/ge06/path-value-construction
+    name: PATH builds a path value out of nodes and edges
+    features: [GE06]
+    subclauses: ["20.14", "4.11.2"]
+    productions: [path value constructor, path value constructor by enumeration, path element list]
+    requires: [GA09]
+    fixture: chain
+    tags: [read, expression, path]
+    # The constructed path names the same three elements the pattern matched,
+    # so it must equal the matched path. Comparing them is what makes the case
+    # evidence about the value that was built rather than about the statement
+    # parsing, and it needs GA09, which is why the case requires it.
+    query: |
+      MATCH p = (a:Step)-[e:LINK]->(b:Step)
+      WHERE a.step = 0
+      RETURN PATH [a, e, b] = p AS same
+    expect:
+      kind: rows
+      columns: [same]
+      rows: [[true]]
+
+  - id: optional/ga09/comparing-two-paths
+    name: Two paths over the same elements compare equal
+    features: [GA09]
+    subclauses: ["22.13", "4.11.2"]
+    productions: [comparison predicate, path value expression]
+    fixture: chain
+    tags: [read, expression, path]
+    # Both patterns match the same one-hop path from n0, so the two bindings
+    # are the same path and an engine that compares paths at all must say so.
+    query: |
+      MATCH p = (a:Step)-[:LINK]->(b:Step), q = (c:Step)-[:LINK]->(d:Step)
+      WHERE a.step = 0 AND c.step = 0
+      RETURN p = q AS same
+    expect:
+      kind: rows
+      columns: [same]
+      rows: [[true]]
+
+  - id: optional/gf04/path-length-function
+    name: PATH_LENGTH counts the edges of a path
+    features: [GF04]
+    subclauses: ["20.13", "4.11.2"]
+    productions: [path length expression, path value expression]
+    fixture: chain
+    tags: [read, expression, path]
+    # Length is edges, not nodes: this path has two nodes and one edge.
+    query: |
+      MATCH p = (a:Step)-[:LINK]->(b:Step)
+      WHERE a.step = 0
+      RETURN PATH_LENGTH(p) AS len
+    expect:
+      kind: rows
+      columns: [len]
+      rows: [[1]]
+
+  - id: optional/gf07/byte-string-trim
+    name: TRIM removes leading and trailing bytes from a byte string
+    features: [GF07]
+    subclauses: ["20.25", "4.16.4"]
+    productions: [byte string function, byte string trim function, byte string trim operands]
+    tags: [read, expression, bytes]
+    # Three bytes in, one byte out. The length is taken so that the row is an
+    # integer: a byte string in a result would have the harness comparing
+    # whatever spelling the driver chose for it, which is a fact about the
+    # driver and not about the engine.
+    query: |
+      RETURN OCTET_LENGTH(TRIM(BOTH X'00' FROM X'00AB00')) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]

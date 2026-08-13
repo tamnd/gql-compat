@@ -1,0 +1,473 @@
+# Data exceptions: the conditions a value raises.
+#
+# Clause 22 of the GQLSTATUS table is the largest class in the standard, and
+# most of it is about values rather than about statements: a number that does
+# not fit the type it was cast to, a date whose month is thirteen, a record
+# missing a field the type declares. These are the conditions an engine reaches
+# at run time with the statement already parsed and planned, which makes them
+# the ones a `parses` control matters most for: an engine that never had the
+# syntax reports a syntax error from the same call and the two are
+# indistinguishable without the control.
+#
+# Two codes in this file share one name. ISO calls both 22G03 and 22G12
+# "invalid value type", and the artifacts give no text that separates them. The
+# corpus keeps a case for each and each names the other in `also_gqlstatus`,
+# because an engine that picks the other code has not made a mistake this
+# corpus is in a position to call.
+#
+# The header of 30-conditions.yaml explains `parses` and the evidence grades;
+# this file follows the same rules.
+
+defaults:
+  kind: condition
+  tags: [error]
+  fixture: unit
+
+cases:
+  - id: condition/22001/string-truncated-by-a-cast
+    name: Casting a string longer than the target type raises string data, right truncation
+    conditions: ["22001"]
+    subclauses: ["18.9", "20.8"]
+    productions: [cast specification, character string type, max length]
+    requires: [GA05, GV31]
+    # Six characters into a type that holds three. The truncated characters are
+    # letters, which is what separates this from the warning in 01004: ISO
+    # refuses to lose a letter and permits losing a space.
+    query: |
+      RETURN CAST('abcdef' AS STRING(3)) AS v
+    parses: |
+      RETURN CAST('abc' AS STRING(3)) AS v
+    expect:
+      kind: error
+      gqlstatus: "22001"
+
+  - id: condition/01004/string-truncated-to-spaces
+    name: Casting away trailing spaces completes with a warning
+    conditions: ["01004"]
+    subclauses: ["18.9", "20.8"]
+    productions: [cast specification, character string type, max length]
+    requires: [GA05, GV31]
+    tags: [error, warning]
+    # A completion condition, so the statement succeeds and the case asserts
+    # the answer. The distinction it draws is the one ISO draws: losing 'def'
+    # is an exception and losing three spaces is a warning, and an engine that
+    # raised 22001 here would be refusing a statement the standard completes.
+    query: |
+      RETURN CAST('abc   ' AS STRING(3)) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["abc"]]
+
+  - id: condition/22003/number-out-of-range-for-its-type
+    name: Casting a number the type cannot hold raises numeric value out of range
+    conditions: ["22003"]
+    subclauses: ["18.9", "20.8"]
+    productions: [cast specification, signed binary exact numeric type]
+    requires: [GA05, GV02]
+    # One thousand does not fit eight signed bits under any encoding, so this
+    # asks nothing about the implementation's choice of range.
+    query: |
+      RETURN CAST(1000 AS INT8) AS v
+    parses: |
+      RETURN CAST(100 AS INT8) AS v
+    expect:
+      kind: error
+      gqlstatus: "22003"
+
+  - id: condition/22004/null-into-a-not-null-type
+    name: Casting null to a type declared NOT NULL raises null value not allowed
+    conditions: ["22004"]
+    subclauses: ["18.9", "20.8"]
+    productions: [cast specification, not null, value type]
+    requires: [GA05, GV90]
+    query: |
+      RETURN CAST(NULL AS INT NOT NULL) AS v
+    parses: |
+      RETURN CAST(1 AS INT NOT NULL) AS v
+    expect:
+      kind: error
+      gqlstatus: "22004"
+
+  - id: condition/22008/datetime-past-the-end-of-the-calendar
+    name: Adding a day to the last representable date raises datetime field overflow
+    conditions: ["22008"]
+    subclauses: ["20.26", "21.2"]
+    productions: [datetime value expression, duration term, date literal]
+    requires: [GV39, GV41]
+    tags: [error, temporal]
+    # The year field of a date has four digits in ISO's own format, so a day
+    # past the last day of year 9999 has nowhere to go. An engine with a wider
+    # internal calendar still owes the overflow here, because the value it
+    # would have to return has no representation in the type.
+    query: |
+      RETURN DATE '9999-12-31' + DURATION 'P1D' AS v
+    parses: |
+      RETURN DATE '2024-01-01' + DURATION 'P1D' AS v
+    expect:
+      kind: error
+      gqlstatus: "22008"
+
+  - id: condition/22014/incompatible-temporal-units
+    name: Adding hours to a date raises incompatible temporal instant unit groups
+    conditions: ["22G14"]
+    subclauses: ["20.26", "20.28"]
+    productions: [datetime value expression, duration term]
+    requires: [GV39, GV41]
+    tags: [error, temporal]
+    # A date has no time of day to put an hour into. ISO separates the year
+    # month group from the day time group for exactly this, and an engine that
+    # silently promoted the date to a datetime answered a different question.
+    query: |
+      RETURN DATE '2024-01-01' + DURATION 'PT1H' AS v
+    parses: |
+      RETURN DATE '2024-01-01' + DURATION 'P1D' AS v
+    expect:
+      kind: error
+      gqlstatus: "22G14"
+
+  - id: condition/22011/negative-substring-length
+    name: Asking for a negative number of characters raises substring error
+    conditions: ["22011"]
+    subclauses: ["20.24"]
+    productions: [substring function, string length]
+    query: |
+      RETURN LEFT('abc', -1) AS v
+    parses: |
+      RETURN LEFT('abc', 1) AS v
+    expect:
+      kind: error
+      gqlstatus: "22011"
+
+  - id: condition/22015/duration-past-its-range
+    name: Multiplying a duration past its range raises interval field overflow
+    conditions: ["22015"]
+    subclauses: ["20.28", "21.2"]
+    productions: [duration term, duration literal]
+    requires: [GV41]
+    tags: [error, temporal]
+    # A year multiplied by a quintillion is more seconds than any binary
+    # representation of a duration holds, whatever the implementation chose.
+    query: |
+      RETURN DURATION 'P1Y' * 1000000000000000000 AS v
+    parses: |
+      RETURN DURATION 'P1Y' * 2 AS v
+    expect:
+      kind: error
+      gqlstatus: "22015"
+
+  - id: condition/22027/trim-with-two-characters
+    name: Trimming with a two character trim string raises trim error
+    conditions: ["22027"]
+    subclauses: ["20.24"]
+    productions: [single-character trim function, trim operands, trim character string]
+    requires: [GF06]
+    # The single-character TRIM takes one character to trim, and this hands it
+    # two. The multi-character TRIM is a separate function with its own feature
+    # code, so an engine that supports BTRIM has not been asked about it here.
+    query: |
+      RETURN TRIM(BOTH 'ab' FROM 'abcba') AS v
+    parses: |
+      RETURN TRIM(BOTH 'a' FROM 'abcba') AS v
+    expect:
+      kind: error
+      gqlstatus: "22027"
+
+  - id: condition/22g0b/list-longer-than-its-type
+    name: Casting a list longer than the target type raises list data, right truncation
+    conditions: ["22G0B", "2202F"]
+    subclauses: ["18.9", "20.8"]
+    productions: [cast specification, list value type, max length]
+    requires: [GA05, GV50]
+    # ISO carries two codes for this. 2202F is SQL's, spelled "array data", and
+    # 22G0B is GQL's own, spelled "list data"; LIST and ARRAY are synonyms in
+    # the grammar and nothing in the statement chooses between the codes. So
+    # both are accepted and both are counted as covered.
+    query: |
+      RETURN CAST([1, 2, 3] AS LIST<INT>[2]) AS v
+    parses: |
+      RETURN CAST([1, 2] AS LIST<INT>[2]) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G0B"
+      also_gqlstatus: ["2202F"]
+
+  - id: condition/22g0c/list-element-that-does-not-fit
+    name: A list element the target type cannot hold raises list element error
+    conditions: ["22G0C"]
+    subclauses: ["18.9", "20.8"]
+    productions: [cast specification, list value type, list value constructor]
+    requires: [GA05, GV50]
+    # The list is the right length and one element is the wrong type. An engine
+    # that names 22018 has reported the same fault one level down, at the cast
+    # of the element rather than at the cast of the list, and ISO does not say
+    # which level owns it.
+    query: |
+      RETURN CAST([1, 'a'] AS LIST<INT>) AS v
+    parses: |
+      RETURN CAST([1, 2] AS LIST<INT>) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G0C"
+      also_gqlstatus: ["22018"]
+
+  - id: condition/22g04/comparing-a-number-with-a-string
+    name: Comparing values of unrelated types raises values not comparable
+    conditions: ["22G04"]
+    subclauses: ["19.3"]
+    productions: [comparison predicate, comparison predicate part 2]
+    limit: GA04
+    # Universal comparison is an optional feature, and an engine that has it
+    # can order a number against a string and must not raise anything. So an
+    # engine that accepts this is not failed: what the acceptance establishes
+    # is that it has GA04, which is the same thing the case would have learned
+    # from a passing feature case.
+    query: |
+      RETURN (1 < 'a') AS v
+    parses: |
+      RETURN (1 < 2) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G04"
+
+  - id: condition/22g12/arithmetic-on-a-string
+    name: Adding a number to a string raises invalid value type
+    conditions: ["22G12", "22G03"]
+    subclauses: ["20.21"]
+    productions: [numeric value expression, term]
+    query: |
+      RETURN 1 + 'a' AS v
+    expect:
+      kind: error
+      gqlstatus: "22G12"
+      also_gqlstatus: ["22G03"]
+
+  - id: condition/22g05/datetime-field-that-is-not-a-field
+    name: A datetime constructor field ISO does not define raises invalid field name
+    conditions: ["22G05"]
+    subclauses: ["20.27", "20.18"]
+    productions: [date function, date function parameters, record constructor]
+    requires: [GV39]
+    tags: [error, temporal]
+    query: |
+      RETURN DATE({yer: 2024, month: 1, day: 1}) AS v
+    parses: |
+      RETURN DATE({year: 2024, month: 1, day: 1}) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G05"
+
+  - id: condition/22g06/datetime-field-out-of-range
+    name: A thirteenth month raises invalid datetime function value
+    conditions: ["22G06"]
+    subclauses: ["20.27"]
+    productions: [date function, date function parameters]
+    requires: [GV39]
+    tags: [error, temporal]
+    # The field names are all correct here, which is what separates this from
+    # 22G05: the constructor was called properly and the calendar refused.
+    query: |
+      RETURN DATE({year: 2024, month: 13, day: 1}) AS v
+    parses: |
+      RETURN DATE({year: 2024, month: 12, day: 1}) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G06"
+
+  - id: condition/22g07/duration-field-that-is-not-a-field
+    name: A duration constructor field ISO does not define raises invalid field name
+    conditions: ["22G07"]
+    subclauses: ["20.29", "20.18"]
+    productions: [duration function, duration function parameters, record constructor]
+    requires: [GV41]
+    tags: [error, temporal]
+    query: |
+      RETURN DURATION({yeas: 1}) AS v
+    parses: |
+      RETURN DURATION({years: 1}) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G07"
+
+  - id: condition/22g0u/records-with-different-fields
+    name: Comparing records with different field names raises record fields do not match
+    conditions: ["22G0U"]
+    subclauses: ["19.3", "20.18"]
+    productions: [comparison predicate, record constructor, field]
+    requires: [GV45]
+    # Two records are comparable when they have the same fields. These do not,
+    # so there is no field-by-field comparison to make and ISO says so with its
+    # own code rather than with the general 22G04.
+    query: |
+      RETURN ({a: 1} = {b: 1}) AS v
+    parses: |
+      RETURN ({a: 1} = {a: 1}) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G0U"
+
+  - id: condition/22g0y/record-missing-a-field-its-type-declares
+    name: Casting a record that lacks a declared field raises record data, field missing
+    conditions: ["22G0Y"]
+    subclauses: ["18.10", "20.8", "20.18"]
+    productions: [cast specification, record type, field type]
+    requires: [GA05, GV46]
+    query: |
+      RETURN CAST({a: 1} AS RECORD { a :: INT, b :: INT }) AS v
+    parses: |
+      RETURN CAST({a: 1, b: 2} AS RECORD { a :: INT, b :: INT }) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G0Y"
+
+  - id: condition/22g0x/record-field-of-the-wrong-type
+    name: A record field the declared type cannot hold raises record data, field unassignable
+    conditions: ["22G0X"]
+    subclauses: ["18.10", "20.8", "20.18"]
+    productions: [cast specification, record type, field type]
+    requires: [GA05, GV46]
+    # Every field the type names is present, which is what separates this from
+    # 22G0Y: the record has the right shape and the wrong contents.
+    query: |
+      RETURN CAST({a: 'x'} AS RECORD { a :: INT }) AS v
+    parses: |
+      RETURN CAST({a: 1} AS RECORD { a :: INT }) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G0X"
+
+  - id: condition/22g0v/node-cast-to-an-edge-reference
+    name: Casting a node to an edge reference raises reference value, invalid base type
+    conditions: ["22G0V"]
+    subclauses: ["18.9", "20.8"]
+    productions: [cast specification, open edge reference value type, edge synonym]
+    requires: [GA05]
+    fixture: social
+    # Node and edge are different base types, not two constrained forms of one
+    # type, so no label set on either side could make this cast work. That is
+    # what ISO's "invalid base type" separates from "invalid constrained type".
+    query: |
+      MATCH (p:Person)
+      RETURN CAST(p AS ANY EDGE) AS v
+    parses: |
+      MATCH (p:Person)
+      RETURN CAST(p AS ANY NODE) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G0V"
+
+  - id: condition/22g0w/node-cast-to-a-label-it-does-not-have
+    name: Casting a node to a reference type it does not satisfy raises invalid constrained type
+    conditions: ["22G0W"]
+    subclauses: ["18.2", "18.9", "20.8"]
+    productions: [cast specification, closed node reference value type, node type phrase]
+    requires: [GA05]
+    fixture: social
+    # The base type is right this time and the constraint is not: a Person is a
+    # node, and it is not a Company.
+    query: |
+      MATCH (p:Person)
+      RETURN CAST(p AS NODE :Company) AS v
+    parses: |
+      MATCH (p:Person)
+      RETURN CAST(p AS NODE :Person) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G0W"
+
+  - id: condition/22g0z/path-whose-edge-joins-other-nodes
+    name: A constructed path whose edge does not join its nodes raises malformed path
+    conditions: ["22G0Z"]
+    subclauses: ["20.14"]
+    productions: [path value constructor by enumeration, path element list]
+    requires: [GE06]
+    fixture: chain
+    # n0 to n1 to n2 is a path in the fixture. This one puts the n0 to n1 edge
+    # between n1 and n2, which is a sequence of the right shape describing a
+    # walk nobody can take.
+    query: |
+      MATCH (a:Step {step: 0})-[e:LINK]->(b:Step {step: 1})-[:LINK]->(c:Step {step: 2})
+      RETURN PATH [b, e, c] AS p
+    parses: |
+      MATCH (a:Step {step: 0})-[e:LINK]->(b:Step {step: 1})-[:LINK]->(c:Step {step: 2})
+      RETURN PATH [a, e, b] AS p
+    expect:
+      kind: error
+      gqlstatus: "22G0Z"
+
+  - id: condition/22g10/path-longer-than-the-implementation-holds
+    name: A constructed path longer than the implementation supports raises path data, right truncation
+    conditions: ["22G10"]
+    subclauses: ["20.14"]
+    productions: [path value constructor by enumeration, path element list step]
+    requires: [GE06]
+    limit: IL015
+    fixture: chain
+    # ISO leaves the maximum cardinality of a constructed value to the
+    # implementation, so there is no length this case could ask for that every
+    # engine must refuse. What it can do is state the length it built and let
+    # the skip record it: an engine that takes this has a limit of at least
+    # five elements, which is a small measurement and a true one.
+    query: |
+      MATCH (a:Step {step: 0})-[e1:LINK]->(b:Step)-[e2:LINK]->(c:Step)
+      RETURN PATH [a, e1, b, e2, c] AS p
+    expect:
+      kind: error
+      gqlstatus: "22G10"
+
+  - id: condition/22g11/property-of-a-node-just-deleted
+    name: Reading a property of a deleted node raises reference value, referent deleted
+    conditions: ["22G11"]
+    subclauses: ["13.5", "20.11"]
+    productions: [delete statement, property reference]
+    requires: [GD01]
+    fixture: pair
+    tags: [error, write]
+    mutating: true
+    # The variable still binds after the DELETE and what it binds no longer
+    # exists. An engine that returned the name here read a value out of a node
+    # the same statement had removed.
+    query: |
+      MATCH (p:Person {name: 'Ada'})
+      DETACH DELETE p
+      RETURN p.name AS name
+    expect:
+      kind: error
+      gqlstatus: "22G11"
+
+  - id: condition/22g13/group-variable-used-as-one-value
+    name: A group variable where one value is required raises invalid group variable value
+    conditions: ["22G13"]
+    subclauses: ["16.11", "20.11"]
+    productions: [graph pattern quantifier, property reference]
+    limit: GQ17
+    fixture: chain
+    # `e` is bound by a quantified pattern, so it holds a group of edges rather
+    # than an edge, and `e.step` asks a group for one property. An engine with
+    # element-wise group variable operations answers with a list and is right
+    # to; one without has been handed a value its property reference cannot
+    # take, which is the condition.
+    query: |
+      MATCH (a:Step {step: 0})-[e:LINK]->{2,3}(b:Step)
+      RETURN e.step AS v
+    expect:
+      kind: error
+      gqlstatus: "22G13"
+
+  - id: condition/00001/insert-returns-no-result
+    name: A statement with nothing to return completes with an omitted result
+    conditions: ["00001"]
+    subclauses: ["13.2"]
+    productions: [insert statement, insert graph pattern]
+    requires: [GD01]
+    fixture: blank
+    tags: [write]
+    mutating: true
+    # A completion condition and the mildest one in the standard: the request
+    # succeeded and there is no table to hand back. The case asserts the
+    # success and the absence, because the subclass itself lives in the
+    # diagnostic record and an engine may report it or not.
+    query: |
+      INSERT (:Person {name: 'Zoe'})
+    expect:
+      kind: empty

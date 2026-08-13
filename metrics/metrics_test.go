@@ -106,11 +106,17 @@ func TestLoadDensityFiguresUseTheGraphThatWasLoaded(t *testing.T) {
 		Wall:  time.Second,
 		Nodes: 1000,
 		Edges: 4000,
-		Disk:  metrics.DiskDelta{BytesBefore: 0, BytesAfter: 8000, OK: true},
+		// An empty store of 400 bytes puts the loaded one 20× above the floor,
+		// which is what a density figure needs before it means anything.
+		EmptyBytes: 400,
+		Disk:       metrics.DiskDelta{BytesBefore: 0, BytesAfter: 8000, OK: true},
 	}
 	l.Compute()
 	if l.NodesPerSec != 1000 || l.EdgesPerSec != 4000 {
 		t.Errorf("ingest rates %v and %v", l.NodesPerSec, l.EdgesPerSec)
+	}
+	if !l.DensityOK {
+		t.Fatalf("density withheld at %.1f× the floor: %s", l.FloorRatio, l.DensityNote)
 	}
 	// 8000 bytes over 4000 edges is 16 bits per edge.
 	if l.BitsPerEdge != 16 {
@@ -118,6 +124,104 @@ func TestLoadDensityFiguresUseTheGraphThatWasLoaded(t *testing.T) {
 	}
 	if l.BytesPerNode != 8 {
 		t.Errorf("bytes per node %v, want 8", l.BytesPerNode)
+	}
+}
+
+// A store that is mostly the engine's own preallocation divides the floor by
+// the fixture. Nine fixtures spanning six nodes to 261 632 edges did exactly
+// that on 2026-08-12 and produced nine densities from one store size.
+func TestDensityIsWithheldWhenTheStoreIsMostlyFloor(t *testing.T) {
+	l := metrics.Load{
+		Wall:       time.Second,
+		Nodes:      6,
+		Edges:      5,
+		EmptyBytes: 3_670_016,
+		Disk:       metrics.DiskDelta{BytesAfter: 3_932_160, OK: true},
+	}
+	l.Compute()
+	if l.DensityOK {
+		t.Fatalf("density reported at %.1f× the floor", l.FloorRatio)
+	}
+	if l.BitsPerEdge != 0 || l.BytesPerNode != 0 {
+		t.Errorf("figures published anyway: %v bits/edge, %v bytes/node", l.BitsPerEdge, l.BytesPerNode)
+	}
+	if l.FloorRatio < 1 {
+		t.Errorf("floor ratio %v, want the measured multiple", l.FloorRatio)
+	}
+	if l.DensityNote == "" {
+		t.Error("no reason given for the missing density")
+	}
+}
+
+// Clearing the floor is not enough on its own. The numbers below are zu's from
+// 2026-08-12: an empty store that measured 256 KiB, a self-loop fixture of one
+// node and one edge whose store weighed 3.5 MiB, and a ratio of 14× that walked
+// straight past the floor test and published 29 360 128 bits for one edge. An
+// engine whose empty store is measured before it has written a single table
+// understates its own fixed cost, and the floor ratio cannot see that. The
+// share can: one edge does not cost fourteen empty databases.
+func TestDensityIsWithheldWhenOneElementOutweighsAnEmptyStore(t *testing.T) {
+	l := metrics.Load{
+		Wall:       time.Second,
+		Nodes:      1,
+		Edges:      1,
+		EmptyBytes: 262_144,
+		Disk:       metrics.DiskDelta{BytesAfter: 3_670_016, OK: true},
+	}
+	l.Compute()
+	if l.FloorRatio < metrics.DensityFloor {
+		t.Fatalf("floor ratio %.1f×, want a case that passes the floor test", l.FloorRatio)
+	}
+	if l.DensityOK {
+		t.Fatalf("density reported at %v bits/edge for one edge in a %d byte store", l.BitsPerEdge, l.Disk.BytesAfter)
+	}
+	if l.BitsPerEdge != 0 || l.BytesPerNode != 0 {
+		t.Errorf("figures published anyway: %v bits/edge, %v bytes/node", l.BitsPerEdge, l.BytesPerNode)
+	}
+	if l.DensityNote == "" {
+		t.Error("no reason given for the missing density")
+	}
+}
+
+// The share test has to leave alone the graphs it was not written for. A
+// million edges in a store of a few hundred megabytes is the case the whole
+// density figure exists to serve, and its per element share is a handful of
+// bytes.
+func TestALargeGraphKeepsItsDensity(t *testing.T) {
+	l := metrics.Load{
+		Wall:       time.Second,
+		Nodes:      1_000_000,
+		Edges:      999_999,
+		EmptyBytes: 262_144,
+		Disk:       metrics.DiskDelta{BytesAfter: 12_000_000, OK: true},
+	}
+	l.Compute()
+	if !l.DensityOK {
+		t.Fatalf("density withheld from a million node graph: %s", l.DensityNote)
+	}
+	if l.BitsPerEdge <= 0 || l.BytesPerNode <= 0 {
+		t.Errorf("density said to be available but the figures are %v and %v", l.BitsPerEdge, l.BytesPerNode)
+	}
+}
+
+// The rates are the engine's and do not depend on the floor. An unknown empty
+// store costs the density figures and nothing else.
+func TestUnknownEmptyStoreCostsOnlyTheDensity(t *testing.T) {
+	l := metrics.Load{
+		Wall:  time.Second,
+		Nodes: 1000,
+		Edges: 4000,
+		Disk:  metrics.DiskDelta{BytesAfter: 8000, OK: true},
+	}
+	l.Compute()
+	if l.NodesPerSec != 1000 {
+		t.Errorf("nodes per second %v", l.NodesPerSec)
+	}
+	if l.DensityOK || l.BitsPerEdge != 0 {
+		t.Errorf("density computed against an unknown floor: %v", l.BitsPerEdge)
+	}
+	if l.DensityNote == "" {
+		t.Error("no reason given for the missing density")
 	}
 }
 

@@ -31,6 +31,7 @@ func cmdList(args []string) error {
 		corpusIn = fs.String("corpus", "", "directory of case files; empty uses the embedded corpus")
 		asJSON   = fs.Bool("json", false, "emit JSON instead of a table")
 		long     = fs.Bool("l", false, "include the ISO references each case claims")
+		large    = fs.Bool("large", false, "include the cases whose fixtures are big enough to measure storage density on")
 	)
 	var kinds, features, tags, skipTags stringList
 	fs.Var(&kinds, "kind", "limit to a kind (repeatable)")
@@ -62,7 +63,7 @@ func cmdList(args []string) error {
 	case "fixtures":
 		return listFixtures(std, *asJSON)
 	case "cases":
-		sel, err := runner.ParseSelector(*pattern, kinds, features, tags, skipTags)
+		sel, err := runner.ParseSelector(*pattern, kinds, features, tags, skipTags, *large)
 		if err != nil {
 			return err
 		}

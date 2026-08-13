@@ -94,6 +94,13 @@ type Config struct {
 	// SampleInterval is how often the process sampler reads. Below about a
 	// millisecond the sampler starts to cost more than it measures.
 	SampleInterval time.Duration
+	// MutatingBudget is how long a run will spend rebuilding one case's graph
+	// so that a non-idempotent statement can be measured more than once. It is
+	// a total per case, not a limit per rebuild: a fixture that loads instantly
+	// buys the full repetition count and one that takes seconds buys as many as
+	// fit. Zero takes the default; a negative value turns restoring off and
+	// leaves every mutating case with the single cold sample it had before.
+	MutatingBudget time.Duration
 
 	// WorkDir is where engine state goes. Empty means a temporary directory
 	// the runner creates and removes.
@@ -127,6 +134,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.SampleInterval <= 0 {
 		c.SampleInterval = 5 * time.Millisecond
+	}
+	if c.MutatingBudget == 0 {
+		// Five seconds buys a distribution on every fixture the corpus loads in
+		// well under a second, and buys nothing at all on the hundred-thousand
+		// node one, which is the right answer in both directions.
+		c.MutatingBudget = 5 * time.Second
 	}
 }
 
@@ -205,6 +218,14 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 	ex := &executor{cfg: &cfg, caps: caps, workdir: workdir}
 	defer ex.close()
 
+	// The empty store is measured before any case, because every density figure
+	// the report prints is a fraction of it and a fraction whose denominator
+	// arrived halfway through the run would apply to half the loads. It is one
+	// load of a fixture with nothing in it, and it leaves that fixture in the
+	// engine, which is where the write cases want it anyway.
+	ex.empty = ex.measureEmpty(ctx)
+	rep.Engine.EmptyStore = ex.empty
+
 	cases := cfg.Suite.Filter(cfg.Select)
 	rep.Cases = make([]CaseResult, 0, len(cases))
 	for i, c := range cases {
@@ -260,6 +281,80 @@ type executor struct {
 	// failedLoads remembers a fixture the engine could not ingest, so the
 	// twelfth case that wants it is not a twelfth wait for the same answer.
 	failedLoads map[string]error
+	// empty is what this engine's store weighs with no graph in it, measured
+	// once before the first case and carried into every load's density gate.
+	empty metrics.EmptyStore
+	// loadWall is what each fixture cost to ingest, most recently. It is what
+	// tells a mutating case how many times its graph can be put back inside the
+	// budget, which is a question that can only be answered by having loaded it
+	// once already.
+	loadWall map[string]time.Duration
+}
+
+// EmptyFixture is the fixture the run loads to find out what an engine's store
+// weighs empty. It is a corpus fixture rather than one the runner invents so
+// that the engine takes the same route into it that every other load takes; a
+// store built by a different path would be a different store.
+const EmptyFixture = "blank"
+
+// measureEmpty loads a graph with nothing in it and weighs what is left on
+// disk.
+//
+// This is the denominator of the floor check in metrics.Load. An engine that
+// preallocates — which is every engine — writes a store of some fixed size
+// before it holds anything, and a fixture smaller than that size divides the
+// preallocation by itself and calls the answer an encoding. Nine fixtures
+// spanning six nodes to 261 632 edges produced a store of exactly the same size
+// on 2026-08-12, and the report published nine different densities for it.
+//
+// Every way this can fail produces a note rather than an error. Not knowing the
+// size of the empty store costs the density figures and nothing else, and a run
+// that refused to proceed without them would trade a whole report for two
+// columns.
+func (e *executor) measureEmpty(ctx context.Context) metrics.EmptyStore {
+	if e.cfg.Fixtures == nil {
+		return metrics.EmptyStore{Note: "the run carries no fixtures"}
+	}
+	fx, found := e.cfg.Fixtures.Get(EmptyFixture)
+	if !found {
+		return metrics.EmptyStore{Note: "fixture " + EmptyFixture + " is not defined"}
+	}
+	if _, err := fx.Materialize(); err != nil {
+		return metrics.EmptyStore{Note: "building fixture " + EmptyFixture + ": " + err.Error()}
+	}
+	if len(fx.Nodes) > 0 || len(fx.Edges) > 0 {
+		return metrics.EmptyStore{Note: fmt.Sprintf("fixture %s holds %d nodes and %d edges, so it does not measure an empty store",
+			EmptyFixture, len(fx.Nodes), len(fx.Edges))}
+	}
+	if missing := fx.Missing(e.caps.Data); len(missing) > 0 {
+		return metrics.EmptyStore{Note: "the engine cannot hold the empty fixture: " + capList(missing)}
+	}
+
+	sess, err := e.session(ctx)
+	if err != nil {
+		return metrics.EmptyStore{Note: "opening a session: " + err.Error()}
+	}
+	_, load, err := e.ensureLoaded(ctx, sess, fx)
+	if err != nil {
+		e.discard()
+		return metrics.EmptyStore{Note: "loading " + EmptyFixture + ": " + err.Error()}
+	}
+	if load == nil {
+		return metrics.EmptyStore{Note: "the empty fixture was already loaded, so nothing was measured"}
+	}
+	if !load.Disk.OK {
+		return metrics.EmptyStore{Note: "the engine's store is not on this machine"}
+	}
+	if load.Disk.BytesAfter <= 0 {
+		return metrics.EmptyStore{Wall: load.Wall,
+			Note: "the engine wrote nothing for an empty graph, so it has no floor to measure"}
+	}
+	return metrics.EmptyStore{
+		Bytes: load.Disk.BytesAfter,
+		Files: load.Disk.Files,
+		Wall:  load.Wall,
+		OK:    true,
+	}
 }
 
 func (e *executor) close() {
@@ -313,8 +408,21 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 		Started:     time.Now(),
 		Repeats:     e.repeats(c),
 		Warmups:     e.cfg.Warmups,
+		Timing:      TimingSeries,
 	}
 	defer func() { r.Wall = time.Since(r.Started) }()
+
+	// A condition the corpus has declared unreachable from a client is skipped
+	// before the engine is touched. Sending the statement anyway would get an
+	// ordinary answer to an ordinary statement and invite a reader to score it,
+	// when what the case records is that this code is outside the reach of
+	// anything a driver can do.
+	if c.Unprovokable != "" {
+		r.Outcome, r.Skip = Skip, SkipNotProvokable
+		r.Reason = c.Unprovokable
+		r.WantStatus = c.Expect.GQLStatus
+		return r
+	}
 
 	stmt, ok := e.statement(c)
 	if !ok {
@@ -415,7 +523,11 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 		}
 	}
 
-	e.execute(ctx, sess, c, stmt, &r)
+	// The plan is made after the load, because how many times a mutating case
+	// can be repeated depends on what putting its fixture back costs, and this
+	// is the first moment the run knows.
+	e.plan(c, &r)
+	e.execute(ctx, sess, c, fx, stmt, &r)
 	if c.Mutating {
 		e.dirty = true
 	}
@@ -505,12 +617,108 @@ func (e *executor) repeats(c *corpus.Case) int {
 	// `MATCH (p:Person {name: 'Ada'}) SET p = {name: 'Ada Lovelace'} RETURN …`
 	// the seventh application is a MATCH that finds nothing. That failure was
 	// published against Neo4j on 2026-08-12 and it was this harness's, not the
-	// engine's. Mutating cases run once unless the case asks for more, which is
-	// how the performance write cases opt in to a distribution.
+	// engine's. Mutating cases run once here, and plan() gives back a
+	// distribution where the graph can be put back between executions.
 	if c.Mutating {
 		return 1
 	}
 	return e.cfg.Repeats
+}
+
+// restores reports whether a case's graph is to be rebuilt between the timed
+// executions. Unset means yes for a mutating case with a fixture; a case whose
+// successive applications are the measurement sets it to false.
+func restores(c *corpus.Case) bool {
+	if !c.Mutating || c.Fixture == "" {
+		return false
+	}
+	if c.Restore != nil {
+		return *c.Restore
+	}
+	return true
+}
+
+// plan decides how many timed executions a case gets and which treatment
+// produced them.
+//
+// The interesting case is a mutating statement. One cold sample is the only
+// honest reading of a graph that only exists once, and it is also a
+// distribution of one: the two runs of 2026-08-12 differed by up to 26× on
+// exactly those cases, and nothing in either report could say which was the
+// engine. Rebuilding the fixture between executions makes every sample the
+// first application again, which is the same statement measured the same way as
+// many times as the clock allows.
+//
+// What the clock allows is the whole question, because the rebuild costs an
+// ingest. The budget is a total, not a per-restore limit, so a fixture that
+// loads in a millisecond gets the full repetition count and one that takes two
+// seconds gets as many as fit. A fixture too slow to restore even once leaves
+// the case exactly where it was, cold and alone, and says so.
+func (e *executor) plan(c *corpus.Case, r *CaseResult) {
+	r.Repeats, r.Timing = e.repeats(c), TimingSeries
+	if !c.Mutating {
+		return
+	}
+	r.Timing = TimingColdOnce
+	if !restores(c) {
+		if c.Fixture == "" {
+			r.TimingNote = "the case has no fixture, so there is no graph to put back between executions"
+		} else {
+			r.TimingNote = "the case asks for its executions to land on each other's results"
+			r.Repeats, r.Timing = e.repeats(c), TimingSeries
+		}
+		return
+	}
+
+	want := e.cfg.Repeats
+	if c.Repeat > 0 {
+		want = c.Repeat
+	}
+	if want <= 1 {
+		r.TimingNote = "one execution was asked for"
+		return
+	}
+	if e.cfg.MutatingBudget < 0 {
+		r.TimingNote = "the run allows no time for putting a graph back between executions"
+		return
+	}
+	load, known := e.loadWall[c.Fixture]
+	if !known || load <= 0 {
+		// The fixture is already in the engine from an earlier case and this run
+		// never timed the ingest, or the ingest was too fast to time. Either way
+		// the restores are affordable.
+		r.Repeats, r.Timing = want, TimingRestored
+		return
+	}
+	// The first execution needs no restore; the graph is already fresh.
+	affordable := 1 + int(e.cfg.MutatingBudget/load)
+	if affordable <= 1 {
+		r.TimingNote = fmt.Sprintf("putting %s back costs %s, and the run allows %s per case for it",
+			c.Fixture, metrics.Format(load), metrics.Format(e.cfg.MutatingBudget))
+		return
+	}
+	r.Repeats, r.Timing = min(want, affordable), TimingRestored
+	if r.Repeats < want {
+		r.TimingNote = fmt.Sprintf("%d of %d executions, because putting %s back costs %s and the run allows %s per case for it",
+			r.Repeats, want, c.Fixture, metrics.Format(load), metrics.Format(e.cfg.MutatingBudget))
+	}
+}
+
+// restore puts the fixture back for the next timed execution. It returns the
+// session to use, which is a new one whenever the engine has no reset of its
+// own, and false when the graph could not be rebuilt at all.
+func (e *executor) restore(ctx context.Context, fx *fixture.Fixture) (adapter.Session, bool) {
+	e.dirty = true
+	sess, err := e.session(ctx)
+	if err != nil {
+		return nil, false
+	}
+	reloaded, _, err := e.ensureLoaded(ctx, sess, fx)
+	if err != nil {
+		e.discard()
+		return nil, false
+	}
+	return reloaded, true
 }
 
 // statement picks the text to run. In compatibility mode a case without a
@@ -588,14 +796,19 @@ func (e *executor) ensureLoaded(ctx context.Context, sess adapter.Session, fx *f
 		Edges:      stats.Edges,
 		Process:    proc,
 		Disk:       metrics.After(dir, disk),
+		EmptyBytes: e.empty.Bytes,
 	}
 	load.Compute()
 	e.loaded, e.dirty = fx.Name, false
+	if e.loadWall == nil {
+		e.loadWall = map[string]time.Duration{}
+	}
+	e.loadWall[fx.Name] = wall
 	return sess, load, nil
 }
 
 // execute runs setup, warmups, and the timed repetitions, and judges.
-func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.Case, stmt string, r *CaseResult) {
+func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.Case, fx *fixture.Fixture, stmt string, r *CaseResult) {
 	timeout := e.cfg.Timeout
 	if c.TimeoutMS > 0 {
 		timeout = time.Duration(c.TimeoutMS) * time.Millisecond
@@ -637,13 +850,35 @@ func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.
 		}
 	}
 
-	sampler := samplerFor(sess, e.cfg.SampleInterval)
+	sampler := e.sampler()
 	sampler.Start()
 
 	series := &metrics.Series{Warmups: warmups}
 	var last *adapter.Result
 	var lastErr error
-	for range r.Repeats {
+	for i := range r.Repeats {
+		if i > 0 && r.Timing == TimingRestored {
+			// Put the graph back so this execution is the first application
+			// again. The restore is outside the sample and inside the case's
+			// wall time, which is where a cost the harness chose to pay belongs,
+			// and the sampler is stopped across it so that an ingest is not
+			// charged to the statement's CPU.
+			sampler.Stop()
+			restored, ok := e.restore(ctx, fx)
+			if !ok {
+				r.TimingNote = fmt.Sprintf("%d of %d executions; %s could not be put back again",
+					len(series.Samples), r.Repeats, fx.Name)
+				break
+			}
+			sess = restored
+			// An engine with no reset comes back in a new directory, so the
+			// disk baseline has to move with it. What the case then reports is
+			// the last execution's storage, which is the only one the store on
+			// disk at the end belongs to.
+			dir = sess.DataDir()
+			disk = metrics.Before(dir)
+			sampler.Start()
+		}
 		qctx, cancel := context.WithTimeout(ctx, timeout)
 		start := time.Now()
 		res, err := sess.Exec(qctx, stmt, c.Params)
@@ -688,6 +923,70 @@ func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.
 	r.Process = series.Process
 	r.Disk = series.Disk
 	judge(c, last, lastErr, e.caps, r)
+	e.checkParses(ctx, sess, c, timeout, r)
+}
+
+// checkParses runs a condition case's control statement and, if the engine
+// refuses that too, turns the case's failure into a skip.
+//
+// A condition case puts a statement the standard says must be rejected with a
+// named code, and reads the code back. That reading is only meaningful if the
+// engine parsed the statement: an engine with no syntax for the construct the
+// condition is raised through rejects it at the parser, reports a syntax error,
+// and is then recorded as having named the wrong condition. Five of Neo4j's
+// thirteen condition failures in the run of 2026-08-12 were that, and the
+// report attributed a syntax gap to the diagnostic machinery.
+//
+// The control is the same syntax written so that it should succeed. Refused, it
+// says the engine cannot parse the shape at all and the condition was never
+// reachable, which is a skip for the same reason SkipRequires is one — the
+// missing feature is already counted where it belongs, and counting it again
+// here would count it twice. Accepted, the failure stands and is now known to
+// be what it looked like.
+//
+// It runs only after a code mismatch, only in conformance mode — the control is
+// standard GQL and says nothing about a dialect spelling — and only once,
+// outside the timed series, so it can never move a latency figure.
+func (e *executor) checkParses(ctx context.Context, sess adapter.Session, c *corpus.Case, timeout time.Duration, r *CaseResult) {
+	if c.Parses == "" || e.cfg.Mode != ModeConformance {
+		return
+	}
+	if r.Outcome != Fail || r.Evidence != EvidenceStatus {
+		return
+	}
+	// A fatal failure took the session with it, and opening a new one here
+	// would run the control against a graph the case never saw.
+	if e.sess == nil {
+		return
+	}
+
+	pctx, cancel := context.WithTimeout(ctx, timeout)
+	_, err := sess.Exec(pctx, c.Parses, c.Params)
+	cancel()
+
+	check := &ParseCheck{Statement: c.Parses, Accepted: err == nil}
+	f := adapter.AsFailure(err)
+	if f != nil {
+		check.GQLStatus, check.Message = f.GQLStatus, f.Message
+		if f.Fatal {
+			e.discard()
+		}
+	}
+	r.Parse = check
+
+	if check.Accepted {
+		r.Reason += "; the engine accepts this syntax, so the code is the defect"
+		return
+	}
+	// A control the harness cut off, or a session that fell over under it, is
+	// not evidence that the engine cannot parse the shape. The case keeps its
+	// failure and the reader gets the control's own words.
+	if f.Timeout || f.Transport {
+		r.Reason += "; the control statement did not complete, so this could not be checked"
+		return
+	}
+	r.Outcome, r.Skip = Skip, SkipUnparsed
+	r.Reason = "the engine refused the control statement too, so it cannot parse this syntax and the condition was never reachable: " + check.Message
 }
 
 // timedOut reports whether the harness cut the statement off rather than the
@@ -716,6 +1015,20 @@ func expectsFailure(c *corpus.Case) bool {
 // the loader's work.
 func samplerFor(sess adapter.Session, interval time.Duration) *metrics.Sampler {
 	return metrics.NewSamplerFunc(sess.PID, interval)
+}
+
+// sampler watches whichever session the executor holds at each tick, rather
+// than the one it held when the window opened. A case that puts its fixture
+// back between executions gets a new session out of an engine with no reset,
+// and a sampler bound to the old one would follow a closed handle and report
+// that nothing was measurable.
+func (e *executor) sampler() *metrics.Sampler {
+	return metrics.NewSamplerFunc(func() int {
+		if e.sess == nil {
+			return 0
+		}
+		return e.sess.PID()
+	}, e.cfg.SampleInterval)
 }
 
 // judge decides the verdict and records the evidence behind it.
@@ -765,6 +1078,13 @@ func judge(c *corpus.Case, res *adapter.Result, err error, caps adapter.Capabili
 
 	case corpus.ExpectError:
 		if err == nil {
+			if c.Limit != "" {
+				r.Outcome, r.Skip = Skip, SkipWithinLimit
+				r.Reason = fmt.Sprintf(
+					"the engine accepted it, so the condition was not reachable here and its limit is at least what this case asked for; ISO leaves that to the implementation (%s)",
+					c.Limit)
+				return
+			}
 			r.Outcome = Fail
 			r.Reason = "the statement succeeded; the standard requires it to fail"
 			return
@@ -835,6 +1155,12 @@ func judgeError(c *corpus.Case, caps adapter.Capabilities, r *CaseResult) {
 			r.Outcome, r.Evidence = Pass, EvidenceStatus
 			return
 		}
+		if slices.Contains(c.Expect.AlsoGQLStatus, r.GotStatus) {
+			r.Outcome, r.Evidence = Pass, EvidenceStatus
+			r.Reason = fmt.Sprintf("rejected with GQLSTATUS %s, which the standard permits here alongside %s",
+				r.GotStatus, c.Expect.GQLStatus)
+			return
+		}
 		r.Outcome, r.Evidence = Fail, EvidenceStatus
 		r.Reason = fmt.Sprintf("rejected with GQLSTATUS %s, the standard specifies %s",
 			r.GotStatus, c.Expect.GQLStatus)
@@ -901,7 +1227,13 @@ func hostInfo() HostInfo {
 }
 
 // ParseSelector builds a Selector from the command line's flag values.
-func ParseSelector(pattern string, kinds, features, tags, skipTags []string) (corpus.Selector, error) {
+//
+// Large cases are excluded unless large is set, or unless the run asked for the
+// tag by name, which is the same request made a different way. The exclusion is
+// here rather than in the corpus so that every command reaching for a selection
+// gets the same one: a `list` that showed cases a `run` would not execute would
+// be describing a different corpus.
+func ParseSelector(pattern string, kinds, features, tags, skipTags []string, large bool) (corpus.Selector, error) {
 	var sel corpus.Selector
 	if pattern != "" {
 		re, err := regexp.Compile(pattern)
@@ -920,6 +1252,9 @@ func ParseSelector(pattern string, kinds, features, tags, skipTags []string) (co
 	sel.Features = features
 	sel.Tags = tags
 	sel.SkipTags = skipTags
+	if !large && !slices.Contains(tags, corpus.LargeTag) && !slices.Contains(skipTags, corpus.LargeTag) {
+		sel.SkipTags = append(sel.SkipTags, corpus.LargeTag)
+	}
 	return sel, nil
 }
 

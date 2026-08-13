@@ -15,6 +15,18 @@
 #
 # Nothing here asserts an error message. Messages are natural language and
 # ISO says so; a corpus that matched on them would be testing a translation.
+#
+# Where a condition is only reachable through syntax an engine might not have
+# at all, the case carries a `parses` control: the same construct written so
+# that it should succeed. The runner only reaches for it after the engine has
+# already answered with the wrong code, and only then to tell two very
+# different things apart. An engine that refuses the control as well never
+# parsed the construct, so the condition was never reachable and the case is a
+# skip rather than a diagnostic failure. An engine that accepts the control
+# understands the construct perfectly well and still named the wrong code,
+# which is exactly the failure the case is for. Neo4j 2025.06 spent five of
+# its thirteen condition failures on the first kind, and without the control
+# the report read them as the second.
 
 defaults:
   kind: condition
@@ -42,6 +54,8 @@ cases:
     requires: [GF01]
     query: |
       RETURN MOD(1, 0) AS v
+    parses: |
+      RETURN MOD(4, 3) AS v
     expect:
       kind: error
       gqlstatus: "22012"
@@ -77,8 +91,8 @@ cases:
   - id: condition/42002/unbound-variable
     name: Projecting a variable nothing bound raises invalid reference
     conditions: ["42002"]
-    subclauses: ["20.5"]
-    productions: [binding variable reference]
+    subclauses: ["20.12", "20.2"]
+    productions: [binding variable reference, non-parenthesized value expression primary]
     fixture: unit
     query: |
       MATCH (u:Unit)
@@ -90,8 +104,8 @@ cases:
   - id: condition/42002/unbound-variable-in-predicate
     name: A where clause naming an unbound variable is an invalid reference
     conditions: ["42002"]
-    subclauses: ["16.13", "20.5"]
-    productions: [binding variable reference, where clause]
+    subclauses: ["16.13", "20.12", "19.2"]
+    productions: [binding variable reference, where clause, predicate]
     fixture: social
     query: |
       MATCH (p:Person)
@@ -145,6 +159,13 @@ cases:
       MATCH (p:Person)
       RETURN p.name AS name
       LIMIT -1
+    # The control differs from the query in one character, so an engine that
+    # takes it and refuses the other has a LIMIT clause and a view about
+    # negative numbers in it, which is the thing the case is asking about.
+    parses: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      LIMIT 1
     expect:
       kind: error
       gqlstatus: "22G02"
@@ -160,6 +181,10 @@ cases:
       MATCH (p:Person)
       RETURN p.name AS name
       OFFSET -1
+    parses: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      OFFSET 1
     expect:
       kind: error
       gqlstatus: "22G02"
@@ -186,6 +211,8 @@ cases:
     requires: [GF01]
     query: |
       RETURN POWER(0, -1) AS v
+    parses: |
+      RETURN POWER(2, 3) AS v
     expect:
       kind: error
       gqlstatus: "2201F"
@@ -199,6 +226,8 @@ cases:
     requires: [GA05]
     query: |
       RETURN CAST('not a number' AS INT) AS v
+    parses: |
+      RETURN CAST('1' AS INT) AS v
     expect:
       kind: error
       gqlstatus: "22018"
@@ -213,6 +242,8 @@ cases:
     tags: [error, temporal]
     query: |
       RETURN DATE '2024-13-45' AS v
+    parses: |
+      RETURN DATE '2024-01-31' AS v
     expect:
       kind: error
       gqlstatus: "22007"
@@ -227,6 +258,8 @@ cases:
     tags: [error, temporal]
     query: |
       RETURN DURATION 'not a duration' AS v
+    parses: |
+      RETURN DURATION 'PT1H' AS v
     expect:
       kind: error
       gqlstatus: "22G0H"
@@ -240,6 +273,9 @@ cases:
     requires: [G019]
     query: |
       MATCH SHORTEST 0 (a:Step)-[:LINK]->{1,5}(b:Step)
+      RETURN COUNT(*) AS n
+    parses: |
+      MATCH SHORTEST 1 (a:Step)-[:LINK]->{1,5}(b:Step)
       RETURN COUNT(*) AS n
     expect:
       kind: error

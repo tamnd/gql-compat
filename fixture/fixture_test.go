@@ -1,6 +1,7 @@
 package fixture_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -228,6 +229,66 @@ func TestGeneratedShapesHaveTheEdgeCountsTheirNamesPromise(t *testing.T) {
 				t.Errorf("%d edges, want %d", len(m.Edges), tc.edges)
 			}
 		})
+	}
+}
+
+func TestTheDiamondChainHasTheAnswerItsShapePromises(t *testing.T) {
+	// The diamond chain exists so that a shortest-path case can be checked
+	// rather than merely timed: the count of shortest paths is arithmetic, not
+	// a measurement. If the generator ever stops building the shape the
+	// arithmetic assumes, the corpus case would quietly start asserting a
+	// number nothing produces, so the arithmetic is verified here instead.
+	const k = 8
+	nodes := 3*k + 1
+	f := &fixture.Fixture{Name: "diamonds", Generated: &fixture.Generator{
+		Shape: "diamonds", Nodes: nodes, Seed: 1,
+	}}
+	m, err := f.Materialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Edges) != 4*k {
+		t.Fatalf("%d edges, want %d: four per diamond", len(m.Edges), 4*k)
+	}
+
+	// Every edge runs from a lower node number to a higher one, so counting
+	// paths is one sweep in node order. paths[n][d] is the number of ways to
+	// reach n from node 0 in d edges.
+	paths := make([]map[int]int, nodes)
+	for i := range paths {
+		paths[i] = map[int]int{}
+	}
+	paths[0][0] = 1
+	byFrom := make([][]int, nodes)
+	for _, e := range m.Edges {
+		from, err := strconv.Atoi(e.From)
+		if err != nil {
+			t.Fatalf("edge endpoint %q is not a node number", e.From)
+		}
+		to, err := strconv.Atoi(e.To)
+		if err != nil {
+			t.Fatalf("edge endpoint %q is not a node number", e.To)
+		}
+		if to <= from {
+			t.Fatalf("edge %d -> %d runs backwards; the chain is no longer acyclic", from, to)
+		}
+		byFrom[from] = append(byFrom[from], to)
+	}
+	for n := range nodes {
+		for d, count := range paths[n] {
+			for _, to := range byFrom[n] {
+				paths[to][d+1] += count
+			}
+		}
+	}
+
+	last := paths[3*k]
+	if len(last) != 1 {
+		t.Fatalf("paths to the last junction come in %d different lengths, want one: %v", len(last), last)
+	}
+	want := 1 << k
+	if got := last[2*k]; got != want {
+		t.Errorf("%d paths of %d edges to the last junction, want %d", got, 2*k, want)
 	}
 }
 

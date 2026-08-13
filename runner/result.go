@@ -101,6 +101,21 @@ const (
 	// can decline a statement, and an engine that never implemented the
 	// function under test declines it for a reason the case is not about.
 	SkipNoGQLStatus SkipReason = "no-gqlstatus"
+	// SkipUnparsed is a condition case whose control statement the engine also
+	// refused. The case named a code, the engine named a different one, and the
+	// control says why: it cannot parse the shape the condition is raised
+	// through, so the condition was never reachable and the mismatch measures a
+	// syntax gap under a diagnostic case's name. It is the same argument as
+	// SkipRequires, reached by measurement instead of by declaration.
+	SkipUnparsed SkipReason = "unparsed"
+	// SkipWithinLimit is a limit condition case the engine did not refuse. The
+	// case asked for more labels, fields or characters than some engine
+	// somewhere draws the line at, and this one took it, so its threshold for
+	// that implementation-defined item is at least what was asked. That is a
+	// measurement of the item rather than a verdict on the engine: ISO names
+	// the code and leaves the number to the implementation, so there is no
+	// answer here the standard calls wrong.
+	SkipWithinLimit SkipReason = "within-limit"
 	// SkipSemantic is a generated statement the engine refused with a
 	// GQLSTATUS that is not a syntax error. The walk knows the statement is
 	// well formed and nothing at all about what it means, so a refusal on
@@ -111,6 +126,12 @@ const (
 	// not a defect. The walk is seeded and would otherwise report the same lead
 	// on every run forever.
 	SkipPromoted SkipReason = "already-reviewed"
+	// SkipNotProvokable is a condition case the corpus itself withdrew: no
+	// statement a client can send raises the code, so there is nothing to put
+	// to the engine. It is the only skip decided before the engine is opened,
+	// and it is a fact about ISO's condition rather than about the engine, which
+	// is why the case's own prose is carried through as the reason.
+	SkipNotProvokable SkipReason = "not-provokable"
 	// SkipSelected is a case excluded by the run's selector, recorded only
 	// when the caller asked for the full list.
 	SkipSelected SkipReason = "not-selected"
@@ -151,6 +172,11 @@ type CaseResult struct {
 	GotStatus  string `json:"got_gqlstatus,omitempty"`
 	// Message is the engine's own error text, verbatim.
 	Message string `json:"message,omitempty"`
+	// Parse is the control statement's outcome, present only on a condition
+	// case that named a code the engine did not, and only when the case carried
+	// a control to run. It is what turns "wrong code" into either "wrong code"
+	// or "no parser for this shape".
+	Parse *ParseCheck `json:"parse_check,omitempty"`
 
 	// Stats is the latency distribution over the measured repetitions.
 	Stats metrics.Stats `json:"stats"`
@@ -167,9 +193,48 @@ type CaseResult struct {
 	// p99 over three samples is not a p99.
 	Repeats int `json:"repeats"`
 	Warmups int `json:"warmups"`
+	// Timing is which treatment produced those repetitions, and TimingNote is
+	// the arithmetic behind it where the runner had a choice to make.
+	Timing     Timing `json:"timing"`
+	TimingNote string `json:"timing_note,omitempty"`
 
 	Started time.Time     `json:"started"`
 	Wall    time.Duration `json:"wall_ns"`
+}
+
+// Timing is how a case's latency distribution was obtained. A p50 over seven
+// executions of a read means something a single cold write does not, and a
+// report that printed both under one heading would be inviting the comparison.
+type Timing string
+
+const (
+	// TimingSeries is the ordinary treatment: warmups, then the repetitions,
+	// all on one loaded graph.
+	TimingSeries Timing = "series"
+	// TimingRestored is a mutating case whose fixture was reloaded before each
+	// timed execution, so every sample is the statement's first application to
+	// the same graph. The reloads are outside the samples and inside the case's
+	// wall time; the process and disk figures beside it cover the last
+	// execution only, because the restore before it rebuilt the store.
+	TimingRestored Timing = "restored"
+	// TimingColdOnce is one unwarmed execution of a mutating statement, which
+	// is what is left when the graph cannot be put back cheaply enough to
+	// repeat it. It is the right correctness answer and a distribution of one.
+	TimingColdOnce Timing = "cold-once"
+)
+
+// ParseCheck is what a condition case's control statement did. It carries the
+// engine's words as well as the verdict, because a control that was refused is
+// a claim about the engine's parser and a reader is entitled to the evidence
+// for it.
+type ParseCheck struct {
+	// Statement is the control text, verbatim.
+	Statement string `json:"statement"`
+	// Accepted is whether the engine ran it.
+	Accepted bool `json:"accepted"`
+	// GQLStatus and Message are what came back when it did not.
+	GQLStatus string `json:"gqlstatus,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 // Passed reports whether the case is a verdict in the engine's favour.
@@ -280,6 +345,11 @@ type EngineInfo struct {
 	// DataCapabilities is the supported set in report-column order, so a
 	// consumer does not have to know AllCapabilities to render it.
 	DataCapabilities []fixture.Capability `json:"data_capabilities"`
+	// EmptyStore is what this engine writes to disk for a graph with nothing in
+	// it. It is here rather than beside the loads because it is a property of
+	// the engine and not of any fixture, and it is the denominator every
+	// density figure in the report is checked against.
+	EmptyStore metrics.EmptyStore `json:"empty_store"`
 }
 
 // HostInfo is the machine, because a latency table without one is a rumour.

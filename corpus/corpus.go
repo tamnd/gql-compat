@@ -60,6 +60,16 @@ const (
 // KindGenerated is deliberately absent; see its documentation.
 var AllKinds = []Kind{KindMandatory, KindOptional, KindCondition, KindGrammar, KindPerformance}
 
+// LargeTag marks a case whose fixture is big enough to measure storage density
+// on and too big to run every time. A store has to outweigh the engine's own
+// preallocation by an order of magnitude before bits/edge describes an encoding
+// rather than a floor, and a fixture that large costs minutes to ingest.
+//
+// Cases carrying it are excluded unless a run asks for them, which is what
+// keeps the default run short enough for CI and keeps the density figures
+// reachable at all. It is the only tag the harness gives a meaning to.
+const LargeTag = "large"
+
 // ExpectKind is how a case's outcome is judged.
 type ExpectKind string
 
@@ -96,6 +106,15 @@ type Expect struct {
 	// GQLStatus is the five-character code from conditions.xml the engine
 	// should report. Empty means any failure satisfies an ExpectError case.
 	GQLStatus string `yaml:"gqlstatus" json:"gqlstatus,omitempty"`
+	// AlsoGQLStatus lists the other codes ISO permits for the same statement.
+	// It is not a way to soften a case. It exists because a few violations are
+	// catchable at two different moments and the standard gives each moment its
+	// own code: a node pattern naming more labels than the implementation
+	// allows is 42010 when the engine reads the statement and 22G0P when it
+	// builds the node, and nothing in the statement decides which. A case that
+	// insisted on one would be scoring engines on when they look rather than on
+	// what they found. Where ISO does name a single code, this stays empty.
+	AlsoGQLStatus []string `yaml:"also_gqlstatus" json:"also_gqlstatus,omitempty"`
 	// ErrorContains, for engines that report no GQLSTATUS, is a substring the
 	// message should hold. It is weaker evidence and is reported as such.
 	ErrorContains string `yaml:"error_contains" json:"error_contains,omitempty"`
@@ -138,6 +157,58 @@ type Case struct {
 	Setup []string `yaml:"setup" json:"setup,omitempty"`
 	// Query is the statement under test, in standard GQL.
 	Query string `yaml:"query" json:"query"`
+	// Parses is a control statement for a condition case: the same syntax the
+	// query uses, in a form the engine should accept. It is run only when the
+	// query failed on the code the engine named, and it separates two failures
+	// a single code mismatch cannot tell apart. An engine that never parsed the
+	// statement reports a syntax error rather than the specified condition, and
+	// reading that as a diagnostic miss blames the wrong part of the engine. If
+	// the control is refused too, the engine cannot parse the shape at all and
+	// the condition was never reachable; if it is accepted, the shape is fine
+	// and the wrong code is exactly what it looks like.
+	Parses string `yaml:"parses" json:"parses,omitempty"`
+	// Limit names the implementation-defined item, or the optional feature,
+	// whose value decides whether this case's condition can be raised at all.
+	//
+	// Sixteen of ISO's sixty-eight GQLSTATUS codes are limit conditions: a node
+	// carrying more labels than the implementation supports, a record with more
+	// fields, a string longer than the type admits. ISO fixes the code and
+	// leaves the threshold to the implementation, which means a case asking for
+	// sixty-four labels is asking a question with two correct answers. An engine
+	// whose maximum is thirty-two must raise the code; an engine with no maximum
+	// must accept the statement, and failing it for that would be scoring it
+	// against a number the standard never set.
+	//
+	// A handful more are not thresholds but absences: ISO says an engine that
+	// does not support two graphs in one transaction shall raise 25G04, which
+	// is a requirement on engines without feature GT03 and says nothing at all
+	// about engines with it. Naming the feature here has the same effect as
+	// naming a threshold, for the same reason.
+	//
+	// So a case with a limit set is not failed for a statement the engine took.
+	// It is skipped, and the skip records that the engine's limit is at least
+	// what the case asked for, which is a measurement of the item and the only
+	// one available. The code is still asserted when the engine does refuse.
+	Limit string `yaml:"limit" json:"limit,omitempty"`
+	// Unprovokable says, in prose, why no statement a client can send raises
+	// this case's condition, and takes the case out of every run.
+	//
+	// Two of ISO's sixty-eight codes are about what the client does not know.
+	// 08007 is the connection dying while a transaction is being resolved, and
+	// 40003 is a statement whose completion is unknown after a rollback. Both
+	// are raised by the loss of the channel the answer would have come back on,
+	// so provoking one means killing the engine or the socket at a chosen
+	// instant, and observing it means trusting whatever the driver reports
+	// about a connection that is gone.
+	//
+	// The case is still written, still names its code, and still counts toward
+	// the corpus's coverage of the condition surface, because the alternative is
+	// a corpus that is silent about two codes and a reader who cannot tell
+	// silence from an oversight. What it never does is produce a verdict: the
+	// runner skips it before the engine is touched, and the skip carries this
+	// text. A code nobody can raise from a client is a fact about the code, and
+	// the honest report of it is a skip that says so.
+	Unprovokable string `yaml:"unprovokable" json:"unprovokable,omitempty"`
 	// Params binds named parameters, for the cases about parameters.
 	Params map[string]any `yaml:"params" json:"params,omitempty"`
 
@@ -150,7 +221,8 @@ type Case struct {
 	Dialects map[string]string `yaml:"dialects" json:"dialects,omitempty"`
 
 	// Tags are free-form selectors for -run filters: "read", "write",
-	// "recursive", "temporal", and so on.
+	// "recursive", "temporal", and so on. LargeTag is the one tag the runner
+	// itself acts on.
 	Tags []string `yaml:"tags" json:"tags,omitempty"`
 
 	// Repeat overrides the run-wide repetition count for cases whose timing
@@ -159,6 +231,15 @@ type Case struct {
 	// Mutating marks a case whose statements change the graph, so the runner
 	// reloads the fixture before it instead of sharing a loaded one.
 	Mutating bool `yaml:"mutating" json:"mutating,omitempty"`
+	// Restore asks the runner to put the fixture back between the timed
+	// repetitions as well as before the first, which is the only way a
+	// non-idempotent statement gets a distribution instead of one cold sample:
+	// every execution is then the first application to the same graph.
+	//
+	// Unset means yes, for a mutating case that has a fixture. Set it to false
+	// where the successive applications are the measurement, as in a write case
+	// whose point is how the cost moves as the graph grows.
+	Restore *bool `yaml:"restore" json:"restore,omitempty"`
 	// TimeoutMS overrides the run-wide per-statement timeout.
 	TimeoutMS int `yaml:"timeout_ms" json:"timeout_ms,omitempty"`
 
@@ -251,6 +332,52 @@ func (c *Case) Validate(known KnownCodes) error {
 	if c.Kind == KindOptional && len(c.Features) == 0 {
 		return fmt.Errorf("%s: an optional case must name the feature it covers", where)
 	}
+	if c.Restore != nil {
+		if !c.Mutating {
+			return fmt.Errorf("%s: restore is for a mutating case, and this one changes nothing", where)
+		}
+		if *c.Restore && c.Fixture == "" {
+			return fmt.Errorf("%s: restore needs a fixture to restore", where)
+		}
+	}
+	// A control statement only means something where a code mismatch is the
+	// failure it disambiguates. On any other case it would run a second
+	// statement nobody could read a result from.
+	if c.Parses != "" && (c.Kind != KindCondition || c.Expect.Kind != ExpectError) {
+		return fmt.Errorf("%s: parses is for a condition case expecting an error, and this is %s expecting %s",
+			where, c.Kind, c.Expect.Kind)
+	}
+	if c.Limit != "" {
+		if c.Expect.Kind != ExpectError {
+			return fmt.Errorf("%s: limit excuses an engine that accepted the statement, and this case expects %s",
+				where, c.Expect.Kind)
+		}
+		// The item is checked against the implementation-defined list rather
+		// than the wider behaviour catalogue, because an excuse is only owed
+		// where 24.5.2 obliges the implementer to have written the threshold
+		// down. A threshold the standard left implementation-dependent is one
+		// nobody has to state, and a case cannot be waived on it. A feature
+		// code is the other admissible answer, for the conditions ISO raises
+		// only on engines that lack the feature.
+		if !known.Defined(c.Limit) && !known.Feature(c.Limit) {
+			return fmt.Errorf("%s: %q is neither an implementation-defined item nor a feature of ISO/IEC 39075", where, c.Limit)
+		}
+	}
+	if c.Unprovokable != "" && (c.Kind != KindCondition || c.Expect.Kind != ExpectError) {
+		return fmt.Errorf("%s: unprovokable withdraws a condition case from the run, and this is %s expecting %s",
+			where, c.Kind, c.Expect.Kind)
+	}
+	for _, s := range c.Expect.AlsoGQLStatus {
+		if c.Expect.Kind != ExpectError || c.Expect.GQLStatus == "" {
+			return fmt.Errorf("%s: also_gqlstatus is a second answer to a case that specifies a first one", where)
+		}
+		if !known.Status(s) {
+			return fmt.Errorf("%s: GQLSTATUS %q is not defined in conditions.xml", where, s)
+		}
+		if s == c.Expect.GQLStatus {
+			return fmt.Errorf("%s: %q is listed as an alternative to itself", where, s)
+		}
+	}
 	return nil
 }
 
@@ -265,6 +392,9 @@ type KnownCodes interface {
 	// specifies behaviour. Front matter and the conformance clause itself are
 	// not such clauses, and a case citing one is mis-filed.
 	Subclause(number string) bool
+	// Defined reports whether the code names an item on ISO's
+	// implementation-defined list, which is what a case's `limit` may cite.
+	Defined(code string) bool
 }
 
 // Suite is a validated, ordered set of cases.

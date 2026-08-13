@@ -40,7 +40,8 @@ var csvColumns = []string{
 
 	"load_wall_ns", "load_engine_wall_ns", "load_nodes", "load_edges",
 	"load_nodes_per_sec", "load_edges_per_sec",
-	"load_disk_growth_bytes", "load_bits_per_edge", "load_bytes_per_node",
+	"load_disk_growth_bytes", "load_empty_store_bytes", "load_floor_ratio",
+	"load_bits_per_edge", "load_bytes_per_node", "load_density_note",
 	"load_rss_peak_bytes", "load_cpu_user_ns", "load_cpu_sys_ns",
 
 	"want_gqlstatus", "got_gqlstatus", "message",
@@ -123,7 +124,11 @@ func csvRow(c *runner.CaseResult) []string {
 			dur(l.Wall), when(l.EngineWall > 0, dur(l.EngineWall)), itoa(l.Nodes), itoa(l.Edges),
 			ftoa(l.NodesPerSec), ftoa(l.EdgesPerSec),
 			when(l.Disk.OK, i64(l.Disk.Growth())),
-			when(l.Disk.OK, ftoa(l.BitsPerEdge)), when(l.Disk.OK, ftoa(l.BytesPerNode)),
+			when(l.EmptyBytes > 0, i64(l.EmptyBytes)), when(l.FloorRatio > 0, ftoa(l.FloorRatio)),
+			// Blank rather than zero where the floor check refused: a zero here
+			// would be read as a density of nothing rather than as no density.
+			when(l.DensityOK, ftoa(l.BitsPerEdge)), when(l.DensityOK, ftoa(l.BytesPerNode)),
+			l.DensityNote,
 			when(l.Process.MemoryOK, i64(l.Process.RSSPeak)),
 			when(l.Process.CPUOK, dur(l.Process.CPUUser)),
 			when(l.Process.CPUOK, dur(l.Process.CPUSys)),
@@ -131,7 +136,7 @@ func csvRow(c *runner.CaseResult) []string {
 	} else {
 		// This case reused a fixture another case loaded. Blank is right:
 		// zero would say the load was free.
-		row = append(row, "", "", "", "", "", "", "", "", "", "", "", "")
+		row = append(row, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 
 	row = append(row,

@@ -74,6 +74,23 @@ func (g *Generator) build() ([]Node, []Edge) {
 				add(i, (r+1)*side+c)
 			}
 		}
+	case "diamonds":
+		// A chain of k diamonds: every node either splits in two or joins two
+		// back. Node 3i is the ith junction, 3i+1 and 3i+2 the two ways out of
+		// it, and 3(i+1) the junction they meet at again.
+		//
+		// The point is that the answer is known before any engine sees the
+		// graph. Every path from the first junction to the last is 2k edges
+		// long, so all of them are shortest paths, and there are exactly 2^k of
+		// them: an answer that grows exponentially in a graph that grows
+		// linearly. A shortest-path query over it can be checked rather than
+		// merely timed, which is what the lattice case could not offer.
+		for i := 0; i+3 < g.Nodes; i += 3 {
+			add(i, i+1)
+			add(i, i+2)
+			add(i+1, i+3)
+			add(i+2, i+3)
+		}
 	case "clique":
 		for i := range g.Nodes {
 			for j := range g.Nodes {

@@ -100,6 +100,19 @@ cases:
       columns: [name]
       rows: [[Ada]]
 
+  - id: condition/08007/unreachable
+    name: A condition no client can provoke is withdrawn before the engine sees it
+    kind: condition
+    conditions: ["08007"]
+    subclauses: ["8.4"]
+    query: COMMIT
+    unprovokable: >-
+      the connection has to die between the commit and its answer, and nothing
+      a driver can send arranges that
+    expect:
+      kind: error
+      gqlstatus: "08007"
+
   - id: mandatory/test/write
     name: A mutating case is never warmed up
     kind: mandatory
@@ -331,6 +344,64 @@ func TestDeclaredUnsupportedFeatureSkipsARequiringCase(t *testing.T) {
 	}
 }
 
+func TestAnUnprovokableConditionNeverReachesTheEngine(t *testing.T) {
+	// Two of ISO's codes are raised by the connection failing, and the corpus
+	// carries a case for each so that the condition surface has no silent gaps.
+	// What must not happen is the statement being sent anyway: COMMIT succeeds
+	// against an ordinary engine, and a success on a case expecting 08007 would
+	// be recorded as a failure to raise a condition nobody could have raised.
+	commits := 0
+	d := countingDriver{
+		Driver: engine(t, func(c *fake.Config) {
+			c.Answers["COMMIT"] = fake.Answer{Table: &rows.Table{}}
+		}),
+		count: func(stmt string) {
+			if strings.Contains(stmt, "COMMIT") {
+				commits++
+			}
+		},
+	}
+	r := result(t, run(t, d, runner.Config{}), "condition/08007/unreachable")
+	if r.Outcome != runner.Skip || r.Skip != runner.SkipNotProvokable {
+		t.Fatalf("outcome %s skip %q, want a not-provokable skip", r.Outcome, r.Skip)
+	}
+	if !strings.Contains(r.Reason, "connection has to die") {
+		t.Errorf("the skip should carry the case's own reason, got %q", r.Reason)
+	}
+	if r.WantStatus != "08007" {
+		t.Errorf("want_gqlstatus %q, want the code the case names", r.WantStatus)
+	}
+	if commits != 0 {
+		t.Errorf("the engine was asked %d statement(s) for a withdrawn case, want 0", commits)
+	}
+}
+
+// countingDriver watches what a run actually sends. It exists for the one
+// guarantee that cannot be read off a result: that a withdrawn case reached no
+// engine at all, rather than reaching one and being reclassified afterwards.
+type countingDriver struct {
+	adapter.Driver
+	count func(stmt string)
+}
+
+func (d countingDriver) Open(ctx context.Context, workdir string) (adapter.Session, error) {
+	s, err := d.Driver.Open(ctx, workdir)
+	if err != nil {
+		return nil, err
+	}
+	return countingSession{Session: s, count: d.count}, nil
+}
+
+type countingSession struct {
+	adapter.Session
+	count func(stmt string)
+}
+
+func (s countingSession) Exec(ctx context.Context, stmt string, params map[string]any) (*adapter.Result, error) {
+	s.count(stmt)
+	return s.Session.Exec(ctx, stmt, params)
+}
+
 func TestSkippingCannotImproveTheRate(t *testing.T) {
 	// The guarantee behind the headline number: a skip leaves the denominator
 	// alone. An engine that declines more work scores the same, not better.
@@ -413,15 +484,19 @@ func TestCoverageUsesISODenominators(t *testing.T) {
 
 func TestCompatModeSkipsCasesWithNoDialect(t *testing.T) {
 	// No case in the mini corpus has a dialect for this engine, so every one of
-	// them is a no-dialect skip. Nobody claimed a spelling exists, so nothing
-	// here is a failure.
+	// them that is put to the engine at all is a no-dialect skip. Nobody claimed
+	// a spelling exists, so nothing here is a failure. The withdrawn condition
+	// case is the exception and stays withdrawn: an engine's dialect cannot make
+	// a dead connection reachable, so it is counted out of the denominator here
+	// rather than reclassified.
 	rep := run(t, engine(t, nil), runner.Config{Mode: runner.ModeCompat})
 	if rep.Totals.Fail != 0 {
 		t.Errorf("%d failures in compat mode with no dialects declared", rep.Totals.Fail)
 	}
-	if rep.Totals.BySkip[runner.SkipNoDialect] != rep.Totals.Cases {
+	asked := rep.Totals.Cases - rep.Totals.BySkip[runner.SkipNotProvokable]
+	if rep.Totals.BySkip[runner.SkipNoDialect] != asked {
 		t.Errorf("%d of %d cases skipped for no dialect",
-			rep.Totals.BySkip[runner.SkipNoDialect], rep.Totals.Cases)
+			rep.Totals.BySkip[runner.SkipNoDialect], asked)
 	}
 }
 

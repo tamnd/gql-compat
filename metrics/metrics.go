@@ -198,11 +198,54 @@ type Load struct {
 
 	// BitsPerEdge is the whole on-disk size divided by the edge count. It is
 	// the density figure graph storage papers quote and the one number that
-	// compares two engines' adjacency encodings directly.
+	// compares two engines' adjacency encodings directly. It is zero unless
+	// DensityOK; see the floor below.
 	BitsPerEdge float64 `json:"bits_per_edge"`
 	// BytesPerNode is the same figure per vertex, which is the one that moves
 	// when properties, not topology, dominate.
 	BytesPerNode float64 `json:"bytes_per_node"`
+
+	// EmptyBytes is what this engine's store weighs with no graph in it, taken
+	// once per run from a load of the empty fixture. Zero means the run could
+	// not find out.
+	EmptyBytes int64 `json:"empty_store_bytes,omitempty"`
+	// FloorRatio is the loaded store over the empty one. Below DensityFloor the
+	// store is mostly the engine's own preallocation and a density computed
+	// from it describes that preallocation.
+	FloorRatio float64 `json:"floor_ratio,omitempty"`
+	// DensityOK says the two density figures above were computed. When it is
+	// false they are zero and DensityNote says why, which is the whole point:
+	// a run of 2026-08-12 published nine densities spanning six nodes to 261 632
+	// edges from stores of identical size, and the best bits/edge belonged to
+	// the fixture that packed the most edges into the same fixed-size file.
+	DensityOK bool `json:"density_ok"`
+	// DensityNote is why there is no density, in words a report can print
+	// beside the dash it prints instead of a number.
+	DensityNote string `json:"density_note,omitempty"`
+}
+
+// DensityFloor is how many times the empty store a loaded store must weigh
+// before bits/edge is reported. Ten is not derived from anything; it is the
+// point at which at most a tenth of what is being divided is the engine's floor,
+// so a density figure is wrong by at most that much rather than being the floor
+// itself. A report that wants the number anyway can compute it from the disk
+// figures, which are printed either way.
+const DensityFloor = 10.0
+
+// EmptyStore is what an engine's data directory weighs holding nothing. It is
+// measured once per run, from a load of a fixture with no nodes and no edges,
+// and every density figure in the report is checked against it.
+type EmptyStore struct {
+	// Bytes is the apparent size of the empty store, and Files how many files
+	// it is spread over.
+	Bytes int64 `json:"bytes"`
+	Files int   `json:"files"`
+	// Wall is what the empty load cost, which is the engine's fixed startup
+	// write and worth seeing beside the loads that carry a graph.
+	Wall time.Duration `json:"wall_ns"`
+	// OK says the measurement happened. Note says why it did not.
+	OK   bool   `json:"available"`
+	Note string `json:"note,omitempty"`
 }
 
 // IngestWall is the time the rates are computed against: the engine's own, if
@@ -232,12 +275,75 @@ func (l *Load) Compute() {
 	// on this machine reports no disk at all, and no density with it. Growth
 	// is still reported beside this, where a reader can see it for what it is.
 	size := l.Disk.BytesAfter
-	if l.Edges > 0 && size > 0 {
+	l.density(size)
+	if !l.DensityOK {
+		return
+	}
+	if l.Edges > 0 {
 		l.BitsPerEdge = float64(size*8) / float64(l.Edges)
 	}
-	if l.Nodes > 0 && size > 0 {
+	if l.Nodes > 0 {
 		l.BytesPerNode = float64(size) / float64(l.Nodes)
 	}
+}
+
+// density decides whether dividing this store by this graph describes the
+// encoding, and records why when it does not.
+//
+// Every engine preallocates. zu's store has a floor near 3.5 MiB and grows in
+// 256 KiB steps, so a fixture small enough to fit inside the floor reports the
+// floor divided by itself, and reports it as an encoding. The harness knows the
+// size of the empty store because it measures one at the start of the run, so
+// this is a question the tool can answer rather than one the reader has to
+// think to ask.
+func (l *Load) density(size int64) {
+	switch {
+	case size <= 0:
+		l.DensityNote = "the engine's store is not on this machine, so there is nothing to divide"
+	case l.EmptyBytes <= 0:
+		l.DensityNote = "the size of this engine's empty store is not known, so how much of this is preallocation cannot be said"
+	default:
+		l.FloorRatio = float64(size) / float64(l.EmptyBytes)
+		if l.FloorRatio < DensityFloor {
+			l.DensityNote = fmt.Sprintf("the loaded store is %.1f× the empty one, under the %g× a density figure needs before it describes an encoding rather than the engine's floor",
+				l.FloorRatio, DensityFloor)
+			return
+		}
+		if share, over := l.shareOverEmptyStore(size); over {
+			l.DensityNote = fmt.Sprintf("one element of this graph accounts for %s of the store, more than the whole %s an empty store weighs, so these figures divide the engine's allocation and not an encoding",
+				FormatBytes(share), FormatBytes(l.EmptyBytes))
+			return
+		}
+		l.DensityOK = true
+	}
+}
+
+// shareOverEmptyStore is the second test a density has to pass, and it is the
+// one the floor ratio cannot make.
+//
+// The floor test compares a whole store against a whole empty one, which says
+// nothing about how the store divides. A fixture of one node and one edge
+// passed it on the run of 2026-08-12: zu's empty store measured 256 KiB there,
+// well under the ~3.5 MiB a zu store weighs once it holds any table at all, so
+// the ratio came out at 14× and the report published 29 360 128 bits per edge.
+// That is one edge apparently occupying three and a half megabytes, and
+// whatever it describes it is not an adjacency encoding.
+//
+// The test needs no constant of its own. An element that appears to cost more
+// than an entire empty database is not a thing the engine encoded, it is a
+// thing the engine allocated, so the share of the larger of the two counts is
+// compared against the empty store and the figures are withheld when it wins.
+// This catches shares that are absurd rather than shares that are merely
+// inflated; the fix that would catch both is to measure the floor from the
+// smallest non-empty graph instead of from an empty one, which is recorded in
+// the roadmap because it changes what the empty load is for.
+func (l *Load) shareOverEmptyStore(size int64) (int64, bool) {
+	elements := max(l.Nodes, l.Edges)
+	if elements <= 0 {
+		return 0, false
+	}
+	share := size / int64(elements)
+	return share, share > l.EmptyBytes
 }
 
 // Summarize reduces a series to its distribution. It sorts a copy, so the

@@ -93,6 +93,7 @@ Adapters in this binary: %s
 		out    = fs.String("out", "", "directory to write reports into; empty writes one report to stdout")
 		failOn = fs.String("fail-on", "mandatory", "exit nonzero on: mandatory, any, or none")
 		quiet  = fs.Bool("quiet", false, "suppress per-case progress")
+		large  = fs.Bool("large", false, "include the cases whose fixtures are big enough to measure storage density on; they cost minutes to ingest and are excluded by default")
 
 		generate      = fs.Int("generate", 0, "statements to walk out of the published grammar after the corpus runs; 0 runs no walk")
 		generateSeed  = fs.Uint64("generate-seed", 1, "seed for the walk; the same seed writes the same statements everywhere")
@@ -128,7 +129,7 @@ Adapters in this binary: %s
 		return err
 	}
 
-	sel, err := runner.ParseSelector(*pattern, kinds, features, tags, skipTags)
+	sel, err := runner.ParseSelector(*pattern, kinds, features, tags, skipTags, *large)
 	if err != nil {
 		return err
 	}
@@ -164,7 +165,7 @@ Adapters in this binary: %s
 	cfg := runner.Config{
 		Mode:           mode,
 		Select:         sel,
-		SelectorText:   describeSelector(*pattern, kinds, features, tags, skipTags),
+		SelectorText:   describeSelector(*pattern, kinds, features, tags, skipTags, *large),
 		Repeats:        *repeats,
 		Warmups:        *warmups,
 		Timeout:        *timeout,
@@ -323,7 +324,7 @@ func progress(w *os.File) func(done, total int, r *runner.CaseResult) {
 
 // describeSelector reproduces the selection in the report, because a score
 // over a subset of the corpus that does not say which subset is not a score.
-func describeSelector(pattern string, kinds, features, tags, skipTags stringList) string {
+func describeSelector(pattern string, kinds, features, tags, skipTags stringList, large bool) string {
 	var parts []string
 	add := func(name string, vs []string) {
 		if len(vs) > 0 {
@@ -337,8 +338,17 @@ func describeSelector(pattern string, kinds, features, tags, skipTags stringList
 	add("feature", features)
 	add("tag", tags)
 	add("skip-tag", skipTags)
+	// The large exclusion is part of the selection even though nobody typed
+	// it, and a report that did not say so would be a score over a subset
+	// presenting itself as one over the corpus.
 	if len(parts) == 0 {
-		return "the whole corpus"
+		if large {
+			return "the whole corpus, large fixtures included"
+		}
+		return "the whole corpus apart from its large fixtures"
+	}
+	if large {
+		parts = append(parts, "large=on")
 	}
 	return strings.Join(parts, " ")
 }
