@@ -226,6 +226,11 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 	ex.empty = ex.measureEmpty(ctx)
 	rep.Engine.EmptyStore = ex.empty
 
+	// The floor under every latency the run is about to print, measured on the
+	// session the empty load just warmed and before any fixture with a graph in
+	// it is loaded, so that nothing about the store can be in it.
+	rep.Engine.RoundTrip = ex.measureRoundTrip(ctx)
+
 	cases := cfg.Suite.Filter(cfg.Select)
 	rep.Cases = make([]CaseResult, 0, len(cases))
 	for i, c := range cases {
@@ -289,6 +294,78 @@ type executor struct {
 	// budget, which is a question that can only be answered by having loaded it
 	// once already.
 	loadWall map[string]time.Duration
+}
+
+// FloorStatement is the cheapest question the harness knows how to ask. It
+// returns one row of one constant, so an engine that answers it has done a
+// parse, a plan, an execution and a round trip and nothing else. It is written
+// in standard GQL and is not translated in compatibility mode, because a floor
+// measured through a different statement on each engine would not be a floor
+// anybody could compare.
+const FloorStatement = "RETURN 1 AS n"
+
+// measureRoundTrip times the cheapest statement the engine can answer, warm and
+// repeated, as the floor under every latency in the report.
+//
+// The report prints case latencies down to microseconds and invites two engines
+// to be compared on them. What it did not print, until now, is that some of
+// every one of those figures is the harness talking to the engine and none of it
+// is the engine answering. For zu that is a JSON line down a pipe to a process
+// on the same machine; for Neo4j it is Bolt over a socket to a server; the two
+// differ by more than several of the cases differ from each other. A reader who
+// cannot see the floor cannot tell a query that is fast from a transport that
+// is cheap.
+//
+// It is measured the way a case is measured — same warmups, same repeat count,
+// same nearest-rank percentiles — because a floor obtained differently from the
+// numbers it sits under is not a floor those numbers can be read against.
+//
+// An engine that will not answer it gets a note and no floor. That is a real
+// possibility and not a defect in this code: RETURN with no preceding MATCH is
+// standard GQL that some engines only accept in some positions, and a run that
+// stopped over it would lose a whole report to a missing sentence.
+func (e *executor) measureRoundTrip(ctx context.Context) metrics.RoundTrip {
+	rt := metrics.RoundTrip{
+		Statement: FloorStatement,
+		Warmups:   e.cfg.Warmups,
+		Repeats:   e.cfg.Repeats,
+	}
+	if rt.Repeats <= 0 {
+		rt.Repeats = 1
+	}
+	sess, err := e.session(ctx)
+	if err != nil {
+		rt.Note = "opening a session: " + err.Error()
+		return rt
+	}
+
+	ask := func() (time.Duration, error) {
+		qctx, cancel := context.WithTimeout(ctx, e.cfg.Timeout)
+		defer cancel()
+		start := time.Now()
+		_, err := sess.Exec(qctx, FloorStatement, nil)
+		return time.Since(start), err
+	}
+	for range rt.Warmups {
+		if _, err := ask(); err != nil {
+			break
+		}
+	}
+	series := &metrics.Series{Warmups: rt.Warmups}
+	for range rt.Repeats {
+		wall, err := ask()
+		if err != nil {
+			if f := adapter.AsFailure(err); f != nil && f.Fatal {
+				e.discard()
+			}
+			rt.Note = "the engine would not answer " + FloorStatement + ": " + err.Error()
+			return rt
+		}
+		series.Samples = append(series.Samples, metrics.Sample{Wall: wall, Rows: 1, Cells: 1})
+	}
+	rt.Stats = series.Summarize()
+	rt.OK = rt.Stats.Count > 0
+	return rt
 }
 
 // EmptyFixture is the fixture the run loads to find out what an engine's store
@@ -797,6 +874,12 @@ func (e *executor) ensureLoaded(ctx context.Context, sess adapter.Session, fx *f
 		Process:    proc,
 		Disk:       metrics.After(dir, disk),
 		EmptyBytes: e.empty.Bytes,
+		// What the engine says about its own store, where it says anything. It
+		// is not checked against the empty load: the two answer the same
+		// question and this one answers it about this store, so a disagreement
+		// between them is the empty load being a proxy and not a fault.
+		SchemaBytes: stats.SchemaBytes,
+		AllocUnit:   stats.AllocUnit,
 	}
 	load.Compute()
 	e.loaded, e.dirty = fx.Name, false
@@ -922,8 +1005,49 @@ func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.
 	r.Stats = series.Summarize()
 	r.Process = series.Process
 	r.Disk = series.Disk
+	r.Plan = e.explain(ctx, sess, stmt, c.Params, timeout, last)
 	judge(c, last, lastErr, e.caps, r)
 	e.checkParses(ctx, sess, c, timeout, r)
+}
+
+// explain asks the engine how it ran the statement, for the report to print
+// beside the latency.
+//
+// It runs after the timed repetitions and never inside them. Before would warm
+// whatever the engine caches about the statement, and a mutating case gets no
+// warm-ups precisely so that its first execution pays that cost where a reader
+// can see it. It is also outside the sampler, so the work of rendering a plan
+// is charged to nothing.
+//
+// Four things stop it. An engine with no Explainer has nothing to ask, and the
+// field stays empty rather than being filled with the harness's own guess. A
+// session the run killed cannot be asked, and opening a new one would answer
+// about a different graph. An adapter that already filled Result.Plan on the
+// ordinary path is believed and not asked again. And a statement the engine
+// could not compile has no plan to give, so the error is dropped: the outcome
+// column already says the case did not parse, and a second sentence saying it
+// again in the plan column would read like a separate defect.
+func (e *executor) explain(ctx context.Context, sess adapter.Session, stmt string, params map[string]any, timeout time.Duration, last *adapter.Result) string {
+	if last != nil && last.Plan != "" {
+		return last.Plan
+	}
+	if e.sess == nil {
+		return ""
+	}
+	ex, ok := sess.(adapter.Explainer)
+	if !ok {
+		return ""
+	}
+	xctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	text, err := ex.Explain(xctx, stmt, params)
+	if err != nil {
+		if f := adapter.AsFailure(err); f != nil && f.Fatal {
+			e.discard()
+		}
+		return ""
+	}
+	return text
 }
 
 // checkParses runs a condition case's control statement and, if the engine

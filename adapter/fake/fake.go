@@ -69,6 +69,11 @@ type Config struct {
 	Respond func(stmt string) (Answer, bool)
 	// Default is the answer for an unscripted statement.
 	Default Answer
+	// Explain, when set, makes the session an adapter.Explainer answering with
+	// what it returns. Left nil the session does not implement the interface at
+	// all, which is not the same as implementing it and returning nothing: the
+	// runner distinguishes the two and only one of them is the common case.
+	Explain func(stmt string) (string, error)
 	// Latency is the default per-statement delay.
 	Latency time.Duration
 	// LoadLatency is the per-thousand-elements delay during an ingest, so that
@@ -136,7 +141,24 @@ func (d *driver) Open(_ context.Context, workdir string) (adapter.Session, error
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		return nil, err
 	}
-	return &session{cfg: d.cfg, dir: workdir}, nil
+	s := &session{cfg: d.cfg, dir: workdir}
+	if d.cfg.Explain != nil {
+		return &explaining{session: s}, nil
+	}
+	return s, nil
+}
+
+// explaining is a session that can also be asked for a plan. It is a separate
+// type because implementing an interface is a property of the type and not of
+// the value, and a fake that always had the method could not stand in for the
+// engines that do not.
+type explaining struct{ *session }
+
+func (s *explaining) Explain(_ context.Context, stmt string, _ map[string]any) (string, error) {
+	s.mu.Lock()
+	s.explains++
+	s.mu.Unlock()
+	return s.cfg.Explain(strings.TrimSpace(stmt))
 }
 
 type session struct {
@@ -148,6 +170,10 @@ type session struct {
 	// calls counts statements, which is what a test asserting that warmups
 	// were suppressed on a mutating case has to look at.
 	calls int
+	// explains counts plan requests separately, because the whole point of
+	// asking for one outside the timed series is that it is not a statement,
+	// and a test of that has to be able to see the difference.
+	explains int
 }
 
 // Calls reports how many statements this session has been given, warmups
@@ -158,6 +184,15 @@ func (s *session) Calls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.calls
+}
+
+// Explains reports how many times this session was asked for a plan. A test
+// that the plan is fetched once per case, and not once per repetition, has
+// nowhere else to look.
+func (s *session) Explains() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.explains
 }
 
 func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadStats, error) {

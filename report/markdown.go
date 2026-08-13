@@ -80,6 +80,7 @@ func WriteMarkdown(w io.Writer, rep *runner.Report) error {
 	writeSkips(b, rep)
 	writeFailures(b, rep)
 	writeLatency(b, rep)
+	writePlans(b, rep)
 	writeResources(b, rep)
 	writeLoads(b, rep)
 	writeExploration(b, rep)
@@ -358,6 +359,7 @@ func writeLatency(b io.Writer, rep *runner.Report) {
 	p("## Latency, per case\n\n")
 	p("A read case ran %d time%s after %d warmup%s. Percentiles are nearest-rank over that many samples and are not interpolated: with this few samples an interpolated p99 would be an invention.\n\n",
 		rep.Run.Repeats, plural(rep.Run.Repeats), rep.Run.Warmups, plural(rep.Run.Warmups))
+	p("%s\n\n", roundTripSentence(rep, backtickCode))
 	p("**How** is the treatment that produced the samples. `series` is that default. `restored` is a statement that changes the graph, measured with the fixture rebuilt before each execution so that every sample is its first application; the rebuilds are outside the samples, and the process and storage figures for such a case describe its last execution. `cold-once` is a statement that changes the graph and could not be repeated that way, which is one sample and no distribution.\n\n")
 	p("| Case | how | n | min | p50 | p90 | p99 | max | mean | stddev | MAD | rows | q/s | rows/s |\n")
 	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
@@ -372,7 +374,95 @@ func writeLatency(b io.Writer, rep *runner.Report) {
 			num(s.MeanRows), num(s.QueriesPerSec), num(s.RowsPerSec))
 	}
 	p("\n")
+	if near := nearTheFloor(rep, ran); len(near) > 0 {
+		p("Within twice the floor, so what separates these from each other is mostly the round trip: %s.\n\n", idList(near))
+	}
 	timingNotes(b, ran)
+}
+
+// FloorMultiple is how many times the round trip a case's p50 has to clear
+// before the report stops warning that the two are close. Two is the point at
+// which at least half of what was measured is the engine, which is the weakest
+// claim worth making.
+const FloorMultiple = 2
+
+// roundTripSentence states the floor, or says there is none.
+//
+// The floor is not a detail of method. It is the largest single thing a reader
+// can get wrong from this table: two engines reached over two different
+// transports have two different numbers under every row, and a case at the
+// floor is a measurement of the pipe. The sentence is printed above the table
+// rather than in the methodology section for that reason.
+// It takes a code formatter because both renderers print it and they mark up a
+// statement differently. The alternative, writing the sentence twice, is how
+// two renderers come to describe the same measurement in two ways.
+func roundTripSentence(rep *runner.Report, code func(string) string) string {
+	rt := rep.Engine.RoundTrip
+	if !rt.OK {
+		reason := rt.Note
+		if reason == "" {
+			reason = "the run did not measure one"
+		}
+		return fmt.Sprintf("There is no floor under this table: %s, the cheapest statement the harness knows how to ask, was not measured against this engine (%s). Some part of every figure below is the harness reaching the engine and this run cannot say how much.",
+			code(runner.FloorStatement), oneLine(reason))
+	}
+	return fmt.Sprintf("%s — one row of one constant, so a parse, a plan, an execution and a round trip and nothing else — takes %s at p50 and %s at p99 against this engine, over %d samples. That is the floor under every row below: it is the harness reaching the engine, it is paid by every case, and it is not the same for an engine embedded behind a pipe as for one across a socket. Two engines' latencies are worth comparing to the extent that both stand well clear of their own floors.",
+		code(runner.FloorStatement), metrics.Format(rt.Stats.P50), metrics.Format(rt.Stats.P99), rt.Stats.Count)
+}
+
+// backtickCode marks up a statement for Markdown, and plainCode leaves it
+// alone for a renderer that will escape the result and wrap it itself.
+func backtickCode(s string) string { return "`" + md(s) + "`" }
+func plainCode(s string) string    { return s }
+
+// nearTheFloor lists the cases whose p50 is within FloorMultiple of the round
+// trip, which is the set a reader must not draw a comparison from.
+func nearTheFloor(rep *runner.Report, ran []*runner.CaseResult) []string {
+	rt := rep.Engine.RoundTrip
+	if !rt.OK || rt.Stats.P50 <= 0 {
+		return nil
+	}
+	var ids []string
+	for _, c := range ran {
+		if c.Stats.Count > 0 && c.Stats.P50 <= FloorMultiple*rt.Stats.P50 {
+			ids = append(ids, c.ID)
+		}
+	}
+	return ids
+}
+
+// writePlans prints what the engine said about how it ran each case, folded
+// away so the section costs a reader nothing until a latency sends them looking.
+//
+// It sits under the latency table because that is the only reason to read it.
+// A plan is not evidence of conformance and is never scored: it is the answer
+// to "why was that one slow", and until now that answer required reproducing
+// the run by hand against a graph the harness had already deleted.
+//
+// Nothing here is comparable across engines. Two engines' plans are two
+// vocabularies for two execution models, and a reader who lines them up side by
+// side is comparing the words. The heading says so once rather than the section
+// implying otherwise by its shape.
+func writePlans(b io.Writer, rep *runner.Report) {
+	var have []*runner.CaseResult
+	for _, c := range judged(rep) {
+		if c.Plan != "" {
+			have = append(have, c)
+		}
+	}
+	if len(have) == 0 {
+		return
+	}
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("## Query plans\n\n")
+	p("What the engine says it did, in the engine's own words, for the %d case%s that could be asked without running the statement again. It is recorded and not scored: plans are not comparable between engines, and this section exists so that a surprising row in the table above has something attached to it.\n\n",
+		len(have), plural(len(have)))
+	p("A plan is taken once, after the measured repetitions and outside the sampler, so it costs no latency figure anything. For a case that changes the graph that means the plan describes the graph as the statement left it.\n\n")
+	for _, c := range have {
+		p("<details>\n<summary><code>%s</code> — %s</summary>\n\n", c.ID, md(c.Name))
+		p("```\n%s\n```\n\n", strings.TrimRight(c.Plan, "\n"))
+		p("</details>\n\n")
+	}
 }
 
 // timingCell names the treatment. A reader comparing two rows is entitled to
@@ -448,8 +538,11 @@ func writeLoads(b io.Writer, rep *runner.Report) {
 	p("One row per fixture load. Cases that reused a graph another case had already loaded contribute nothing here, which is why these times must not be summed into a per-case cost.\n\n")
 	p("**Wall** is everything the harness waited for; **engine** is the part of it the engine itself spent, where the adapter can separate the two, and is what the rates are computed against. The gap between them is this harness's cost of getting the fixture in — a staging file, an encoded batch, a process start — and belongs to the route rather than to the store.\n\n")
 	p("%s\n\n", floorSentence(rep))
-	p("| Fixture | Triggered by | Nodes | Edges | Wall | Engine | nodes/s | edges/s | Apparent Δ | Allocated Δ | × floor | bits/edge | bytes/node | RSS peak | CPU |\n")
-	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	if s := schemaSentence(loadsOf(loads)); s != "" {
+		p("%s\n\n", s)
+	}
+	p("| Fixture | Triggered by | Nodes | Edges | Wall | Engine | nodes/s | edges/s | Apparent Δ | Allocated Δ | × floor | graph | bits/edge | bytes/node | RSS peak | CPU |\n")
+	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
 	for i := range loads {
 		c := loads[i]
 		l := c.Load
@@ -461,11 +554,12 @@ func writeLoads(b io.Writer, rep *runner.Report) {
 		if l.EngineWall > 0 {
 			engine = metrics.Format(l.EngineWall)
 		}
-		p("| %s | `%s` | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+		p("| %s | `%s` | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 			c.Fixture, c.ID, l.Nodes, l.Edges, metrics.Format(l.Wall), engine,
 			num(l.NodesPerSec), num(l.EdgesPerSec),
 			dashSigned(l.Disk.OK, l.Disk.Growth()), dashSigned(l.Disk.OK, l.Disk.AllocGrowth()),
-			floorCell(l), dashFloat(l.DensityOK, l.BitsPerEdge), dashFloat(l.DensityOK, l.BytesPerNode),
+			floorCell(l), dashBytes(l.SchemaBytes > 0, l.GraphBytes),
+			dashFloat(l.DensityOK, l.BitsPerEdge), dashFloat(l.DensityOK, l.BytesPerNode),
 			dashBytes(l.Process.MemoryOK, l.Process.RSSPeak), cpu)
 	}
 	p("\n")
@@ -493,6 +587,35 @@ func floorSentence(rep *runner.Report) string {
 	}
 	return fmt.Sprintf("The × floor column is the loaded store over this engine's empty one, which weighs %s across %d files with no graph in it. Below %g× the store is mostly that floor, dividing it by the fixture measures the preallocation, and bits/edge and bytes/node are withheld rather than printed. A load that clears the floor is checked once more, per element, because an engine whose empty store is measured before it has written anything understates its own fixed cost: a graph whose single node or single edge appears to weigh more than the whole empty store is measuring allocation, and its density is withheld too. That second check catches the shares that are absurd rather than the ones that are merely inflated, so a small fixture that clears both is still worth reading beside a large one rather than on its own.",
 		metrics.FormatBytes(es.Bytes), es.Files, metrics.DensityFloor)
+}
+
+// schemaSentence describes the exact route, for an engine that can say which
+// part of its store is the graph. It replaces nothing in floorSentence above:
+// both are printed, because the two tests are applied per load and a run can
+// have one engine reporting a schema size for some loads and not others.
+//
+// The sentence is worth the space. A reader looking at bits/edge for a fixture
+// of six nodes would be right to distrust it, and the reason to trust this one
+// is not visible in the number: it is that the engine's own fixed cost was
+// subtracted rather than assumed to be small.
+func schemaSentence(loads []*metrics.Load) string {
+	var with *metrics.Load
+	for _, l := range loads {
+		if l.SchemaBytes > 0 {
+			with = l
+			break
+		}
+	}
+	if with == nil {
+		return ""
+	}
+	s := fmt.Sprintf("This engine reports how much of its store is fixed by the shape of the database rather than by the graph, so for those loads the **graph** column is the store with that part taken off, and it is that column and not the whole store that bits/edge and bytes/node divide. The × floor column is the store over the fixed part, which for the first such load was %s of a %s store.",
+		metrics.FormatBytes(with.SchemaBytes), metrics.FormatBytes(with.Disk.BytesAfter))
+	if with.AllocUnit > 0 {
+		s += fmt.Sprintf(" A store that grows in units of %s still rounds the last one up, so a density is withheld until the graph fills at least %g of them and the rounding is under a tenth of the figure.",
+			metrics.FormatBytes(with.AllocUnit), metrics.DensityFloor)
+	}
+	return s
 }
 
 func floorCell(l *metrics.Load) string {

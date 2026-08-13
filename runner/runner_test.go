@@ -3,6 +3,7 @@ package runner_test
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -438,6 +439,120 @@ func TestMutatingCaseIsNotWarmedUp(t *testing.T) {
 	if got := result(t, run(t, engine(t, nil), runner.Config{Warmups: 3, Repeats: 2}),
 		"mandatory/test/right-answer").Warmups; got != 3 {
 		t.Errorf("a read-only case recorded %d warmups, want 3", got)
+	}
+}
+
+// The plan is the answer to "why was that case slow", and until it was
+// recorded the answer meant reproducing the run by hand against a graph the
+// harness had already deleted. What it must not do is cost a measurement
+// anything, which is why the runner asks the engine to describe the statement
+// rather than to run it and count.
+func TestThePlanIsRecordedOncePerCaseAndNotOncePerRepetition(t *testing.T) {
+	var mu sync.Mutex
+	asked := map[string]int{}
+	d := engine(t, func(c *fake.Config) {
+		c.Explain = func(stmt string) (string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			asked[stmt]++
+			return "Project\n  ScanNodes(Person)", nil
+		}
+	})
+	rep := run(t, d, runner.Config{Repeats: 4, Warmups: 2})
+
+	r := result(t, rep, "mandatory/test/right-answer")
+	if !strings.Contains(r.Plan, "ScanNodes") {
+		t.Fatalf("the case recorded no plan: %q", r.Plan)
+	}
+	// Four measured executions and two warmups all ran the same text. A plan
+	// bought on any of them would show up here as more than one request, and a
+	// plan bought inside the timed loop is a latency figure that is measuring
+	// the harness.
+	mu.Lock()
+	defer mu.Unlock()
+	if n := asked[strings.TrimSpace(r.Statement)]; n != 1 {
+		t.Errorf("the engine was asked for this plan %d times, want 1", n)
+	}
+}
+
+// An engine that cannot describe a statement without running it must not
+// implement Explainer at all, and the harness has to survive that rather than
+// printing its own guess in the column.
+func TestAnEngineThatCannotExplainLeavesThePlanEmpty(t *testing.T) {
+	rep := run(t, engine(t, nil), runner.Config{})
+	for i := range rep.Cases {
+		if p := rep.Cases[i].Plan; p != "" {
+			t.Errorf("%s: an engine with no Explainer produced a plan %q", rep.Cases[i].ID, p)
+		}
+	}
+}
+
+// A statement the engine cannot compile has no plan. Recording the refusal as
+// one would put a second error in the report for a case whose outcome column
+// already says it did not parse.
+func TestAPlanTheEngineRefusesIsDroppedAndChangesNoVerdict(t *testing.T) {
+	d := engine(t, func(c *fake.Config) {
+		c.Explain = func(string) (string, error) {
+			return "", &adapter.Failure{GQLStatus: "42001", Message: "syntax error"}
+		}
+	})
+	rep := run(t, d, runner.Config{})
+	r := result(t, rep, "mandatory/test/right-answer")
+	if r.Plan != "" {
+		t.Errorf("a refused explain was recorded as a plan: %q", r.Plan)
+	}
+	if r.Outcome != runner.Pass {
+		t.Errorf("outcome %s: an engine that would not explain the statement changed the verdict on it: %s",
+			r.Outcome, r.Reason)
+	}
+}
+
+// Every latency in the report has the harness's own round trip in it, and how
+// much varies by an order of magnitude between an engine behind a pipe and one
+// across a socket. The run measures it so the report can print it, rather than
+// leaving a reader to compare two engines' transports and call it a query
+// comparison.
+func TestTheRoundTripFloorIsMeasuredBeforeAnyCase(t *testing.T) {
+	d := engine(t, func(c *fake.Config) {
+		c.Answers[runner.FloorStatement] = fake.Answer{
+			Table: table("n", 1), Latency: 2 * time.Millisecond,
+		}
+	})
+	rep := run(t, d, runner.Config{Repeats: 3, Warmups: 1})
+	rt := rep.Engine.RoundTrip
+	if !rt.OK {
+		t.Fatalf("no floor was measured: %s", rt.Note)
+	}
+	if rt.Statement != runner.FloorStatement {
+		t.Errorf("the floor was measured with %q", rt.Statement)
+	}
+	if rt.Stats.Count != 3 {
+		t.Errorf("floor over %d samples, want the run's repeat count", rt.Stats.Count)
+	}
+	if rt.Stats.P50 < time.Millisecond {
+		t.Errorf("floor p50 %s, want the 2ms the engine was told to take", rt.Stats.P50)
+	}
+}
+
+// An engine that will not answer the cheapest statement is a finding, not an
+// error. The report then has no floor and has to say so, and every other
+// measurement in the run still happens.
+func TestAnEngineThatRefusesTheFloorStatementStillGetsAReport(t *testing.T) {
+	d := engine(t, func(c *fake.Config) {
+		c.Answers[runner.FloorStatement] = fake.Answer{
+			Failure: &adapter.Failure{GQLStatus: "42001", Message: "RETURN must follow MATCH"},
+		}
+	})
+	rep := run(t, d, runner.Config{})
+	if rep.Engine.RoundTrip.OK {
+		t.Fatal("a floor was reported for an engine that refused to be asked")
+	}
+	if rep.Engine.RoundTrip.Note == "" {
+		t.Error("no reason given for the missing floor")
+	}
+	if r := result(t, rep, "mandatory/test/right-answer"); r.Outcome != runner.Pass {
+		t.Errorf("outcome %s: the refused floor statement took the rest of the run with it: %s",
+			r.Outcome, r.Reason)
 	}
 }
 

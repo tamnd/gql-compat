@@ -478,6 +478,14 @@ func (h *htmlWriter) latency(rep *runner.Report) {
 	h.p(`<section id="latency"><h2>Latency, per case</h2>`)
 	h.p(`<p>Every case ran %d times after %d warmup%s. Percentiles are nearest-rank over that many samples and are not interpolated: with this few samples an interpolated p99 would be an invention.</p>`,
 		rep.Run.Repeats, rep.Run.Warmups, plural(rep.Run.Warmups))
+	h.p(`<p>%s</p>`, e(roundTripSentence(rep, plainCode)))
+	if near := nearTheFloor(rep, ran); len(near) > 0 {
+		h.p(`<p>Within twice the floor, so what separates these from each other is mostly the round trip:</p><ul class="ids">`)
+		for _, id := range near {
+			h.p(`<li><code>%s</code></li>`, e(id))
+		}
+		h.p(`</ul>`)
+	}
 	h.filter("latency")
 	h.p(`<table class="grid filterable wide" data-filter="latency"><thead><tr>`)
 	for _, col := range []string{"Case", "n", "min", "p50", "p90", "p95", "p99", "max", "mean", "stddev", "MAD", "rows", "q/s", "rows/s", "cells/s"} {
@@ -545,9 +553,12 @@ func (h *htmlWriter) loads(rep *runner.Report) {
 	h.p(`<p>One row per fixture load. Cases that reused a graph another case had already loaded contribute nothing here, which is why these times must not be summed into a per-case cost.</p>`)
 	h.p(`<p><b>Wall</b> is everything the harness waited for; <b>engine</b> is the part of it the engine itself spent, where the adapter can separate the two, and is what the rates are computed against. The gap between them is this harness's cost of getting the fixture in &mdash; a staging file, an encoded batch, a process start &mdash; and belongs to the route rather than to the store.</p>`)
 	h.p(`<p>%s</p>`, e(floorSentence(rep)))
+	if s := schemaSentence(loadsOf(rep.Cases)); s != "" {
+		h.p(`<p>%s</p>`, e(s))
+	}
 	h.p(`<table class="grid wide"><thead><tr>`)
 	for _, col := range []string{"Fixture", "Triggered by", "Nodes", "Edges", "Wall", "Engine", "nodes/s", "edges/s",
-		"Apparent Δ", "Allocated Δ", "× floor", "bits/edge", "bytes/node", "RSS peak", "CPU"} {
+		"Apparent Δ", "Allocated Δ", "× floor", "graph", "bits/edge", "bytes/node", "RSS peak", "CPU"} {
 		h.p(`<th class="n">%s</th>`, e(col))
 	}
 	h.p(`</tr></thead><tbody>`)
@@ -565,7 +576,8 @@ func (h *htmlWriter) loads(rep *runner.Report) {
 			strconv.Itoa(l.Nodes), strconv.Itoa(l.Edges), metrics.Format(l.Wall), engine,
 			num(l.NodesPerSec), num(l.EdgesPerSec),
 			dashSigned(l.Disk.OK, l.Disk.Growth()), dashSigned(l.Disk.OK, l.Disk.AllocGrowth()),
-			floorCell(l), dashFloat(l.DensityOK, l.BitsPerEdge), dashFloat(l.DensityOK, l.BytesPerNode),
+			floorCell(l), dashBytes(l.SchemaBytes > 0, l.GraphBytes),
+			dashFloat(l.DensityOK, l.BitsPerEdge), dashFloat(l.DensityOK, l.BytesPerNode),
 			dashBytes(l.Process.MemoryOK, l.Process.RSSPeak), cpu,
 		}
 		h.p(`<tr><td>%s</td><td><code>%s</code></td>%s</tr>`,

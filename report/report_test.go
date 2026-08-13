@@ -338,6 +338,77 @@ func TestMarkdownSaysUnavailableWhereThereIsNoNumber(t *testing.T) {
 	}
 }
 
+// The floor is the largest thing a reader can get wrong from the latency
+// table. It has to be stated above it, with the number, and a run that could
+// not measure one has to say that too rather than leaving the table looking
+// like it has no floor.
+func TestMarkdownStatesTheRoundTripFloorAboveTheLatencyTable(t *testing.T) {
+	rep := sample()
+	rep.Engine.RoundTrip = metrics.RoundTrip{
+		Statement: "RETURN 1 AS n",
+		Stats:     metrics.Stats{Count: 7, P50: ms(1), P99: ms(2)},
+		Repeats:   7, Warmups: 1, OK: true,
+	}
+	var b bytes.Buffer
+	if err := report.WriteMarkdown(&b, rep); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	floor := strings.Index(out, "RETURN 1 AS n")
+	if floor < 0 {
+		t.Fatal("the floor statement is not in the report")
+	}
+	if table := strings.Index(out, "| Case | how |"); table < 0 || floor > table {
+		t.Error("the floor is stated below the table it is the floor of")
+	}
+	// A case whose p50 is 1ms against a 1ms floor is measuring the transport,
+	// and the report has to say which cases those are.
+	if !strings.Contains(out, "Within twice the floor") {
+		t.Error("no case was flagged as being at the floor, though one runs at it")
+	}
+
+	var none bytes.Buffer
+	if err := report.WriteMarkdown(&none, sample()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(none.String(), "There is no floor under this table") {
+		t.Error("a run with no floor measurement did not say so")
+	}
+}
+
+// A plan belongs under the latency table and nowhere near the verdict. It is
+// the engine's own account of what it did, it is not comparable between
+// engines, and a reader who found it in the scoreboard would reasonably think
+// it had been scored.
+func TestMarkdownPrintsThePlansItHasAndNoSectionWhenItHasNone(t *testing.T) {
+	rep := sample()
+	rep.Cases[0].Plan = "Project(name)\n  ScanNodes(Person)"
+	var b bytes.Buffer
+	if err := report.WriteMarkdown(&b, rep); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "## Query plans") {
+		t.Fatal("a report carrying a plan printed no plans section")
+	}
+	if !strings.Contains(out, "ScanNodes(Person)") {
+		t.Error("the plan text is not in the report")
+	}
+	if strings.Index(out, "## Latency") > strings.Index(out, "## Query plans") {
+		t.Error("the plans are printed above the latency table they exist to explain")
+	}
+
+	// An engine with no way to describe a statement gets no empty heading. A
+	// section with nothing under it reads as a measurement that came back zero.
+	var none bytes.Buffer
+	if err := report.WriteMarkdown(&none, sample()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(none.String(), "Query plans") {
+		t.Error("a report with no plans printed the section anyway")
+	}
+}
+
 func TestMarkdownDoesNotLetAnEngineMessageBreakTheTable(t *testing.T) {
 	rep := sample()
 	// An engine is free to put a pipe, a newline, or an asterisk in its error
