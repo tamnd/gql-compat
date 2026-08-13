@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tamnd/gql-compat/fixture"
+	"github.com/tamnd/gql-compat/impdef"
 	"github.com/tamnd/gql-compat/metrics"
 	"github.com/tamnd/gql-compat/runner"
 )
@@ -42,6 +43,7 @@ func WriteHTML(w io.Writer, rep *runner.Report) error {
 	h.latency(rep)
 	h.resources(rep)
 	h.loads(rep)
+	h.implementation(rep)
 	h.methodology(rep)
 	h.p(`</main>`)
 
@@ -99,6 +101,7 @@ func sections(rep *runner.Report) []section {
 		{"latency", "Latency", ran},
 		{"resources", "Process and storage", ran},
 		{"ingest", "Ingest", hasLoads},
+		{"implementation", impdef.Heading, rep.Implementation.Len() > 0},
 		{"methodology", "How to read this", true},
 	}
 }
@@ -556,6 +559,72 @@ func (h *htmlWriter) loads(rep *runner.Report) {
 	h.p(`</tbody></table></section>`)
 }
 
+// implementation renders what the run observed of the behaviour ISO delegates.
+//
+// The words are the impdef package's, not this file's, so the HTML and the
+// Markdown say the same thing about the same run. What the browser adds is only
+// what a browser can: the section is marked up as its own tables rather than as
+// a block of pre-rendered markdown, so the filter box and the stylesheet reach
+// it. Nothing here has a status class, because nothing here has a status.
+func (h *htmlWriter) implementation(rep *runner.Report) {
+	r := rep.Implementation
+	if r.Len() == 0 {
+		return
+	}
+	h.p(`<section id="implementation"><h2>%s</h2>`, e(impdef.Heading))
+	h.p(`<p>%s</p>`, e(impdef.Preamble))
+	for _, k := range impdef.AllKinds {
+		obs := r.Of(k)
+		if len(obs) == 0 {
+			continue
+		}
+		h.p(`<h3>%s</h3>`, e(impdef.KindHeading(k)))
+		h.p(`<p>%s</p>`, e(impdef.KindPreamble(k, r)))
+		// The padding probe asks about two consecutive spaces, which ordinary
+		// HTML whitespace handling would collapse into one, printing a
+		// different question from the one that was asked.
+		h.p(`<table class="grid wide impdef"><thead><tr>`)
+		cols := []string{"Item", "What ISO leaves open", "What was asked", "Observed", "The statement"}
+		if k == impdef.Extension {
+			cols = []string{"Extension", "Observed", "The statement"}
+		}
+		for _, col := range cols {
+			h.p(`<th>%s</th>`, e(col))
+		}
+		h.p(`</tr></thead><tbody>`)
+		for _, o := range obs {
+			stmt := fmt.Sprintf(`<td><code>%s</code></td>`, e(impdef.Escape(o.Statement)))
+			if k == impdef.Extension {
+				h.p(`<tr><td>%s</td>%s%s</tr>`, e(o.Question), h.observed(o), stmt)
+				continue
+			}
+			h.p(`<tr><td><code>%s</code></td><td>%s</td><td>%s</td>%s%s</tr>`,
+				e(o.Item), e(o.Description), e(o.Question), h.observed(o), stmt)
+		}
+		h.p(`</tbody></table>`)
+		var notes []string
+		for _, o := range obs {
+			if o.Note != "" {
+				notes = append(notes, fmt.Sprintf(`<li><code>%s</code> %s</li>`, e(o.Item), e(o.Note)))
+			}
+		}
+		if len(notes) > 0 {
+			h.p(`<ul class="notes">%s</ul>`, strings.Join(notes, ""))
+		}
+	}
+	h.p(`</section>`)
+}
+
+// observed is the answer cell. An unobserved one gets the na class, which is
+// the same grey the report gives an unavailable measurement, and for the same
+// reason: it is the absence of a number, not a bad number.
+func (h *htmlWriter) observed(o impdef.Observation) string {
+	if !o.Observed() {
+		return fmt.Sprintf(`<td class="na">%s</td>`, e(o.Cell()))
+	}
+	return fmt.Sprintf(`<td><code>%s</code></td>`, e(o.Cell()))
+}
+
 func numCells(cells []string) string {
 	var b strings.Builder
 	for _, c := range cells {
@@ -689,6 +758,9 @@ pre.gql { background: var(--bg); border: 1px solid var(--line); border-radius: .
   padding: .7rem .9rem; overflow-x: auto; font-size: .85rem; white-space: pre-wrap }
 ul.ids { margin: .4rem 0; padding-left: 1.1rem; columns: 3; font-size: .82rem }
 ul.prose li { margin: .4rem 0; max-width: 62rem }
+table.impdef code { white-space: pre-wrap }
+ul.notes { margin: .6rem 0 1.4rem; padding-left: 1.1rem; font-size: .86rem; color: var(--dim) }
+ul.notes li { margin: .3rem 0; max-width: 62rem }
 details summary { cursor: pointer; color: var(--dim) }
 .filterbox { margin: .3rem 0 .2rem; font-size: .85rem; color: var(--dim) }
 .filterbox input { font: inherit; padding: .25rem .5rem; border: 1px solid var(--line);

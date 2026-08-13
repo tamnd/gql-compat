@@ -1,0 +1,270 @@
+# Probes for the choices ISO leaves to the implementation.
+#
+# A probe is not a case. It has no expectation, it produces no verdict, and no
+# answer it can get is wrong: every item below is one the standard explicitly
+# declined to decide, so an engine that answers differently from another engine
+# is exercising a choice the standard gave it. The corpus is forbidden to test
+# either list and that is not going to change; this file is how the observation
+# gets reported instead of tested.
+#
+# Three rules govern what may be written here.
+#
+# A probe may not write. The observation phase runs after the cases on the same
+# session and restores nothing, so a statement that changed the graph would
+# change it for whatever ran next. The loader rejects a statement containing a
+# writing keyword.
+#
+# A probe cites the item it answers, and the loader checks the citation against
+# the two vendored artifacts. A probe that called an implementation-dependent
+# item implementation-defined would misstate what the vendor is obliged to
+# document, so the loader checks the list too, not just the code.
+#
+# A probe states its own question. ISO's words for IA015 are "whether to pad
+# character strings for comparison, or not"; what this harness can actually
+# observe is whether one particular pair of strings compared equal, and the
+# question says so. The standard's own description is attached from the
+# artifact at load time and never retyped here.
+
+probes:
+  # ---------------------------------------------------------------- 24.5.2
+
+  - id: impdef/ia010/integer-overflow
+    item: IA010
+    kind: implementation-defined
+    question: >-
+      What the engine does with the largest signed 64 bit integer plus one:
+      returns a wrapped or promoted value, or refuses the arithmetic.
+    fixture: unit
+    statement: RETURN 9223372036854775807 + 1 AS v
+    read: answer
+    note: >-
+      A refusal is as good an answer as a number here, which is why this probe
+      reads the answer rather than the cell. ISO asks the implementation to
+      state the boundaries within which the normal rules of arithmetic apply,
+      and refusing to leave them is one way to have stated it.
+
+  - id: impdef/ia011/inexact-division
+    item: IA011
+    kind: implementation-defined
+    question: >-
+      The value returned for 0.5 divided by 3, whose exact result has no finite
+      decimal expansion, so the digits show where the engine stopped.
+    fixture: numbers
+    statement: |
+      MATCH (v:Value)
+      WHERE v.n = 1
+      RETURN v.x / 3 AS v
+    read: cell
+    note: >-
+      The 0.5 is read from the fixture rather than written as a literal,
+      because a decimal literal is optional feature GL04 and a probe that
+      spelled one would observe the lexer instead of the division on an engine
+      that has not implemented it.
+
+  - id: impdef/ia015/trailing-space-comparison
+    item: IA015
+    kind: implementation-defined
+    question: Whether 'a' equals the same letter followed by two spaces, which it does when the shorter operand is padded.
+    fixture: unit
+    statement: RETURN 'a' = 'a  ' AS v
+    read: cell
+
+  - id: impdef/ia019/bidirectional-control
+    item: IA019
+    kind: implementation-defined
+    question: Whether a string literal containing U+202E, right-to-left override, is accepted.
+    fixture: unit
+    statement: "RETURN 'a\u202Eb' AS v"
+    read: accepted
+    note: >-
+      The report escapes the character rather than printing it, because a
+      right-to-left override in a table cell reorders the rest of the line for
+      whoever reads the table. The engine received the character itself.
+
+  - id: impdef/ia020/private-use-identifier
+    item: IA020
+    kind: implementation-defined
+    question: >-
+      Whether a delimited identifier containing U+E000, a Unicode private use
+      character of general category Co, is accepted.
+    fixture: unit
+    statement: "RETURN 1 AS `x\uE000`"
+    read: accepted
+    note: >-
+      Accent quotes rather than double quotes delimit the identifier. Both are
+      delimited identifiers in the grammar, but double quotes also open a
+      character string literal, and an engine that reads them only that way
+      would refuse this statement for a reason that has nothing to do with the
+      character being asked about.
+
+  - id: impdef/id022/default-collation
+    item: ID022
+    kind: implementation-defined
+    question: >-
+      The order 'b', 'A', 'a', 'B' come back in under an ascending sort, which
+      separates a codepoint collation from one that folds case.
+    fixture: unit
+    statement: |
+      FOR x IN ['b', 'A', 'a', 'B']
+      RETURN x AS v
+      ORDER BY x
+    read: sequence
+    note: >-
+      An observed order constrains the collation without naming it. Two
+      engines that agree here may still have different default collations that
+      happen to agree on four ASCII letters.
+
+  - id: impdef/id086/default-match-mode
+    item: ID086
+    kind: implementation-defined
+    question: >-
+      The number of four edge matches in a three node cycle, which is three
+      when the default match mode lets a match repeat an edge and zero when it
+      does not.
+    fixture: triangle
+    statement: |
+      MATCH ()-[]->()-[]->()-[]->()-[]->()
+      RETURN COUNT(*) AS n
+    read: answer
+
+  - id: impdef/il010/twenty-digit-literal
+    item: IL010
+    kind: implementation-defined
+    question: Whether a twenty digit unsigned integer literal is accepted.
+    fixture: unit
+    statement: RETURN 99999999999999999999 AS v
+    read: accepted
+    note: >-
+      Twenty digits is one more than the largest signed 64 bit integer has, so
+      an engine whose maximum is that type refuses here and an engine with
+      arbitrary precision does not. The probe reports the answer to that one
+      question and not the maximum itself, which would take a search.
+
+  - id: impdef/is001/null-ordering
+    item: IS001
+    kind: implementation-defined
+    question: >-
+      Where the null value sorts in an ascending order that says neither NULLS
+      FIRST nor NULLS LAST.
+    fixture: nullable
+    statement: |
+      MATCH (m:Maybe)
+      RETURN m.note AS note
+      ORDER BY note
+    read: sequence
+
+  - id: impdef/iv001/non-ascii-source
+    item: IV001
+    kind: implementation-defined
+    question: >-
+      Whether source text outside ASCII is accepted, and whether the
+      characters come back as they went in.
+    fixture: unit
+    statement: RETURN 'héllo ☃' AS v
+    read: answer
+
+  - id: impdef/iv023/truncating-whitespace
+    item: IV023
+    kind: implementation-defined
+    question: >-
+      The length of a tab-surrounded 'x' after TRIM, which is one when the tab
+      counts as truncating whitespace and three when only the space does.
+    fixture: unit
+    statement: "RETURN CHAR_LENGTH(TRIM('\tx\t')) AS v"
+    read: cell
+
+  # ---------------------------------------------------------------- dependent
+
+  - id: impdep/ua004/inessential-division-by-zero
+    item: UA004
+    kind: implementation-dependent
+    question: >-
+      Whether a division by zero in a disjunct the engine never needs to
+      evaluate raises anything, or the count comes back.
+    fixture: numbers
+    statement: |
+      MATCH (v:Value)
+      WHERE v.n > 0 OR v.n / 0 = 1
+      RETURN COUNT(*) AS n
+    read: answer
+    note: >-
+      Every node in the fixture has a positive n, so the second disjunct is
+      inessential for every one of them. ISO leaves it to the system whether
+      the exception is raised anyway, which means neither answer is a defect
+      and a program must not be written that depends on either.
+
+  - id: impdep/us001/unordered-sequence
+    item: US001
+    kind: implementation-dependent
+    question: The order five people come back in when nothing asked for an order.
+    fixture: social
+    statement: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+    read: sequence
+    note: >-
+      This is the item behind every unordered comparison in the corpus. A case
+      that expected one of these sequences would be testing an engine's storage
+      order and calling it conformance, which is why the corpus compares
+      unordered results as sets instead.
+
+  - id: impdep/us006/sort-peers
+    item: US006
+    kind: implementation-dependent
+    question: >-
+      Which of Bob and Dave, who are both 27, comes first when age is the only
+      sort key.
+    fixture: social
+    statement: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+      ORDER BY p.age
+    read: sequence
+
+  - id: impdep/uv004/element-id-value
+    item: UV004
+    kind: implementation-dependent
+    question: The identifier this engine gave the single node of the unit graph.
+    fixture: unit
+    statement: |
+      MATCH (u:Unit)
+      RETURN ELEMENT_ID(u) AS v
+    read: cell
+    note: >-
+      The value is expected to differ between runs of the same statement on the
+      same engine, and that is the point of the item. The corpus case for
+      ELEMENT_ID asserts only that a value exists, for exactly this reason.
+
+  # ---------------------------------------------------------------- 24.5.3
+
+  - id: extension/trailing-semicolon
+    item: IE005
+    kind: extension
+    question: Whether a statement ending in a semicolon is accepted.
+    fixture: unit
+    statement: RETURN 1 AS v;
+    read: accepted
+    note: >-
+      No production in the grammar artifact contains a semicolon and the
+      standard defines no statement terminator. Undefined is not forbidden:
+      Clause 24.5.3 permits an implementation to accept language the standard
+      does not define, provided it says so, and IE005 makes the treatment of
+      such language implementation-defined. This harness had a grammar case
+      requiring a refusal until M3 deleted it, because scoring a refusal as
+      the right answer asserted a prohibition the standard does not contain.
+
+  - id: extension/unwind
+    item: IE005
+    kind: extension
+    question: Whether UNWIND, the openCypher spelling, is accepted where GQL spells FOR.
+    fixture: unit
+    statement: |
+      UNWIND [1, 2] AS x
+      RETURN x AS v
+    read: accepted
+    note: >-
+      UNWIND appears nowhere in the grammar artifact. GQL spells this as a for
+      statement, feature GQ10. Every engine this project has measured is
+      descended from Cypher, so this probe is close to a lineage test, and an
+      engine accepting both spellings has extended the language rather than got
+      anything wrong.

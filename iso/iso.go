@@ -142,6 +142,7 @@ type Catalog struct {
 	byFeature    map[string]Feature
 	byProduction map[string]Production
 	bySubclause  map[string]Subclause
+	byBehaviour  map[string]Behaviour
 	statuses     map[string]string
 }
 
@@ -202,6 +203,13 @@ func (c *Catalog) index() {
 			c.statuses[cl.Code+sc.Code] = cl.Name + ": " + sc.Name
 		}
 	}
+	c.byBehaviour = make(map[string]Behaviour, len(c.ImplementationDefined)+len(c.ImplementationDependent))
+	for _, b := range c.ImplementationDefined {
+		c.byBehaviour[b.Code] = b
+	}
+	for _, b := range c.ImplementationDependent {
+		c.byBehaviour[b.Code] = b
+	}
 }
 
 // Feature returns the feature with the given code.
@@ -215,6 +223,31 @@ func (c *Catalog) Feature(code string) (Feature, bool) {
 func (c *Catalog) Production(name string) (Production, bool) {
 	p, ok := c.byProduction[strings.Trim(name, "<>")]
 	return p, ok
+}
+
+// Behaviour returns the implementation-defined or implementation-dependent
+// item with the given code, from either list.
+//
+// The two lists are searched together because the codes do not collide and a
+// caller citing IA015 almost never cares which of the two documents it came
+// from until it has found it. Which list it came from is IsDefined's answer.
+func (c *Catalog) Behaviour(code string) (Behaviour, bool) {
+	b, ok := c.byBehaviour[strings.ToUpper(strings.TrimSpace(code))]
+	return b, ok
+}
+
+// IsDefined reports whether the code names an implementation-defined item,
+// which is the one of the two lists Clause 24.5.2 obliges an implementer to
+// write down. An implementation-dependent item carries no such obligation and
+// answers false here, as does a code neither list holds.
+func (c *Catalog) IsDefined(code string) bool {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	for _, b := range c.ImplementationDefined {
+		if b.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 // Subclause returns the clause or subclause with the given number.
@@ -297,6 +330,17 @@ func (c Codes) Subclause(number string) bool {
 	s, ok := c.Catalog.Subclause(number)
 	return ok && s.Normative
 }
+
+// Item returns the standard's own description of an implementation-defined or
+// implementation-dependent item, from either list.
+func (c Codes) Item(code string) (string, bool) {
+	b, ok := c.Behaviour(code)
+	return b.Description, ok
+}
+
+// Defined reports whether the code is on the implementation-defined list, the
+// one Clause 24.5.2 obliges an implementer to write down.
+func (c Codes) Defined(code string) bool { return c.IsDefined(code) }
 
 // Keywords returns every distinct keyword the grammar spells out, sorted.
 // The reserved-word tests draw their inputs from this list.

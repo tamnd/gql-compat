@@ -14,6 +14,7 @@
 //	gql-compat iso       features
 //	gql-compat validate  -corpus ./corpus/suite
 //	gql-compat consensus reports/neo4j/neo4j.json reports/zu/zu.json reports/ladybug/ladybug.json
+//	gql-compat statement reports/zu/zu.json -out STATEMENT.md
 //	gql-compat version
 package main
 
@@ -92,6 +93,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return cmdValidate(args[1:])
 	case "consensus":
 		return cmdConsensus(args[1:])
+	case "statement":
+		return cmdStatement(args[1:])
 	case "version", "-version", "--version":
 		printVersion(os.Stdout)
 		return nil
@@ -123,6 +126,8 @@ func usage(w *os.File) {
   validate   load a corpus and check every ISO reference in it
   consensus  compare two or more reports and queue the cases every
              engine failed for corpus review
+  statement  print the Clause 24.5.2 template an implementer has to fill
+             in, with a run's observed answers already in it
   version    print the version
 
 Run "gql-compat <subcommand> -h" for that subcommand's flags.

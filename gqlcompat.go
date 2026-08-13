@@ -30,6 +30,7 @@ import (
 	"github.com/tamnd/gql-compat/adapter"
 	"github.com/tamnd/gql-compat/corpus"
 	"github.com/tamnd/gql-compat/fixture"
+	"github.com/tamnd/gql-compat/impdef"
 	"github.com/tamnd/gql-compat/iso"
 	"github.com/tamnd/gql-compat/runner"
 )
@@ -49,6 +50,9 @@ type Standard struct {
 	Fixtures *fixture.Set
 	// Catalog is the vendored ISO vocabulary.
 	Catalog *iso.Catalog
+	// Probes are the questions about behaviour the standard leaves open. They
+	// are not cases and are never scored; see the impdef package.
+	Probes *impdef.Set
 }
 
 // Load returns the corpus embedded in this module.
@@ -65,7 +69,16 @@ func Load() (*Standard, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading the embedded corpus: %w", err)
 	}
-	return &Standard{Suite: suite, Fixtures: fixtures, Catalog: cat}, nil
+	std, err := newStandard(cat, suite, fixtures)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range std.Probes.Fixtures() {
+		if _, ok := fixtures.Get(name); !ok {
+			return nil, fmt.Errorf("a shipped probe names unknown fixture %q", name)
+		}
+	}
+	return std, nil
 }
 
 // LoadFS returns a corpus read from root, checked against the same vendored
@@ -84,7 +97,23 @@ func LoadFS(root fs.FS) (*Standard, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading the corpus: %w", err)
 	}
-	return &Standard{Suite: suite, Fixtures: fixtures, Catalog: cat}, nil
+	return newStandard(cat, suite, fixtures)
+}
+
+// newStandard attaches the shipped probes to a loaded corpus.
+//
+// The probes are loaded here rather than beside the corpus because they are not
+// cases and the corpus loader must stay unable to load one. What they do share
+// is the fixtures, and a probe naming a fixture the corpus does not define
+// simply observes nothing: that is a legitimate state for a caller running
+// their own cases against the shipped probes, and only a bug when both sides
+// shipped together, which is what Load checks and LoadFS does not.
+func newStandard(cat *iso.Catalog, suite *corpus.Suite, fixtures *fixture.Set) (*Standard, error) {
+	probes, err := impdef.LoadEmbedded(iso.Codes{Catalog: cat})
+	if err != nil {
+		return nil, fmt.Errorf("loading the implementation-defined probes: %w", err)
+	}
+	return &Standard{Suite: suite, Fixtures: fixtures, Catalog: cat, Probes: probes}, nil
 }
 
 // Run measures one engine against this corpus.
@@ -103,5 +132,8 @@ func (s *Standard) Run(ctx context.Context, d adapter.Driver, cfg runner.Config)
 	cfg.Suite = s.Suite
 	cfg.Fixtures = s.Fixtures
 	cfg.Catalog = s.Catalog
+	if cfg.Probes == nil {
+		cfg.Probes = s.Probes
+	}
 	return runner.Run(ctx, cfg)
 }

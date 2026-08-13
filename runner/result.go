@@ -8,6 +8,7 @@ import (
 	"github.com/tamnd/gql-compat/adapter"
 	"github.com/tamnd/gql-compat/corpus"
 	"github.com/tamnd/gql-compat/fixture"
+	"github.com/tamnd/gql-compat/impdef"
 	"github.com/tamnd/gql-compat/iso"
 	"github.com/tamnd/gql-compat/metrics"
 	"github.com/tamnd/gql-compat/rows"
@@ -319,6 +320,12 @@ type Report struct {
 	Cases    []CaseResult `json:"cases"`
 	Totals   Totals       `json:"totals"`
 	Coverage Coverage     `json:"coverage"`
+
+	// Implementation is what the run observed of the choices ISO leaves open.
+	// It is deliberately outside Totals and Coverage: an implementation-defined
+	// choice has no right answer, so counting it would put a number on
+	// something the standard declined to decide. Nil when no probe ran.
+	Implementation *impdef.Result `json:"implementation,omitempty"`
 }
 
 // ReportSchema is the version of the JSON shape above. It changes whenever a

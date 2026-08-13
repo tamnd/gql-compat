@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tamnd/gql-compat/fixture"
+	"github.com/tamnd/gql-compat/impdef"
 	"github.com/tamnd/gql-compat/metrics"
 	"github.com/tamnd/gql-compat/runner"
 )
@@ -81,6 +82,7 @@ func WriteMarkdown(w io.Writer, rep *runner.Report) error {
 	writeLatency(b, rep)
 	writeResources(b, rep)
 	writeLoads(b, rep)
+	writeImplementation(b, rep)
 	writeMethodology(b, rep)
 	return b.Flush()
 }
@@ -422,6 +424,24 @@ func writeLoads(b io.Writer, rep *runner.Report) {
 			dashBytes(l.Process.MemoryOK, l.Process.RSSPeak), cpu)
 	}
 	p("\n")
+}
+
+// writeImplementation prints what the run observed of the behaviour ISO
+// delegates.
+//
+// It sits after the ingest tables and before the methodology because it is not
+// a result: nothing above it counted any of this, and a reader who has got this
+// far already knows what the engine scored. The rendering is the impdef
+// package's own, unchanged, so that the section a vendor pastes into a 24.5.2
+// statement and the section printed here cannot differ.
+func writeImplementation(b io.Writer, rep *runner.Report) {
+	if rep.Implementation.Len() == 0 {
+		return
+	}
+	// WriteSection's only error is the writer's, and every other section here
+	// ignores that the same way: the bufio flush at the end of WriteMarkdown
+	// reports it.
+	_ = impdef.WriteSection(b, rep.Implementation)
 }
 
 func writeMethodology(b io.Writer, rep *runner.Report) {
