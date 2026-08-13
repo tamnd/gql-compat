@@ -30,6 +30,7 @@ import (
 	"github.com/tamnd/gql-compat/adapter"
 	"github.com/tamnd/gql-compat/corpus"
 	"github.com/tamnd/gql-compat/fixture"
+	"github.com/tamnd/gql-compat/grammar"
 	"github.com/tamnd/gql-compat/impdef"
 	"github.com/tamnd/gql-compat/iso"
 	"github.com/tamnd/gql-compat/runner"
@@ -53,6 +54,13 @@ type Standard struct {
 	// Probes are the questions about behaviour the standard leaves open. They
 	// are not cases and are never scored; see the impdef package.
 	Probes *impdef.Set
+	// Grammar is the published BNF as a tree, ready to be walked. It is not
+	// the corpus and a walk of it is not a conformance result; see the grammar
+	// package.
+	Grammar *grammar.Grammar
+	// Promoted is the record of which leads from earlier walks review has
+	// already dealt with.
+	Promoted *grammar.Promoted
 }
 
 // Load returns the corpus embedded in this module.
@@ -113,7 +121,22 @@ func newStandard(cat *iso.Catalog, suite *corpus.Suite, fixtures *fixture.Set) (
 	if err != nil {
 		return nil, fmt.Errorf("loading the implementation-defined probes: %w", err)
 	}
-	return &Standard{Suite: suite, Fixtures: fixtures, Catalog: cat, Probes: probes}, nil
+	bnf, err := grammar.Load()
+	if err != nil {
+		return nil, fmt.Errorf("parsing the grammar artifact: %w", err)
+	}
+	promoted, err := grammar.LoadEmbeddedPromoted()
+	if err != nil {
+		return nil, fmt.Errorf("loading the promotion list: %w", err)
+	}
+	return &Standard{
+		Suite:    suite,
+		Fixtures: fixtures,
+		Catalog:  cat,
+		Probes:   probes,
+		Grammar:  bnf,
+		Promoted: promoted,
+	}, nil
 }
 
 // Run measures one engine against this corpus.
@@ -127,6 +150,11 @@ func newStandard(cat *iso.Catalog, suite *corpus.Suite, fixtures *fixture.Set) (
 // It returns an error only when the run could not start. An engine that fails
 // every case yields a full report and a nil error, because that is a
 // measurement and not a malfunction.
+//
+// The grammar walk runs only when the caller asks for it, by setting
+// cfg.Explore with a Count above zero. The grammar and the promotion list are
+// filled in from the Standard when the caller left them nil, so asking for a
+// walk takes a count and nothing else.
 func (s *Standard) Run(ctx context.Context, d adapter.Driver, cfg runner.Config) (*runner.Report, error) {
 	cfg.Driver = d
 	cfg.Suite = s.Suite
@@ -134,6 +162,20 @@ func (s *Standard) Run(ctx context.Context, d adapter.Driver, cfg runner.Config)
 	cfg.Catalog = s.Catalog
 	if cfg.Probes == nil {
 		cfg.Probes = s.Probes
+	}
+	if cfg.Explore != nil {
+		// Copied rather than filled in place: cfg is the caller's value but
+		// Explore is their pointer, and a library that quietly wrote the
+		// shipped grammar into a caller's struct would make a second run with
+		// the same config mean something different from the first.
+		ex := *cfg.Explore
+		if ex.Grammar == nil {
+			ex.Grammar = s.Grammar
+		}
+		if ex.Promoted == nil {
+			ex.Promoted = s.Promoted
+		}
+		cfg.Explore = &ex
 	}
 	return runner.Run(ctx, cfg)
 }

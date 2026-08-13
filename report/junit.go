@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/tamnd/gql-compat/corpus"
@@ -136,6 +137,12 @@ func WriteJUnit(w io.Writer, rep *runner.Report) error {
 		root.Skipped += s.Skipped
 	}
 
+	if s := junitExploration(rep); s != nil {
+		root.Suites = append(root.Suites, *s)
+		root.Tests += s.Tests
+		root.Skipped += s.Skipped
+	}
+
 	if _, err := io.WriteString(w, xml.Header); err != nil {
 		return err
 	}
@@ -146,6 +153,79 @@ func WriteJUnit(w io.Writer, rep *runner.Report) error {
 	}
 	_, err := io.WriteString(w, "\n")
 	return err
+}
+
+// junitExploration renders the grammar walk as a suite of skipped tests.
+//
+// Every one of them is <skipped>, including the leads, and that is the point.
+// JUnit has two states a build can be gated on and neither of them fits: a lead
+// is not a failure, because the statement cites no clause and an engine may
+// document a restriction under 24.5.3, and it is not a pass either. Reporting
+// them as failures would turn a build red on a question, which is exactly what
+// the milestone said not to do. Leaving them out of the CI artifact altogether
+// would be worse: a whole phase of the run would be invisible to anyone reading
+// only this file. So they are here, skipped, with the reduced statement and the
+// production path in system-out, and the message says the word lead.
+func junitExploration(rep *runner.Report) *JUnitCase {
+	x := rep.Exploration
+	if x == nil || x.Totals.Cases == 0 {
+		return nil
+	}
+	leads := map[string]*runner.Lead{}
+	for i := range x.Leads {
+		leads[x.Leads[i].ID] = &x.Leads[i]
+	}
+	s := &JUnitCase{
+		Name: string(corpus.KindGenerated),
+		Properties: []JUnitProperty{
+			{Name: "engine", Value: rep.Engine.Adapter},
+			{Name: "seed", Value: strconv.FormatUint(x.Seed, 10)},
+			{Name: "start", Value: x.Start},
+			{Name: "leads", Value: strconv.Itoa(len(x.Leads))},
+			{Name: "note", Value: "statements from a walk of the published grammar; they cite no clause, so nothing here is a conformance result and nothing here gates a build"},
+		},
+	}
+	for i := range x.Cases {
+		c := &x.Cases[i]
+		t := JUnitTest{
+			Name:      c.ID,
+			Classname: string(corpus.KindGenerated),
+			Time:      c.Stats.Mean.Seconds(),
+			SystemOut: systemOut(c),
+		}
+		switch l, isLead := leads[c.ID]; {
+		case isLead:
+			t.Skipped = &JUnitSkipped{Message: "lead: the engine reports GQLSTATUS " + l.GQLStatus +
+				" for a statement the published grammar admits"}
+			t.SystemOut = leadOut(l)
+		case c.Outcome == runner.Skip:
+			t.Skipped = &JUnitSkipped{Message: string(c.Skip) + ": " + oneLine(c.Reason)}
+		default:
+			t.Skipped = &JUnitSkipped{Message: "not a conformance result: " + string(c.Outcome)}
+		}
+		s.Cases = append(s.Cases, t)
+		s.Tests++
+		s.Skipped++
+		s.Time += c.Wall.Seconds()
+	}
+	return s
+}
+
+func leadOut(l *runner.Lead) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "reduced: %s\n", oneLine(l.Reduced))
+	if l.Reduced != l.Statement {
+		fmt.Fprintf(&b, "walked: %s\n", oneLine(l.Statement))
+	}
+	fmt.Fprintf(&b, "gqlstatus: %s\n", l.GQLStatus)
+	if l.Message != "" {
+		fmt.Fprintf(&b, "engine: %s\n", oneLine(l.Message))
+	}
+	if len(l.Path) > 0 {
+		fmt.Fprintf(&b, "productions: %s\n", strings.Join(l.Path, " > "))
+	}
+	fmt.Fprintf(&b, "fingerprint: %s\n", l.Fingerprint)
+	return b.String()
 }
 
 func junitCase(c *runner.CaseResult) JUnitTest {

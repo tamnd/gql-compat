@@ -1,0 +1,25 @@
+# Leads from the grammar walk that review has dealt with.
+#
+# A lead is a statement the published grammar admits and an engine called a
+# syntax error. The walk is seeded, so a lead nobody records here comes back on
+# every run forever. Recording it is how the walk moves on.
+#
+# There are two dispositions and both belong here.
+#
+# The lead was real. Write the case by hand, citing the production and the
+# clause, put it in corpus/suite/, and name it in `case`. The corpus is the
+# record from then on and the walk stops reporting the statement.
+#
+# The lead was not real. Say why in `note`. An engine may document a syntax
+# restriction under 24.5.3, this harness cuts the grammar at tokens chosen by
+# hand in leaves.go, and a statement can be well formed and still meaningless.
+# All three produce leads that are not defects, and each one is worth deciding
+# once.
+#
+# `fingerprint` is the first eight bytes of the SHA-256 of the reduced
+# statement with surrounding whitespace removed, which is what the report
+# prints beside every lead. When `statement` is given the loader recomputes the
+# fingerprint from it and refuses the file if the two disagree, so an entry
+# cannot drift away from the statement it claims to be about.
+
+promoted: []

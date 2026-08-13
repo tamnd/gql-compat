@@ -82,6 +82,7 @@ func WriteMarkdown(w io.Writer, rep *runner.Report) error {
 	writeLatency(b, rep)
 	writeResources(b, rep)
 	writeLoads(b, rep)
+	writeExploration(b, rep)
 	writeImplementation(b, rep)
 	writeMethodology(b, rep)
 	return b.Flush()
@@ -151,7 +152,19 @@ func writeScoreboard(b io.Writer, rep *runner.Report) {
 	p("| **total** | **%d** | **%d** | **%d** | **%d** | **%d** | **%s** |\n",
 		t.Cases, t.Pass, t.Fail, t.Skip, t.Error,
 		rate(runner.KindTotals{Pass: t.Pass, Fail: t.Fail}))
+	// The generated row sits under the total line and not above it, because it
+	// is not part of the total and the layout should say so before the caption
+	// does. Its rate column is a dash on purpose: a rate is a conformance
+	// claim, and a statement that cites no clause cannot support one.
+	if x := rep.Exploration; x != nil && x.Totals.Cases > 0 {
+		g := x.Totals
+		p("| _generated_ | _%d_ | _%d_ | _%d_ | _%d_ | _%d_ | _—_ |\n",
+			g.Cases, g.Pass, g.Fail, g.Skip, g.Error)
+	}
 	p("\n")
+	if x := rep.Exploration; x != nil && x.Totals.Cases > 0 {
+		p("The generated row is below the total because it is not in it. Those statements came from a walk of the published grammar, they cite no clause, and nothing in that row is a conformance result. See the section on statements the grammar admits.\n\n")
+	}
 	if rep.Run.Mode == runner.ModeCompat {
 		p("> This is a **compatibility** run: the statements executed were the engine's own documented spellings, not standard GQL. Nothing in this table is a conformance result.\n\n")
 	}
@@ -426,6 +439,71 @@ func writeLoads(b io.Writer, rep *runner.Report) {
 	p("\n")
 }
 
+// ExplorationHeading is the section a grammar walk gets. It is a description of
+// what the statements are and not of what they proved, because they proved
+// nothing: no statement in this section cites a clause.
+const ExplorationHeading = "Statements the grammar admits"
+
+// writeExploration prints the walk of the published BNF.
+//
+// It comes after every table that counts something and before the
+// implementation-defined section, which is the right place for it: a reader who
+// has got this far has the engine's score and knows that nothing from here on
+// is part of it. Every sentence in the section is written to keep it that way.
+func writeExploration(b io.Writer, rep *runner.Report) {
+	x := rep.Exploration
+	if x == nil || x.Totals.Cases == 0 {
+		return
+	}
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("## %s\n\n", ExplorationHeading)
+	p("These statements were written by a walk of ISO's published BNF, not by a person. They cite no clause and carry no expectation, so nothing here is a conformance result and nothing here is in the scoreboard. What the section is for is the opposite direction: the corpus is hand written, 814 productions cannot be covered by hand, and a walk reaches constructs nobody would think to write.\n\n")
+	p("| | |\n|---|---|\n")
+	p("| Seed | `%d` |\n", x.Seed)
+	p("| Start production | `<%s>` |\n", x.Start)
+	p("| Statements walked | %d, of which %d were different |\n", x.Walked, x.Distinct)
+	p("| Productions reachable | %d of %d, with %d replaced by a token the harness supplies |\n",
+		x.Coverage.Reachable, x.Coverage.Total, x.Coverage.Cut)
+	if n := len(x.Coverage.Unwritable); n > 0 {
+		p("| Reachable but unwritable | %d, because every path through them ends in a production ISO defines in prose |\n", n)
+	}
+	if x.Known > 0 {
+		p("| Already reviewed | %d |\n", x.Known)
+	}
+	p("| Leads | %d |\n", len(x.Leads))
+	p("\n")
+	p("The same seed and the same grammar give the same statements in the same order on every machine, so a lead below can be reproduced exactly.\n\n")
+
+	if len(x.Leads) == 0 {
+		p("The engine accepted, or refused on grounds other than syntax, every statement the walk put to it. That is not a claim that its parser matches the standard: %d statements is a sample of a language, the walk stops at tokens this harness chooses rather than at characters, and the grammar admits far more than any walk of this size reaches.\n\n", x.Distinct)
+		return
+	}
+
+	p("### Leads\n\n")
+	p("Each of these is a statement the published grammar admits and the engine rejected with GQLSTATUS %s, invalid syntax. A lead is the beginning of work and not the end of it: the walk knows only that the statement is well formed, the harness supplies its own tokens for the productions ISO writes in prose, and §24.5.3 lets an implementation document a restriction. What makes a lead worth a person's time is the reduced form, which is the smallest statement the engine still called a syntax error.\n\n", runner.StatusSyntaxError)
+	for i := range x.Leads {
+		l := x.Leads[i]
+		p("#### `%s`\n\n", l.ID)
+		p("```gql\n%s\n```\n\n", l.Reduced)
+		if l.Reduced != l.Statement {
+			p("Reduced from %d candidate%s put to the engine. The statement the walk originally wrote was:\n\n", l.Tried, plural(l.Tried))
+			p("```gql\n%s\n```\n\n", l.Statement)
+		}
+		p("| | |\n|---|---|\n")
+		p("| GQLSTATUS | `%s` |\n", l.GQLStatus)
+		if l.Message != "" {
+			p("| Engine's words | %s |\n", md(oneLine(l.Message)))
+		}
+		p("| Fingerprint | `%s` |\n", l.Fingerprint)
+		p("\n")
+		if len(l.Path) > 0 {
+			p("Productions on the way down, outermost first:\n\n")
+			p("`<%s>`\n\n", strings.Join(l.Path, ">` → `<"))
+		}
+	}
+	p("To settle a lead, add its fingerprint to the promotion list with either the id of the hand-written case it became or a note saying why it is not a defect. The walk is seeded and would report it again on every run otherwise.\n\n")
+}
+
 // writeImplementation prints what the run observed of the behaviour ISO
 // delegates.
 //
@@ -451,6 +529,9 @@ func writeMethodology(b io.Writer, rep *runner.Report) {
 	p("- **Skips are the engine's own declaration.** They come from the capability table, which the adapter fills in before the run. An engine cannot be made to look better by skipping more, because skips are never in the pass-rate denominator.\n")
 	p("- **A pass on error text is weaker than a pass on a code.** Where an engine reports no GQLSTATUS, a condition case can only confirm that something was refused. Those passes are counted separately in the headline.\n")
 	p("- **Apparent and allocated disk sizes both appear.** A sparse or compressed file makes them differ, and quoting only one of them flatters by accident.\n")
+	if rep.Exploration != nil && rep.Exploration.Totals.Cases > 0 {
+		p("- **Generated statements are leads, not results.** They cite no clause, so they are in no total and in no pass rate. A lead becomes a result only when a person writes a case for it that cites one.\n")
+	}
 	p("- **Absolute latencies are about this machine.** %s\n", hostCaveat(rep))
 	p("\n")
 	p("Generated by gql-compat, report schema %d, %s.\n",

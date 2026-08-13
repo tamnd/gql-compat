@@ -101,6 +101,16 @@ const (
 	// can decline a statement, and an engine that never implemented the
 	// function under test declines it for a reason the case is not about.
 	SkipNoGQLStatus SkipReason = "no-gqlstatus"
+	// SkipSemantic is a generated statement the engine refused with a
+	// GQLSTATUS that is not a syntax error. The walk knows the statement is
+	// well formed and nothing at all about what it means, so a refusal on
+	// meaning is one the harness has no standing to dispute.
+	SkipSemantic SkipReason = "semantic-refusal"
+	// SkipPromoted is a generated statement review has already dealt with,
+	// either by writing a hand-written case for it or by recording why it is
+	// not a defect. The walk is seeded and would otherwise report the same lead
+	// on every run forever.
+	SkipPromoted SkipReason = "already-reviewed"
 	// SkipSelected is a case excluded by the run's selector, recorded only
 	// when the caller asked for the full list.
 	SkipSelected SkipReason = "not-selected"
@@ -326,6 +336,13 @@ type Report struct {
 	// choice has no right answer, so counting it would put a number on
 	// something the standard declined to decide. Nil when no probe ran.
 	Implementation *impdef.Result `json:"implementation,omitempty"`
+
+	// Exploration is what a walk of the published grammar produced. It is
+	// outside Cases and outside Totals for a stricter reason than the
+	// observations: a generated statement cites no clause, so a verdict on it
+	// is not a conformance result and must never be added to one. Nil when no
+	// walk ran.
+	Exploration *Exploration `json:"exploration,omitempty"`
 }
 
 // ReportSchema is the version of the JSON shape above. It changes whenever a

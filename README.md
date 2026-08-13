@@ -85,6 +85,11 @@ Five kinds of case, scored separately and never summed:
 | `grammar` | Whether a production is accepted or refused | production |
 | `performance` | Cost at scale, on generated graphs | — |
 
+There is a sixth kind, `generated`, and it is not in that table because it is
+not scored. It is what a walk of the published BNF writes, it cites no clause,
+and it is in no total, no pass rate and no exit status. See
+[statements the grammar admits](#statements-the-grammar-admits).
+
 **A skip is a measurement, not a gap.** An engine that declares it cannot hold
 temporal values skips the temporal cases, and the report says so by name. Skips
 are excluded from the denominator, so a pass rate can never be improved by
@@ -188,6 +193,10 @@ gql-compat run -adapter neo4j -mode compat -out ./reports
 
 # the performance corpus only, with the working directory left for inspection
 gql-compat run -adapter zu -kind performance -keep-workdir -out ./reports
+
+# the corpus, then 200 statements walked out of the published grammar
+gql-compat run -adapter neo4j -uri bolt://localhost:7687 -user neo4j \
+    -generate 200 -generate-seed 7 -out ./reports
 ```
 
 | Subcommand | |
@@ -243,6 +252,7 @@ baseline.
 | `rows` | result normalisation and comparison |
 | `report` | JSON, Markdown, HTML, CSV, JUnit |
 | `impdef` | the choices ISO delegates, the probes that observe them, the 24.5.2 template |
+| `grammar` | the published BNF as a tree, the seeded walk of it, and the reducer |
 
 ## Reports
 
@@ -294,6 +304,53 @@ The method has a limit, and it is printed with every report rather than kept in
 the documentation: consensus only detects a shared misreading between engines
 that are actually independent. Three engines that all grew out of Cypher will
 agree about Cypher.
+
+## Statements the grammar admits
+
+The corpus is hand written and every case in it cites a clause, which is what
+makes it reviewable, and that does not change. But 814 productions cannot be
+covered by hand. `-generate N` walks the published BNF after the corpus has
+run and puts what it wrote to the same session.
+
+```
+$ gql-compat run -adapter neo4j -uri bolt://localhost:7687 -user neo4j -generate 200
+```
+
+Nothing that comes out of it is a conformance result. A generated statement
+cites no clause, so it is in no total, no pass rate, no coverage denominator
+and no exit status, and the mechanism for that is structural rather than a
+convention: the walk's results live in a different field of the report from the
+scored cases, and the scoreboard is summed from the other one.
+
+What the walk produces is a **lead**, and the bar for one is deliberately high.
+The grammar describes syntax and nothing else, so a statement it admits can
+still be meaningless, and an engine that refuses one of those is right. A
+rejection is only a lead when the engine reports GQLSTATUS `42001`, invalid
+syntax. Any other code is a semantic refusal and is recorded as a skip. An
+engine that reports no GQLSTATUS at all is not judged on this at any point,
+because guessing from the wording of an error message is how a harness invents
+findings.
+
+A lead is then **reduced**. Every candidate is produced by taking a decision in
+the derivation differently rather than by deleting text, so every candidate is
+still a statement the published grammar admits, and the smallest one the engine
+still calls a syntax error is what gets printed, along with the productions on
+the way down to it. A forty token rejection tells a reader nothing; the same
+rejection on six tokens names the construct in dispute.
+
+The walk is seeded, so the same seed writes the same statements on every
+machine, and a lead nobody records would come back forever. Recording it is
+[`grammar/promoted.yaml`](grammar/promoted.yaml): a lead that survives review is
+rewritten by hand as a case citing a clause and its fingerprint is noted here,
+and a lead review rejects is noted here with the reason. The generator's output
+is a lead, and the corpus is the record.
+
+Two limits are printed with the section rather than kept in the documentation.
+The walk stops at tokens this harness chooses by hand, because ISO defines 23 of
+its productions in prose, so the productions inside a token are never exercised.
+And a walk from `<GQL-program>` reaches 699 of the 814 productions, with 14
+replaced by a token and 4 reachable but unwritable, which is the ceiling on
+anything the phase can say.
 
 ## The choices the standard leaves open
 
