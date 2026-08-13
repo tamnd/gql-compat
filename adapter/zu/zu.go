@@ -92,7 +92,13 @@ func New(opts adapter.Options) (adapter.Driver, error) {
 	if err != nil {
 		return nil, fmt.Errorf("zu: cannot find binary %q: %w", bin, err)
 	}
-	out, err := exec.Command(resolved, "conformance", "--declare", "--format", "json").Output()
+	// New takes no context, and printing a constant string should not need
+	// one, but a binary that wedges here would wedge driver construction
+	// with no way out. Ten seconds is far past generous for the work and
+	// well short of a person deciding the harness has hung.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, resolved, "conformance", "--declare", "--format", "json").Output()
 	if err != nil {
 		return nil, fmt.Errorf("zu: %s cannot declare its capabilities, which every "+
 			"zu since 0.0.1 can: run `%s conformance --declare` to see why: %w", resolved, resolved, err)
