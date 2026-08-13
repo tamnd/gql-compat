@@ -634,3 +634,58 @@ func TestAReportWithNoJudgedCasesDoesNotClaimAPerfectScore(t *testing.T) {
 		t.Error("a run with no verdicts does not say so")
 	}
 }
+
+// The section a challenging run exists to produce. It has to name the claim,
+// say plainly that it was contradicted, and warn in the first sentence of the
+// page that these totals are not a score, because the cases were chosen for
+// being ones the engine said it could not take.
+func TestTheReportNamesAClaimTheRunContradicted(t *testing.T) {
+	rep := sample()
+	rep.Run.Challenge = true
+	rep.Declarations = []runner.DeclarationCheck{
+		{Claim: "float-values", Reason: runner.SkipCapability, Cases: 3, Pass: 3,
+			Contradicted: true, Passing: []string{"mandatory/match/basic"}},
+		{Claim: "GQ13", Reason: runner.SkipRequires, Cases: 2, Fail: 2},
+		{Claim: "parameters", Reason: runner.SkipParameters, Cases: 2, Pass: 1, Error: 1},
+	}
+	var b bytes.Buffer
+	if err := report.WriteMarkdown(&b, rep); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{
+		"The declaration under challenge",
+		"float-values",
+		"contradicted",
+		"claim stands",
+		"mandatory/match/basic",
+		"not a conformance score",
+		// A claim that survived on an error rather than on a failure is
+		// short of a contradiction and still worth reading.
+		"not refuted",
+		"never reached a verdict",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the challenge section does not mention %q", want)
+		}
+	}
+	var h bytes.Buffer
+	if err := report.WriteHTML(&h, rep); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.String(), "The declaration under challenge") {
+		t.Error("the HTML report has no challenge section")
+	}
+	if !strings.Contains(h.String(), "Not a conformance run") {
+		t.Error("the HTML report does not warn that these totals are not a score")
+	}
+
+	// And an ordinary run says none of it.
+	var plain bytes.Buffer
+	if err := report.WriteMarkdown(&plain, sample()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.String(), "under challenge") {
+		t.Error("a run that believed the declaration printed a challenge section")
+	}
+}

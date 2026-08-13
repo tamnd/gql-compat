@@ -36,6 +36,7 @@ func WriteHTML(w io.Writer, rep *runner.Report) error {
 	h.title(rep)
 	h.overview(rep)
 	h.capabilities(rep)
+	h.challenge(rep)
 	h.scoreboard(rep)
 	h.coverage(rep)
 	h.skips(rep)
@@ -95,6 +96,7 @@ func sections(rep *runner.Report) []section {
 	return []section{
 		{"overview", "What was measured", true},
 		{"capabilities", "Declared capabilities", true},
+		{"challenge", "The declaration under challenge", rep.Run.Challenge},
 		{"scoreboard", "Scoreboard", true},
 		{"coverage", "Coverage of the standard", true},
 		{"skips", "What the engine was not asked", rep.Totals.Skip > 0},
@@ -238,6 +240,46 @@ func (h *htmlWriter) capabilities(rep *runner.Report) {
 		h.p(`<h3>Adapter notes</h3><ul>`)
 		for _, n := range caps.Notes {
 			h.p(`<li>%s</li>`, e(n))
+		}
+		h.p(`</ul>`)
+	}
+	h.p(`</section>`)
+}
+
+// challenge is the HTML of what became of the cases the declaration would have
+// excluded. See writeChallenge for why the interesting row is the one where
+// nothing went wrong.
+func (h *htmlWriter) challenge(rep *runner.Report) {
+	if !rep.Run.Challenge {
+		return
+	}
+	h.p(`<section id="challenge"><h2>The declaration under challenge</h2>`)
+	h.p(`<p class="warn"><strong>Not a conformance run.</strong> This run ignored the table above and put the excluded cases to the engine anyway, so its failures are expected and its totals are not a score. A claim is contradicted when every case it excluded passed, which is the one outcome an engine that lacks the thing cannot produce.</p>`)
+	if len(rep.Declarations) == 0 {
+		h.p(`<p>No case was excluded by the declaration, so there was nothing to challenge.</p></section>`)
+		return
+	}
+	h.p(`<table class="grid"><thead><tr><th>Claimed absent</th><th>Excluded by</th><th class="n">Cases</th><th class="n">Pass</th><th class="n">Fail</th><th class="n">Error</th><th>Verdict</th></tr></thead><tbody>`)
+	var wrong []runner.DeclarationCheck
+	for _, d := range rep.Declarations {
+		cls, v := "yes", "claim stands"
+		switch {
+		case d.Contradicted:
+			cls, v = "no", "contradicted"
+			wrong = append(wrong, d)
+		case d.Unrefuted():
+			cls, v = "warnish", "not refuted"
+		}
+		h.p(`<tr><td><code>%s</code></td><td>%s</td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="c %s">%s</td></tr>`,
+			e(d.Claim), e(string(d.Reason)), d.Cases, d.Pass, d.Fail, d.Error, cls, e(v))
+	}
+	h.p(`</tbody></table>`)
+	for _, d := range wrong {
+		h.p(`<p>The engine declares <code>%s</code> absent, and all %d case%s it excluded passed. Either the declaration is out of date or those cases are reaching a verdict without the thing they claim to need, and both are worth a look before the next run believes the declaration again.</p>`,
+			e(d.Claim), d.Cases, plural(d.Cases))
+		h.p(`<ul class="ids">`)
+		for _, id := range d.Passing {
+			h.p(`<li><code>%s</code></li>`, e(id))
 		}
 		h.p(`</ul>`)
 	}
