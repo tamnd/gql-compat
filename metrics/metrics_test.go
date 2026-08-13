@@ -204,6 +204,107 @@ func TestALargeGraphKeepsItsDensity(t *testing.T) {
 	}
 }
 
+// An engine that can say which part of its store is the graph gets a density
+// for a fixture the floor ratio would have refused. The numbers are zu's: a
+// four-block schema of 1 MiB, 256 KiB blocks, and a graph occupying 16 blocks.
+// The whole store is 5× its fixed part, well under the floor, and every figure
+// the ratio test would have withheld here is now exactly computable.
+func TestAKnownSchemaSizeIsSubtractedRatherThanGuessedAt(t *testing.T) {
+	l := metrics.Load{
+		Wall:  time.Second,
+		Nodes: 60_000,
+		Edges: 400_000,
+		// Deliberately present and deliberately wrong for this store: the empty
+		// load is a proxy and the engine's own answer supersedes it.
+		EmptyBytes:  262_144,
+		SchemaBytes: 1_048_576,
+		AllocUnit:   262_144,
+		Disk:        metrics.DiskDelta{BytesAfter: 5_242_880, OK: true},
+	}
+	l.Compute()
+	if !l.DensityOK {
+		t.Fatalf("density withheld from a graph whose own bytes are known: %s", l.DensityNote)
+	}
+	if l.GraphBytes != 4_194_304 {
+		t.Fatalf("graph bytes %d, want the store less its schema", l.GraphBytes)
+	}
+	// The graph's bytes and not the store's: 4 MiB over 400 000 edges is
+	// 83.9 bits, where dividing the whole store would have said 104.9.
+	if want := float64(4_194_304*8) / 400_000; l.BitsPerEdge != want {
+		t.Errorf("bits per edge %v, want %v: the whole store was divided rather than the graph", l.BitsPerEdge, want)
+	}
+	if want := float64(4_194_304) / 60_000; l.BytesPerNode != want {
+		t.Errorf("bytes per node %v, want %v", l.BytesPerNode, want)
+	}
+}
+
+// Subtracting the fixed part exactly leaves one way to be wrong: the graph's
+// last allocation unit is charged whole. A graph of one edge in a store that
+// grows 256 KiB at a time reports a quarter of a megabyte per edge, which is
+// the granularity and not the encoding.
+func TestAGraphSmallerThanTenAllocationUnitsGetsNoDensity(t *testing.T) {
+	l := metrics.Load{
+		Wall:        time.Second,
+		Nodes:       2,
+		Edges:       1,
+		SchemaBytes: 1_048_576,
+		AllocUnit:   262_144,
+		Disk:        metrics.DiskDelta{BytesAfter: 1_310_720, OK: true},
+	}
+	l.Compute()
+	if l.DensityOK {
+		t.Fatalf("density reported at %v bits/edge for one edge in one block", l.BitsPerEdge)
+	}
+	if l.GraphBytes != 262_144 {
+		t.Errorf("graph bytes %d, want the one block the graph occupies", l.GraphBytes)
+	}
+	if l.DensityNote == "" {
+		t.Error("no reason given for the missing density")
+	}
+}
+
+// A store whose fixed part is the whole of it holds a graph that cost nothing
+// measurable. Dividing zero by the graph would publish an encoding of 0 bits
+// per edge, which is the most flattering wrong number the report could print.
+func TestAGraphThatFitsInsideTheFixedPartGetsNoDensity(t *testing.T) {
+	l := metrics.Load{
+		Wall:        time.Second,
+		Nodes:       2,
+		Edges:       1,
+		SchemaBytes: 1_048_576,
+		Disk:        metrics.DiskDelta{BytesAfter: 1_048_576, OK: true},
+	}
+	l.Compute()
+	if l.DensityOK || l.BitsPerEdge != 0 {
+		t.Fatalf("a graph that added no bytes reported %v bits per edge", l.BitsPerEdge)
+	}
+	if l.GraphBytes != 0 {
+		t.Errorf("graph bytes %d, want 0", l.GraphBytes)
+	}
+	if l.DensityNote == "" {
+		t.Error("no reason given for the missing density")
+	}
+}
+
+// An engine that reports a schema size but no allocation unit has nothing left
+// to be suspected of, and the figures stand.
+func TestAKnownSchemaWithNoAllocationUnitStillDivides(t *testing.T) {
+	l := metrics.Load{
+		Wall:        time.Second,
+		Nodes:       100,
+		Edges:       400,
+		SchemaBytes: 4096,
+		Disk:        metrics.DiskDelta{BytesAfter: 8192, OK: true},
+	}
+	l.Compute()
+	if !l.DensityOK {
+		t.Fatalf("density withheld: %s", l.DensityNote)
+	}
+	if l.BitsPerEdge != float64(4096*8)/400 {
+		t.Errorf("bits per edge %v", l.BitsPerEdge)
+	}
+}
+
 // The rates are the engine's and do not depend on the floor. An unknown empty
 // store costs the density figures and nothing else.
 func TestUnknownEmptyStoreCostsOnlyTheDensity(t *testing.T) {

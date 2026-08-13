@@ -178,6 +178,19 @@ type CaseResult struct {
 	// or "no parser for this shape".
 	Parse *ParseCheck `json:"parse_check,omitempty"`
 
+	// Plan is how the engine says it ran this statement, for an engine that can
+	// say so without running it a second time. It is recorded and never scored:
+	// two engines' plans are written in two vocabularies and comparing them
+	// would be comparing the words. What it is for is the case whose latency
+	// looks wrong, where the next question is always which access path was
+	// taken and the answer used to require reproducing the run by hand.
+	//
+	// It is taken after the measured repetitions, so on a mutating case it
+	// describes the graph as the statement left it rather than as the statement
+	// found it. Taking it first would warm a plan cache the first timed
+	// execution is supposed to pay for.
+	Plan string `json:"plan,omitempty"`
+
 	// Stats is the latency distribution over the measured repetitions.
 	Stats metrics.Stats `json:"stats"`
 	// Process is what the engine's process did while they ran.
@@ -350,6 +363,10 @@ type EngineInfo struct {
 	// the engine and not of any fixture, and it is the denominator every
 	// density figure in the report is checked against.
 	EmptyStore metrics.EmptyStore `json:"empty_store"`
+	// RoundTrip is what the cheapest statement this engine can answer costs,
+	// which is the floor under every latency in the report. It belongs to the
+	// engine and the route to it, not to any case.
+	RoundTrip metrics.RoundTrip `json:"round_trip"`
 }
 
 // HostInfo is the machine, because a latency table without one is a rumour.

@@ -114,9 +114,11 @@ type Result struct {
 	// GQLStatus is the code the engine reported for a successful outcome,
 	// which for GQL is 00000 on a normal completion and 02000 on no data.
 	GQLStatus string
-	// Plan, when the engine offers one cheaply, is its own rendering of how
-	// it executed the statement. It is never compared, only recorded, so a
-	// surprising latency in the report has something attached to it.
+	// Plan is the engine's own rendering of how it ran the statement, for an
+	// adapter whose engine hands one back on the ordinary path at no extra
+	// cost. Almost none do, and an adapter must not buy one here: see
+	// Explainer, which is where the runner looks first and where every
+	// adapter in this repository answers from.
 	Plan string
 }
 
@@ -211,6 +213,35 @@ type Session interface {
 	Close() error
 }
 
+// Explainer is a session whose engine can describe how it would run a
+// statement without running it. It is optional; the runner asks for it with a
+// type assertion and records nothing when the session does not have it.
+//
+// It is separate from Exec, rather than a Plan field Exec fills in, because
+// the two have to happen at different times. The plan is wanted for every case
+// and the harness times every case, so an Exec that also produced a plan would
+// either be timing the extra work or timing something the report does not
+// describe. Worse, the obvious way for an engine to produce a plan is to
+// execute the statement and count, which for a statement that writes would
+// apply the write twice. So the runner asks once, after the samples are taken,
+// and an adapter that can only answer by executing should not implement this
+// at all.
+type Explainer interface {
+	// Explain returns the engine's own rendering of its plan, in whatever
+	// form the engine renders one. It is never compared against anything and
+	// never parsed; it is recorded so that a surprising latency in the report
+	// has something attached to it.
+	//
+	// Params are passed because some engines want the shape of the bindings
+	// before they will plan. An engine that plans on the statement text alone
+	// is free to ignore them.
+	//
+	// A statement this engine cannot compile returns an error, and the runner
+	// drops it: a case that failed to parse has no plan, which the report
+	// already says in the outcome column.
+	Explain(ctx context.Context, stmt string, params map[string]any) (string, error)
+}
+
 // LoadStats is what an adapter can say about an ingest beyond what the
 // harness times from outside.
 type LoadStats struct {
@@ -223,6 +254,27 @@ type LoadStats struct {
 	// client-side encoding, and naming it stops it being attributed to
 	// storage.
 	EngineWall time.Duration
+	// SchemaBytes is the part of the store that is fixed by the shape of the
+	// database rather than by the graph in it: headers, the catalog, whatever
+	// the engine writes before it has been given anything. Zero means the
+	// adapter cannot separate the two, and then the harness falls back to
+	// weighing an empty store, which is a cruder answer to the same question.
+	//
+	// It exists because every density figure in the report is a store size
+	// divided by a graph, and a store size that is mostly the engine's floor
+	// divided by a small graph describes the floor. The run of 2026-08-12
+	// published 29 360 128 bits per edge for a one-edge graph and nine
+	// different densities for nine stores of identical size, all of them
+	// correct arithmetic over the wrong numerator.
+	SchemaBytes int64
+	// AllocUnit is the smallest amount the store can grow by: a block, a page,
+	// an extent. Zero means unknown.
+	//
+	// A store that rounds up to a unit reports the rounding as encoding. With
+	// the unit known the harness can say how much of a density figure is
+	// rounding and withhold the figure when that share is too large, instead of
+	// publishing a number whose error nobody can bound.
+	AllocUnit int64
 	// Detail is free text the engine printed about the load, kept for the
 	// report.
 	Detail string

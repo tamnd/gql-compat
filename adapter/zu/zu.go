@@ -287,10 +287,54 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 		EngineWall: wall,
 		Detail:     strings.TrimSpace(string(out)),
 	}
+	// Asked after the conversion and before the shell comes back up, so it
+	// reads a file nothing is writing to, and outside the timed section above,
+	// so the ingest figures do not carry it.
+	stats.SchemaBytes, stats.AllocUnit = s.storeLayout(ctx)
 	if err := s.startShell(); err != nil {
 		return stats, err
 	}
 	return stats, nil
+}
+
+// storeLayout asks zu how much of the store it just wrote is fixed by the shape
+// of the database rather than by the graph, and how much the store grows by at
+// a time.
+//
+// The harness divides a store size by a graph to get bits per edge, and zu's
+// store has a floor of four 256 KiB blocks that exists whether the graph has a
+// million edges in it or one. Most of the conformance corpus is smaller than
+// that floor, so the run of 2026-08-12 published nine densities for nine stores
+// of identical size and 29 360 128 bits per edge for a graph with one edge in
+// it. Subtracting a number zu itself computes is the fix; guessing at it from
+// an empty store measured once per run is what the harness did instead, and it
+// is a proxy for this.
+//
+// A failure here is not a load failure. The store is written and the fixture is
+// loaded; what is missing is a breakdown, and a harness that refused a load
+// because it could not have one would trade a measurement for a metric. Zero
+// comes back and the density falls through to the empty-store test, which is
+// where every other engine already is.
+func (s *session) storeLayout(ctx context.Context) (schema, unit int64) {
+	cmd := exec.CommandContext(ctx, s.driver.binary, "stat", s.path, "--format", "json")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0
+	}
+	var layout struct {
+		BlockSize   int64 `json:"block_size"`
+		SchemaBytes int64 `json:"schema_bytes"`
+		FreeBytes   int64 `json:"free_bytes"`
+	}
+	if err := json.Unmarshal(out, &layout); err != nil {
+		return 0, 0
+	}
+	// The free list is neither schema nor graph: it is space the store holds
+	// and is not using. It counts as fixed, because charging a graph for blocks
+	// a previous graph released would make a density depend on what was loaded
+	// before it, and the whole reason the density is computed from the store's
+	// size rather than from its growth is to keep run order out of the figure.
+	return layout.SchemaBytes + layout.FreeBytes, layout.BlockSize
 }
 
 // startShell starts the shell. It takes no context on purpose: the process it
@@ -373,6 +417,8 @@ type frame struct {
 	Failure   *diagnostic         `json:"failure"`
 	Error     string              `json:"error"`
 	Bye       bool                `json:"bye"`
+	// Text is what the explain frames answer with, and nothing else uses.
+	Text string `json:"text"`
 }
 
 // diagnostic is one GQLSTATUS record: the standard's code and text in fields
@@ -389,15 +435,56 @@ type diagnostic struct {
 func (s *session) Exec(ctx context.Context, stmt string, params map[string]any) (*adapter.Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	req := map[string]any{"op": "query", "q": stmt}
+	if len(params) > 0 {
+		req["params"] = params
+	}
+	line, err := s.roundTrip(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return decode(line)
+}
+
+// Explain asks the shell for the plan without running the statement.
+//
+// The parameters are dropped rather than forwarded, and the shell's explain
+// frame does not accept them: zu compiles on the statement text and the schema
+// alone, so there is nothing for a binding to change. An engine whose planner
+// reads parameter values would forward them here, which is why the interface
+// carries them.
+//
+// A statement zu cannot compile comes back as a *Failure, the same as it would
+// from Exec. The runner drops it, which is right: a case that did not parse has
+// no plan, and the report already says that in the outcome column.
+func (s *session) Explain(ctx context.Context, stmt string, _ map[string]any) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	line, err := s.roundTrip(ctx, map[string]any{"op": "explain", "q": stmt})
+	if err != nil {
+		return "", err
+	}
+	var f frame
+	if err := json.Unmarshal(line, &f); err != nil {
+		return "", fmt.Errorf("zu: malformed explain response %q: %w", strings.TrimSpace(string(line)), err)
+	}
+	if f.Error != "" {
+		fail := &adapter.Failure{Message: f.Error}
+		if f.Failure != nil {
+			fail.GQLStatus = f.Failure.GQLStatus
+		}
+		return "", fail
+	}
+	return f.Text, nil
+}
+
+// roundTrip writes one frame and reads the one line that answers it. The
+// caller holds s.mu.
+func (s *session) roundTrip(ctx context.Context, req map[string]any) ([]byte, error) {
 	if s.cmd == nil {
 		if err := s.startShellLocked(); err != nil {
 			return nil, err
 		}
-	}
-
-	req := map[string]any{"op": "query", "q": stmt}
-	if len(params) > 0 {
-		req["params"] = params
 	}
 	line, err := json.Marshal(req)
 	if err != nil {
@@ -428,7 +515,7 @@ func (s *session) Exec(ctx context.Context, stmt string, params map[string]any) 
 		if r.err != nil {
 			return nil, s.fatal(fmt.Errorf("zu: read: %w (stderr: %s)", r.err, strings.TrimSpace(s.errs.String())))
 		}
-		return decode(r.line)
+		return r.line, nil
 	}
 }
 

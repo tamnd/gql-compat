@@ -209,9 +209,22 @@ type Load struct {
 	// once per run from a load of the empty fixture. Zero means the run could
 	// not find out.
 	EmptyBytes int64 `json:"empty_store_bytes,omitempty"`
-	// FloorRatio is the loaded store over the empty one. Below DensityFloor the
-	// store is mostly the engine's own preallocation and a density computed
-	// from it describes that preallocation.
+	// SchemaBytes is the part of this store the engine says is fixed by the
+	// shape of the database rather than by the graph, when the engine can say.
+	// It is the same question EmptyBytes answers and a better answer to it:
+	// EmptyBytes is one measurement taken once for the whole run, and this is
+	// this store, after this load, from the engine that laid it out.
+	SchemaBytes int64 `json:"schema_bytes,omitempty"`
+	// GraphBytes is what is left after SchemaBytes comes off, which is the
+	// numerator the densities below are computed from when it is known.
+	GraphBytes int64 `json:"graph_bytes,omitempty"`
+	// AllocUnit is the store's allocation granularity, when the engine reports
+	// one. It is what decides whether GraphBytes is an encoding or a rounding.
+	AllocUnit int64 `json:"alloc_unit_bytes,omitempty"`
+	// FloorRatio is the loaded store over its fixed part: over SchemaBytes when
+	// the engine reported one, and otherwise over the empty store. It is
+	// reported either way, and is what the DensityFloor test looks at on the
+	// cruder of those two routes.
 	FloorRatio float64 `json:"floor_ratio,omitempty"`
 	// DensityOK says the two density figures above were computed. When it is
 	// false they are zero and DensityNote says why, which is the whole point:
@@ -248,6 +261,34 @@ type EmptyStore struct {
 	Note string `json:"note,omitempty"`
 }
 
+// RoundTrip is what it costs to ask this engine a question whose answer is
+// already known: one statement in, one row out, over whatever the harness talks
+// to it through. It is measured once per run.
+//
+// It is the floor under every latency in the report, and it is not the same
+// floor for every engine. An embedded store answering over a pipe and a server
+// answering over a socket differ here by an order of magnitude before either of
+// them has looked at a graph, and a case whose p50 is near this number is
+// measuring the difference between those two transports rather than between two
+// query engines. Without it printed, a reader comparing two 200 µs cases has no
+// way to know that 180 µs of each was the round trip.
+type RoundTrip struct {
+	// Statement is what was asked, verbatim, so a reader can see that it is
+	// cheap and that it is the same question for every engine.
+	Statement string `json:"statement"`
+	// Stats is the distribution over the measured repetitions, taken the same
+	// way a case's is: warm, repeated, nearest-rank percentiles.
+	Stats Stats `json:"stats"`
+	// Warmups and Repeats are how it was obtained.
+	Warmups int `json:"warmups"`
+	Repeats int `json:"repeats"`
+	// OK says the measurement happened, and Note says why it did not. An engine
+	// that refuses the statement is a finding in its own right and not an error:
+	// the run continues without a floor, and the report says it has none.
+	OK   bool   `json:"available"`
+	Note string `json:"note,omitempty"`
+}
+
 // IngestWall is the time the rates are computed against: the engine's own, if
 // the adapter reported it, and otherwise the whole wait.
 func (l *Load) IngestWall() time.Duration {
@@ -279,11 +320,19 @@ func (l *Load) Compute() {
 	if !l.DensityOK {
 		return
 	}
+	// The graph's own bytes where the engine could name its fixed part, and the
+	// whole store where it could not. An engine that cannot separate the two
+	// only gets here at ten times its floor, so at most a tenth of what is
+	// divided below is not the graph.
+	over := size
+	if l.GraphBytes > 0 {
+		over = l.GraphBytes
+	}
 	if l.Edges > 0 {
-		l.BitsPerEdge = float64(size*8) / float64(l.Edges)
+		l.BitsPerEdge = float64(over*8) / float64(l.Edges)
 	}
 	if l.Nodes > 0 {
-		l.BytesPerNode = float64(size) / float64(l.Nodes)
+		l.BytesPerNode = float64(over) / float64(l.Nodes)
 	}
 }
 
@@ -300,6 +349,8 @@ func (l *Load) density(size int64) {
 	switch {
 	case size <= 0:
 		l.DensityNote = "the engine's store is not on this machine, so there is nothing to divide"
+	case l.SchemaBytes > 0:
+		l.exactDensity(size)
 	case l.EmptyBytes <= 0:
 		l.DensityNote = "the size of this engine's empty store is not known, so how much of this is preallocation cannot be said"
 	default:
@@ -314,6 +365,41 @@ func (l *Load) density(size int64) {
 				FormatBytes(share), FormatBytes(l.EmptyBytes))
 			return
 		}
+		l.DensityOK = true
+	}
+}
+
+// exactDensity is the density test for an engine that can say which part of
+// its store is the graph, which is a different and much better question than
+// the one the floor ratio asks.
+//
+// The floor ratio exists because the harness could not tell preallocation from
+// encoding, so it refused to divide until the preallocation was at most a tenth
+// of the total. An engine that reports its schema size makes that guesswork
+// unnecessary: the fixed part comes off exactly, and what is left is the bytes
+// this graph cost. A fixture far smaller than the engine's floor, which the
+// ratio test could only withhold, now gets a real answer.
+//
+// What is left to be wrong about is rounding. A store that allocates in whole
+// blocks charges a graph for the tail of its last one, and for a small enough
+// graph that tail is most of the figure. So the same tenth applies, to the
+// quantity it was always about: with the allocation unit known, the graph must
+// occupy at least DensityFloor of them, and then the rounding is at most a
+// tenth of what is published. An engine that reports a schema size but no
+// allocation unit is believed and the figures stand, because there is nothing
+// left to suspect them of.
+func (l *Load) exactDensity(size int64) {
+	l.FloorRatio = float64(size) / float64(l.SchemaBytes)
+	l.GraphBytes = size - l.SchemaBytes
+	switch {
+	case l.GraphBytes <= 0:
+		l.GraphBytes = 0
+		l.DensityNote = fmt.Sprintf("the whole %s store is the fixed part the engine writes for an empty database, so this graph added nothing that can be divided",
+			FormatBytes(size))
+	case l.AllocUnit > 0 && float64(l.GraphBytes) < DensityFloor*float64(l.AllocUnit):
+		l.DensityNote = fmt.Sprintf("the graph occupies %s, under the %g allocation units of %s a density figure needs before the rounding up to a whole unit is less than a tenth of it",
+			FormatBytes(l.GraphBytes), DensityFloor, FormatBytes(l.AllocUnit))
+	default:
 		l.DensityOK = true
 	}
 }
