@@ -95,6 +95,8 @@ Adapters in this binary: %s
 		quiet  = fs.Bool("quiet", false, "suppress per-case progress")
 		large  = fs.Bool("large", false, "include the cases whose fixtures are big enough to measure storage density on; they cost minutes to ingest and are excluded by default")
 
+		challenge = fs.Bool("challenge", false, "run the cases the engine's declaration would have skipped, and exit nonzero on a claim of absence every one of its cases passed; the totals of such a run are not a conformance score")
+
 		generate      = fs.Int("generate", 0, "statements to walk out of the published grammar after the corpus runs; 0 runs no walk")
 		generateSeed  = fs.Uint64("generate-seed", 1, "seed for the walk; the same seed writes the same statements everywhere")
 		generateStart = fs.String("generate-start", "", "production to walk from (default GQL-program)")
@@ -171,6 +173,7 @@ Adapters in this binary: %s
 		Timeout:        *timeout,
 		LoadTimeout:    *loadwait,
 		SampleInterval: *interval,
+		Challenge:      *challenge,
 		WorkDir:        *workdir,
 		KeepWorkDir:    *keepWorkDir,
 	}
@@ -285,7 +288,28 @@ func emit(rep *runner.Report, formats []report.Format, out, engine string) error
 // rep.Exploration instead. That is the whole mechanism: -fail-on any cannot
 // turn a build red over a lead even if someone later decides it should,
 // without moving the walk into the corpus first.
+// verdict turns a report into an exit status.
+//
+// A challenging run is judged on one thing only. It put cases to the engine
+// that the engine said it could not take, so its failures and its errors are
+// the expected outcome and counting them would fail every such run. What it is
+// looking for is the claim nothing went wrong with, and that is a defect in
+// the declaration whatever the -fail-on policy says.
 func verdict(rep *runner.Report, policy string) error {
+	if rep.Run.Challenge {
+		var wrong []string
+		for _, d := range rep.Declarations {
+			if d.Contradicted {
+				wrong = append(wrong, fmt.Sprintf("%s (%d case(s), all passing: %s)",
+					d.Claim, d.Cases, strings.Join(d.Passing, " ")))
+			}
+		}
+		if len(wrong) > 0 {
+			return fmt.Errorf("the engine declares it cannot do %d thing(s) it did: %s",
+				len(wrong), strings.Join(wrong, "; "))
+		}
+		return nil
+	}
 	if rep.Totals.Error > 0 {
 		return fmt.Errorf("%d case(s) could not be measured; the report says why", rep.Totals.Error)
 	}

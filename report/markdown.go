@@ -75,6 +75,7 @@ func WriteMarkdown(w io.Writer, rep *runner.Report) error {
 	nl()
 
 	writeCapabilities(b, rep)
+	writeChallenge(b, rep)
 	writeScoreboard(b, rep)
 	writeCoverage(b, rep)
 	writeSkips(b, rep)
@@ -93,6 +94,13 @@ func headline(rep *runner.Report) string {
 	t := rep.Totals
 	judged := t.Pass + t.Fail
 	var parts []string
+	// A challenging run has to say so in its first sentence. Its cases were
+	// chosen for being ones the engine said it could not take, so the pass rate
+	// below is a rate over the wrong denominator by design, and a reader who
+	// meets it without the warning will read it as a conformance score.
+	if rep.Run.Challenge {
+		parts = append(parts, "**this run challenged the engine's declaration** and is not a conformance score")
+	}
 	if judged > 0 {
 		parts = append(parts, fmt.Sprintf("**%d of %d judged cases passed** (%.1f%%)",
 			t.Pass, judged, 100*float64(t.Pass)/float64(judged)))
@@ -137,6 +145,53 @@ func writeCapabilities(b io.Writer, rep *runner.Report) {
 			p("- %s\n", n)
 		}
 		p("\n")
+	}
+}
+
+// writeChallenge reports what became of the cases the declaration would have
+// skipped, and is silent on a run that did not challenge it.
+//
+// The table reads in the engine's favour by default. A claim of absence whose
+// cases failed is a claim the run confirmed, and most of them are: the whole
+// point of a declaration is to save the run from measuring the same absence
+// through fifty cases that needed it in passing. What the section exists for
+// is the row where every case passed, which is the one thing an engine that
+// genuinely lacks the capability cannot produce.
+func writeChallenge(b io.Writer, rep *runner.Report) {
+	if !rep.Run.Challenge {
+		return
+	}
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("## The declaration under challenge\n\n")
+	p("This run ignored the table above and put the excluded cases to the engine anyway, so its failures are expected and its totals are not a conformance score. A claim is contradicted when every case it excluded passed, which is the one outcome an engine that lacks the thing cannot produce.\n\n")
+	if len(rep.Declarations) == 0 {
+		p("No case was excluded by the declaration, so there was nothing to challenge.\n\n")
+		return
+	}
+	p("| Claimed absent | Excluded by | Cases | Pass | Fail | Error | Verdict |\n")
+	p("|---|---|--:|--:|--:|--:|---|\n")
+	var wrong, unrefuted []runner.DeclarationCheck
+	for _, d := range rep.Declarations {
+		v := "claim stands"
+		switch {
+		case d.Contradicted:
+			v = "**contradicted**"
+			wrong = append(wrong, d)
+		case d.Unrefuted():
+			v = "not refuted"
+			unrefuted = append(unrefuted, d)
+		}
+		p("| `%s` | %s | %d | %d | %d | %d | %s |\n",
+			md(d.Claim), d.Reason, d.Cases, d.Pass, d.Fail, d.Error, v)
+	}
+	p("\n")
+	for _, d := range wrong {
+		p("The engine declares `%s` absent, and all %d case%s it excluded passed%s. Either the declaration is out of date or those cases are reaching a verdict without the thing they claim to need, and both are worth a look before the next run believes the declaration again.\n\n",
+			md(d.Claim), d.Cases, plural(d.Cases), passingIDs(d))
+	}
+	for _, d := range unrefuted {
+		p("The engine declares `%s` absent, and of the %d case%s it excluded, %d passed and none failed; the other %d never reached a verdict. That is not a contradiction, because an error is the harness failing to get an answer rather than the engine answering. It is still the shape a capability an engine quietly has makes when a second claim excludes the same cases, so it is worth reading the errors before believing this one.\n\n",
+			md(d.Claim), d.Cases, plural(d.Cases), d.Pass, d.Cases-d.Pass)
 	}
 }
 
@@ -320,6 +375,19 @@ func writeFailures(b io.Writer, rep *runner.Report) {
 // stops being something a person reads and starts being something that pushes
 // the rest of the table off the screen; the count beside it is exact either
 // way, and the JSON and CSV always carry every id.
+// passingIDs names the cases that contradicted a claim, saying so when the
+// report is carrying only the first few of them.
+func passingIDs(d runner.DeclarationCheck) string {
+	switch {
+	case len(d.Passing) == 0:
+		return ""
+	case len(d.Passing) < d.Pass:
+		return ", among them " + idList(d.Passing)
+	default:
+		return ": " + idList(d.Passing)
+	}
+}
+
 func idList(ids []string) string {
 	const shown = 12
 	parts := make([]string, 0, shown+1)

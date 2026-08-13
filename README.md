@@ -95,6 +95,15 @@ temporal values skips the temporal cases, and the report says so by name. Skips
 are excluded from the denominator, so a pass rate can never be improved by
 skipping more.
 
+**A declaration can be put to the test.** `-challenge` ignores the engine's own
+declaration and runs the cases it would have excluded. Most of them fail, which
+is the point of believing the declaration by default; what the run is looking
+for is the claim of absence whose cases all passed, which is the one outcome an
+engine that lacks the thing cannot produce. Declaring a capability an engine in
+fact has costs nothing at the time, turns real passes into skips, and reads in
+the report exactly like a limitation. A challenging run exits nonzero on a
+contradicted claim and its totals are not a conformance score.
+
 **Evidence is graded.** Rejecting `1/0` with GQLSTATUS `22012` is stronger than
 rejecting it with prose, which is stronger than merely rejecting it. The three
 are recorded as `gqlstatus`, `message`, and `rejected`, and message-only passes

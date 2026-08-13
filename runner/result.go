@@ -164,6 +164,11 @@ type CaseResult struct {
 	Skip SkipReason `json:"skip_reason,omitempty"`
 	// Missing names the capabilities a skipped fixture needed.
 	Missing []fixture.Capability `json:"missing_capabilities,omitempty"`
+	// Challenges are the declared absences a challenging run ignored to reach
+	// this case, empty on a run that believed the declaration. A case with any
+	// of them is one the engine said it could not take, so its outcome is
+	// evidence about the declaration first and about the engine second.
+	Challenges []Challenge `json:"challenges,omitempty"`
 
 	// Diff is the first difference between expected and actual rows.
 	Diff *rows.Diff `json:"diff,omitempty"`
@@ -235,6 +240,66 @@ const (
 	// repeat it. It is the right correctness answer and a distribution of one.
 	TimingColdOnce Timing = "cold-once"
 )
+
+// Challenge is one declared absence a run ignored, recorded on the case it
+// would otherwise have skipped.
+type Challenge struct {
+	// Reason is the skip the run overrode.
+	Reason SkipReason `json:"skip_reason"`
+	// Claims names what the engine declared it could not do, in the engine's
+	// own vocabulary: a fixture capability, a harness capability flag, or an
+	// ISO optional feature code.
+	Claims []string `json:"claims,omitempty"`
+	// Note is the sentence the skip would have carried.
+	Note string `json:"note,omitempty"`
+}
+
+// DeclarationCheck is what happened to the cases one declared absence would
+// have skipped.
+//
+// It exists so that a claim of absence can be refuted by the run rather than
+// taken on trust. Contradicted is the finding: every case the claim excluded
+// was put to the engine and every one of them passed, which is not something
+// an engine that lacks the thing can do.
+type DeclarationCheck struct {
+	// Claim is what the engine said it could not do.
+	Claim string `json:"claim"`
+	// Reason is the skip this claim would have caused.
+	Reason SkipReason `json:"skip_reason"`
+
+	Cases int `json:"cases"`
+	Pass  int `json:"pass"`
+	Fail  int `json:"fail"`
+	Skip  int `json:"skip"`
+	Error int `json:"error"`
+
+	// Contradicted is Cases > 0 and every one of them a pass. Anything else
+	// leaves the claim standing: a failure is the absence the engine declared,
+	// and an error is the harness failing to obtain a verdict, which proves
+	// nothing in either direction.
+	Contradicted bool `json:"contradicted"`
+	// Passing lists the case ids that passed, so a contradiction can be
+	// reproduced without rerunning everything. It is capped, because a claim
+	// contradicted by two hundred cases is not made clearer by two hundred ids.
+	Passing []string `json:"passing,omitempty"`
+}
+
+// Unrefuted is a claim that survived on errors rather than on failures: cases
+// passed, none failed, and the rest never reached a verdict.
+//
+// It is short of a contradiction and is not treated as one, because an error
+// is the harness failing to get an answer and a run that failed CI on one
+// would fail it on a dead session. It is worth printing all the same. A case
+// can be excluded by two claims at once, and when the other one errors first
+// this is what an engine that quietly has the capability looks like: on the
+// run of 2026-08-14 zu was told to declare parameters absent, and of the two
+// cases that excluded, one passed and the other never loaded its fixture.
+func (d DeclarationCheck) Unrefuted() bool {
+	return !d.Contradicted && d.Pass > 0 && d.Fail == 0
+}
+
+// MaxPassingIDs is how many case ids a DeclarationCheck carries.
+const MaxPassingIDs = 8
 
 // ParseCheck is what a condition case's control statement did. It carries the
 // engine's words as well as the verdict, because a control that was refused is
@@ -396,10 +461,14 @@ type RunInfo struct {
 	LoadTimeout    time.Duration `json:"load_timeout_ns"`
 	SampleInterval time.Duration `json:"sample_interval_ns"`
 	Selector       string        `json:"selector,omitempty"`
-	WorkDir        string        `json:"workdir,omitempty"`
-	Started        time.Time     `json:"started"`
-	Finished       time.Time     `json:"finished"`
-	Wall           time.Duration `json:"wall_ns"`
+	// Challenge says the run ignored the engine's declaration and put the
+	// skipped cases to it anyway. Its totals are not a conformance score and
+	// must not be compared with a run that has this clear.
+	Challenge bool          `json:"challenge,omitempty"`
+	WorkDir   string        `json:"workdir,omitempty"`
+	Started   time.Time     `json:"started"`
+	Finished  time.Time     `json:"finished"`
+	Wall      time.Duration `json:"wall_ns"`
 	// ISOSource is where the conformance vocabulary came from, so a reader can
 	// check the claims against the same artifacts.
 	ISOSource string `json:"iso_source"`
@@ -417,6 +486,13 @@ type Report struct {
 	Cases    []CaseResult `json:"cases"`
 	Totals   Totals       `json:"totals"`
 	Coverage Coverage     `json:"coverage"`
+
+	// Declarations is what became of the cases the engine's declaration would
+	// have skipped, one entry per declared absence the run challenged. Nil on
+	// an ordinary run, which believes the declaration and skips them. An entry
+	// with Contradicted set is a bug in the engine's declaration and not a
+	// result about the standard, which is why it is here and not in Coverage.
+	Declarations []DeclarationCheck `json:"declarations,omitempty"`
 
 	// Implementation is what the run observed of the choices ISO leaves open.
 	// It is deliberately outside Totals and Coverage: an implementation-defined
@@ -506,6 +582,53 @@ func summarize(cat *iso.Catalog, results []CaseResult) (Totals, Coverage) {
 	}
 	cov.Families = families(cat, cov.Features)
 	return t, cov
+}
+
+// declarations aggregates the challenged cases by the claim that would have
+// excluded them, in claim order so two runs of the same engine produce the
+// same list.
+func declarations(results []CaseResult) []DeclarationCheck {
+	index := map[string]*DeclarationCheck{}
+	var order []string
+	for i := range results {
+		r := &results[i]
+		for _, ch := range r.Challenges {
+			for _, claim := range ch.Claims {
+				key := string(ch.Reason) + "\x00" + claim
+				d := index[key]
+				if d == nil {
+					d = &DeclarationCheck{Claim: claim, Reason: ch.Reason}
+					index[key] = d
+					order = append(order, key)
+				}
+				d.Cases++
+				switch r.Outcome {
+				case Pass:
+					d.Pass++
+					if len(d.Passing) < MaxPassingIDs {
+						d.Passing = append(d.Passing, r.ID)
+					}
+				case Fail:
+					d.Fail++
+				case Skip:
+					d.Skip++
+				case Error:
+					d.Error++
+				}
+			}
+		}
+	}
+	if len(order) == 0 {
+		return nil
+	}
+	sort.Strings(order)
+	out := make([]DeclarationCheck, 0, len(order))
+	for _, key := range order {
+		d := index[key]
+		d.Contradicted = d.Cases > 0 && d.Pass == d.Cases
+		out = append(out, *d)
+	}
+	return out
 }
 
 func record(into map[string]Status, keys []string, outcome Outcome) {

@@ -102,6 +102,27 @@ type Config struct {
 	// leaves every mutating case with the single cold sample it had before.
 	MutatingBudget time.Duration
 
+	// Challenge runs the cases the engine's own declaration would have
+	// skipped, so that a declaration is contradicted by measurement instead of
+	// believed.
+	//
+	// Every skip the declaration causes is a case the report never puts to the
+	// engine, and that is the right default: measuring an absence the adapter
+	// already reported wastes a run and files the same finding twice. What it
+	// cannot catch is the opposite mistake. An engine that declares a
+	// capability it in fact has turns real passes into skips, costs nothing at
+	// the time, and reads in the report exactly like a limitation. Nothing else
+	// in the harness notices, because the cases that would have noticed are the
+	// ones that did not run.
+	//
+	// A challenging run is therefore not a conformance run and its numbers are
+	// not comparable with one: it deliberately puts cases to an engine that
+	// said it could not take them, and most of them fail or error. What it
+	// produces is Report.Declarations, one entry per declared absence the run
+	// challenged, and the entries where every case passed are the ones that
+	// contradict the engine.
+	Challenge bool
+
 	// WorkDir is where engine state goes. Empty means a temporary directory
 	// the runner creates and removes.
 	WorkDir string
@@ -188,6 +209,7 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 			LoadTimeout:    cfg.LoadTimeout,
 			SampleInterval: cfg.SampleInterval,
 			Selector:       cfg.SelectorText,
+			Challenge:      cfg.Challenge,
 			WorkDir:        workdir,
 			Started:        started,
 			ISOSource:      iso.SourceURL,
@@ -263,6 +285,7 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 	rep.Run.Finished = time.Now()
 	rep.Run.Wall = rep.Run.Finished.Sub(started)
 	rep.Totals, rep.Coverage = summarize(cfg.Catalog, rep.Cases)
+	rep.Declarations = declarations(rep.Cases)
 	return rep, nil
 }
 
@@ -513,26 +536,31 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 		return r
 	}
 	if len(c.Params) > 0 && !e.caps.Parameters {
-		r.Outcome, r.Skip = Skip, SkipParameters
-		r.Reason = "the engine cannot bind named parameters, and inlining them would change the statement"
-		return r
+		if e.declared(&r, SkipParameters,
+			"the engine cannot bind named parameters, and inlining them would change the statement",
+			"parameters") {
+			return r
+		}
 	}
 	if len(c.Setup) > 0 && !e.caps.MultipleStatements {
-		r.Outcome, r.Skip = Skip, SkipSetup
-		r.Reason = "the case needs setup statements and the engine runs one statement at a time"
-		return r
+		if e.declared(&r, SkipSetup,
+			"the case needs setup statements and the engine runs one statement at a time",
+			"multiple-statements") {
+			return r
+		}
 	}
 	// A transaction command sent to an engine with no transaction control
 	// would measure the parser's opinion of the keyword and nothing else.
 	if slices.Contains(c.Tags, "transaction") && !e.caps.Transactions {
-		r.Outcome, r.Skip = Skip, SkipTransactions
-		r.Reason = "the engine declares no explicit transaction control"
-		return r
+		if e.declared(&r, SkipTransactions,
+			"the engine declares no explicit transaction control", "transactions") {
+			return r
+		}
 	}
-	for _, f := range c.Requires {
-		if slices.Contains(e.caps.Unsupported, f) {
-			r.Outcome, r.Skip = Skip, SkipRequires
-			r.Reason = "the case needs feature " + f + ", which this engine documents as unsupported"
+	if missing := unsupportedBy(e.caps.Unsupported, c.Requires); len(missing) > 0 {
+		if e.declared(&r, SkipRequires,
+			"the case needs feature "+strings.Join(missing, ", ")+
+				", which this engine documents as unsupported", missing...) {
 			return r
 		}
 	}
@@ -545,10 +573,12 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 	// as `supported`, which is the strongest word this report has.
 	if c.Expect.Kind == corpus.ExpectError && c.Expect.GQLStatus != "" &&
 		c.Expect.ErrorContains == "" && !e.caps.GQLStatus {
-		r.Outcome, r.Skip = Skip, SkipNoGQLStatus
-		r.Reason = "the case expects GQLSTATUS " + c.Expect.GQLStatus +
-			" and the engine reports no GQLSTATUS, so a refusal proves nothing about the condition"
-		return r
+		if e.declared(&r, SkipNoGQLStatus,
+			"the case expects GQLSTATUS "+c.Expect.GQLStatus+
+				" and the engine reports no GQLSTATUS, so a refusal proves nothing about the condition",
+			"gqlstatus") {
+			return r
+		}
 	}
 
 	var fx *fixture.Fixture
@@ -568,9 +598,12 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 			return r
 		}
 		if missing := f.Missing(e.caps.Data); len(missing) > 0 {
-			r.Outcome, r.Skip, r.Missing = Skip, SkipCapability, missing
-			r.Reason = "the engine cannot hold this fixture: " + capList(missing)
-			return r
+			if e.declared(&r, SkipCapability,
+				"the engine cannot hold this fixture: "+capList(missing),
+				capStrings(missing)...) {
+				r.Missing = missing
+				return r
+			}
 		}
 		fx = f
 	}
@@ -838,6 +871,12 @@ func (e *executor) ensureLoaded(ctx context.Context, sess adapter.Session, fx *f
 	start := time.Now()
 	lctx, cancel := context.WithTimeout(ctx, e.cfg.LoadTimeout)
 	stats, err := sess.Load(lctx, fx)
+	// Asked before the cancel, because after it every load looks cut off. An
+	// engine that refused a fixture in a millisecond was being reported as one
+	// that ran out of the load timeout, which sent a reader looking for a slow
+	// ingest that never happened. It stayed hidden as long as no load failed;
+	// the first challenging run produced 107 of them.
+	cutOff := errors.Is(lctx.Err(), context.DeadlineExceeded)
 	cancel()
 	wall := time.Since(start)
 	proc := sampler.Stop()
@@ -845,7 +884,7 @@ func (e *executor) ensureLoaded(ctx context.Context, sess adapter.Session, fx *f
 		// A load the harness cut off is reported as that and not as whatever
 		// the adapter's plumbing said on the way down, because the fixture is
 		// named here and the adapter does not know what it was waiting for.
-		if lctx.Err() != nil && ctx.Err() == nil {
+		if cutOff && ctx.Err() == nil {
 			err = fmt.Errorf("it did not finish within %s (%d nodes, %d edges)",
 				e.cfg.LoadTimeout, len(fx.Nodes), len(fx.Edges))
 		}
@@ -1319,11 +1358,48 @@ func judgeError(c *corpus.Case, caps adapter.Capabilities, r *CaseResult) {
 }
 
 func capList(caps []fixture.Capability) string {
+	return strings.Join(capStrings(caps), ", ")
+}
+
+func capStrings(caps []fixture.Capability) []string {
 	parts := make([]string, len(caps))
 	for i, c := range caps {
 		parts[i] = string(c)
 	}
-	return strings.Join(parts, ", ")
+	return parts
+}
+
+// unsupportedBy returns the features a case requires that the engine documents
+// as absent, in the case's own order. It returns all of them rather than the
+// first, because a case that needs two missing features is two findings when
+// the declaration is challenged and one skip when it is not.
+func unsupportedBy(unsupported, requires []string) []string {
+	var out []string
+	for _, f := range requires {
+		if slices.Contains(unsupported, f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// declared applies one of the engine's declared absences to a case, and
+// reports whether the case is finished.
+//
+// An ordinary run marks the case skipped and stops: the engine has already
+// said it cannot do this, and putting the statement to it anyway would file
+// the same absence a second time under a case name that is about something
+// else. A challenging run records what it overrode and lets the case through
+// to the engine, which is the only way a declaration that is wrong in the
+// generous direction can be caught.
+func (e *executor) declared(r *CaseResult, reason SkipReason, why string, claims ...string) bool {
+	if !e.cfg.Challenge {
+		r.Outcome, r.Skip = Skip, reason
+		r.Reason = why
+		return true
+	}
+	r.Challenges = append(r.Challenges, Challenge{Reason: reason, Claims: claims, Note: why})
+	return false
 }
 
 // hostInfo describes the machine. Every field is best-effort: a container

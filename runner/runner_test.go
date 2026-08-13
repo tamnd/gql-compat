@@ -2,6 +2,7 @@ package runner_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -800,5 +801,126 @@ func TestAProbeThatCannotBeAskedObservesNothing(t *testing.T) {
 func TestRunNeedsADriver(t *testing.T) {
 	if _, err := runner.Run(context.Background(), runner.Config{}); err == nil {
 		t.Fatal("a run with no driver should not start")
+	}
+}
+
+// A declaration is a claim, and until this run there was no way to test one.
+// An engine that declares a feature it in fact has turns real passes into
+// skips, which reads in the report exactly like a limitation and is caught by
+// nothing, because the cases that would catch it are the ones that did not
+// run. Challenging the declaration runs them.
+func TestAChallengedClaimEveryCasePassesIsReportedAsContradicted(t *testing.T) {
+	lying := engine(t, func(c *fake.Config) {
+		c.Capabilities.Unsupported = []string{"GQ13"}
+		c.Answers["MATCH (p:Person) RETURN p.name AS name LIMIT 1"] = fake.Answer{
+			Table: table("name", "Ada"),
+		}
+	})
+	rep := run(t, lying, runner.Config{Challenge: true})
+	r := result(t, rep, "optional/gq13/needs-limit")
+	if r.Outcome != runner.Pass {
+		t.Fatalf("outcome %s: the case the declaration excluded was not put to the engine: %s",
+			r.Outcome, r.Reason)
+	}
+	if len(r.Challenges) != 1 || r.Challenges[0].Reason != runner.SkipRequires {
+		t.Fatalf("challenges %+v, want one required-feature override", r.Challenges)
+	}
+	d := declaration(t, rep, "GQ13")
+	if !d.Contradicted {
+		t.Errorf("%+v: every case for a feature the engine says it lacks passed, and the claim still stands", d)
+	}
+	if len(d.Passing) == 0 {
+		t.Error("a contradiction that names no case cannot be reproduced")
+	}
+}
+
+// The ordinary outcome, and the reason the declaration is believed by default:
+// the engine said it could not, and it could not. A run that reported this as
+// a finding would report one for every honest declaration in the file.
+func TestAChallengedClaimTheCasesFailIsLeftStanding(t *testing.T) {
+	rep := run(t, engine(t, func(c *fake.Config) {
+		c.Capabilities.Unsupported = []string{"GQ13"}
+	}), runner.Config{Challenge: true})
+	d := declaration(t, rep, "GQ13")
+	if d.Contradicted {
+		t.Errorf("%+v: a claim whose cases did not pass was called contradicted", d)
+	}
+	if d.Cases == 0 {
+		t.Error("the claim was never challenged at all")
+	}
+}
+
+// A fixture capability is challenged through the load rather than through the
+// statement, so it is worth its own case: the engine that said it cannot hold
+// temporal values is asked to hold some.
+func TestChallengingAFixtureCapabilityLoadsTheFixtureAnyway(t *testing.T) {
+	rep := run(t, engine(t, nil), runner.Config{Challenge: true})
+	r := result(t, rep, "mandatory/test/temporal")
+	if r.Outcome == runner.Skip {
+		t.Fatalf("the fixture the engine declared it cannot hold was still skipped: %s", r.Reason)
+	}
+	if len(r.Challenges) == 0 || r.Challenges[0].Reason != runner.SkipCapability {
+		t.Fatalf("challenges %+v, want a fixture-capability override", r.Challenges)
+	}
+	if declaration(t, rep, "temporal-values").Cases == 0 {
+		t.Error("the temporal-values claim was not counted")
+	}
+}
+
+// The default is unchanged, and has to be: a challenging run puts statements to
+// an engine that said it could not take them, so its totals are not a score and
+// no ordinary run should produce them by accident.
+func TestARunThatDoesNotChallengeRecordsNoDeclarations(t *testing.T) {
+	rep := run(t, engine(t, func(c *fake.Config) {
+		c.Capabilities.Unsupported = []string{"GQ13"}
+	}), runner.Config{})
+	if rep.Declarations != nil {
+		t.Errorf("declarations %+v on a run that believed the declaration", rep.Declarations)
+	}
+	if rep.Run.Challenge {
+		t.Error("the report says the declaration was challenged when it was not")
+	}
+	r := result(t, rep, "optional/gq13/needs-limit")
+	if r.Outcome != runner.Skip || len(r.Challenges) != 0 {
+		t.Errorf("outcome %s challenges %+v, want the ordinary skip", r.Outcome, r.Challenges)
+	}
+}
+
+func declaration(t *testing.T, rep *runner.Report, claim string) runner.DeclarationCheck {
+	t.Helper()
+	for _, d := range rep.Declarations {
+		if d.Claim == claim {
+			return d
+		}
+	}
+	t.Fatalf("no declaration check for %q in %+v", claim, rep.Declarations)
+	return runner.DeclarationCheck{}
+}
+
+// The other half of the timeout report, and a bug the first challenging run
+// turned up: an engine that refuses a fixture outright is not an engine that
+// ran out of patience, and saying so sends a reader looking for a slow ingest
+// that never happened.
+func TestAnEngineThatRefusesAFixtureIsNotReportedAsATimeout(t *testing.T) {
+	refuses := engine(t, func(c *fake.Config) {
+		c.LoadFails = func(string) error { return errors.New("this store holds no dates") }
+	})
+	rep := run(t, refuses, runner.Config{Repeats: 1})
+	var saw int
+	for i := range rep.Cases {
+		r := &rep.Cases[i]
+		if r.Outcome != runner.Error {
+			continue
+		}
+		saw++
+		if strings.Contains(r.Reason, "did not finish within") {
+			t.Errorf("%s: a load that failed at once was reported as a timeout: %s", r.ID, r.Reason)
+		}
+		if !strings.Contains(r.Reason, "holds no dates") {
+			t.Errorf("%s: the engine's own words are missing from %q", r.ID, r.Reason)
+		}
+	}
+	if saw == 0 {
+		t.Fatal("no case reported the fixture the engine refused")
 	}
 }

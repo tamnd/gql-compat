@@ -80,6 +80,10 @@ type Config struct {
 	// a large generated fixture costs more to load than a small one and the
 	// ingest measurement has a shape to it.
 	LoadLatency time.Duration
+	// LoadFails, when set, decides an ingest's fate by fixture name. It is how
+	// a test reaches the engine that refuses a graph it cannot hold, which is
+	// an ordinary answer from an engine and not a fault in the harness.
+	LoadFails func(fixture string) error
 	// BytesPerNode is how many bytes the session writes to its data directory
 	// per loaded node. It exists so the disk measurement has something real to
 	// measure: the harness reads the directory, so a fake that wrote nothing
@@ -199,6 +203,11 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 	built, err := fx.Materialize()
 	if err != nil {
 		return adapter.LoadStats{}, err
+	}
+	if s.cfg.LoadFails != nil {
+		if err := s.cfg.LoadFails(fx.Name); err != nil {
+			return adapter.LoadStats{}, err
+		}
 	}
 	elements := len(built.Nodes) + len(built.Edges)
 	if s.cfg.LoadLatency > 0 {
