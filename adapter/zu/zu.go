@@ -123,7 +123,7 @@ func (d *Driver) Capabilities() adapter.Capabilities {
 			// Every rel table is directed.
 			fixture.CapUndirectedEdges: false,
 		},
-		GQLStatus:          false,
+		GQLStatus:          true,
 		Parameters:         true,
 		Transactions:       false,
 		MultipleStatements: true,
@@ -134,7 +134,8 @@ func (d *Driver) Capabilities() adapter.Capabilities {
 				"`zu copy` was not used because an edge list carries no labels or properties",
 			"the shell evaluates a read-only subset — MATCH, WHERE, CALL, UNWIND, WITH, RETURN — " +
 				"so every case that writes is answered with a parse error rather than a skip",
-			"errors carry no GQLSTATUS; condition cases fall back to message matching",
+			"results and engine-raised failures carry GQLSTATUS; a protocol fault, a malformed " +
+				"frame or an unknown op, reports no code and is scored on the message",
 		},
 	}
 }
@@ -304,11 +305,31 @@ func (s *session) stopLocked() error {
 
 // frame is the shell's response envelope. Exactly one of the three shapes is
 // populated per line.
+//
+// GQLStatus is present on every successful reply and carries the completion
+// condition, 00000 or 00001 when the statement had no projection. Failure is
+// present only when the engine raised a condition: a protocol fault, a
+// malformed frame or an unknown op, sets Error alone and deliberately claims
+// no code. That is the distinction the runner needs, so it is read off the
+// presence of the object rather than guessed from the message.
 type frame struct {
-	Columns []string            `json:"columns"`
-	Rows    [][]json.RawMessage `json:"rows"`
-	Error   string              `json:"error"`
-	Bye     bool                `json:"bye"`
+	GQLStatus string              `json:"gqlstatus"`
+	Columns   []string            `json:"columns"`
+	Rows      [][]json.RawMessage `json:"rows"`
+	Notices   []diagnostic        `json:"notices"`
+	Failure   *diagnostic         `json:"failure"`
+	Error     string              `json:"error"`
+	Bye       bool                `json:"bye"`
+}
+
+// diagnostic is one GQLSTATUS record: the standard's code and text in fields
+// of their own, and zu's message apart from them, so nothing here has to parse
+// prose to grade a condition.
+type diagnostic struct {
+	GQLStatus string `json:"gqlstatus"`
+	Condition string `json:"condition"`
+	Severity  string `json:"severity"`
+	Message   string `json:"message"`
 }
 
 // Exec sends one query frame and reads one response line.
@@ -369,10 +390,15 @@ func decode(line []byte) (*adapter.Result, error) {
 		return nil, fmt.Errorf("zu: malformed response %q: %w", strings.TrimSpace(string(line)), err)
 	}
 	if f.Error != "" {
-		// zu reports no GQLSTATUS, so the status field stays empty and the
-		// runner scores the case on the message alone, at the lower
-		// confidence the report labels.
-		return nil, &adapter.Failure{Message: f.Error}
+		// A protocol fault leaves Failure nil and the status empty, which is
+		// honest: those are not conditions the standard defines, and the
+		// runner falls back to matching the message at the lower confidence
+		// the report labels.
+		fail := &adapter.Failure{Message: f.Error}
+		if f.Failure != nil {
+			fail.GQLStatus = f.Failure.GQLStatus
+		}
+		return nil, fail
 	}
 	if f.Bye {
 		return nil, errors.New("zu: shell closed")
@@ -391,7 +417,7 @@ func decode(line []byte) (*adapter.Result, error) {
 		}
 		t.Rows = append(t.Rows, row)
 	}
-	return &adapter.Result{Table: t, Bytes: size}, nil
+	return &adapter.Result{Table: t, Bytes: size, GQLStatus: f.GQLStatus}, nil
 }
 
 // numeric recovers integer identity that encoding/json throws away. zu writes
