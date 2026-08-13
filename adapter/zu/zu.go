@@ -18,10 +18,12 @@
 // and typed edges. The adapter writes that SQLite file directly (see
 // sqlite.go) rather than reducing every fixture to an edge list.
 //
-// What the route cannot carry is declared in Capabilities and worked around
-// nowhere: one label per node, no edge properties, no doubles, booleans,
-// nulls, lists or temporals, and no edge between two different labels, since
-// zu binds a rel table to a single node table. Each of those is a limit of
+// What the route cannot carry is worked around nowhere: one label per node,
+// no edge properties, no doubles, booleans, nulls, lists or temporals, and no
+// edge between two different labels, since zu binds a rel table to a single
+// node table. The list is not written down here. It comes off the binary, from
+// `zu conformance --declare --format json`, which renders the same tables as
+// the conformance.toml checked into the zu repository. Each of those is a limit of
 // zu's loader rather than of its query engine, and each shows up in the report
 // as a named skip rather than as a failure. The skip list is a finding in its
 // own right: it is the distance between what zu can evaluate and what zu can
@@ -54,10 +56,33 @@ func init() { adapter.Register("zu", New) }
 // Driver runs zu out of a binary on disk.
 type Driver struct {
 	binary string
+	caps   adapter.Capabilities
+}
+
+// declaration is what `zu conformance --declare --format json` writes. It is
+// the same content as the conformance.toml checked into the zu repository,
+// rendered from the same tables, minus the per-flag reasons, which exist for
+// a person reading the file and would be a trap for anything matching on
+// them.
+type declaration struct {
+	Engine struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	} `json:"engine"`
+	Data         map[string]bool `json:"data"`
+	Capabilities map[string]bool `json:"capabilities"`
+	Notes        []string        `json:"notes"`
 }
 
 // New builds a zu driver. The binary defaults to whatever `zu` resolves to on
 // PATH; point Binary at a build tree's target/release/zu to measure a change.
+//
+// The capabilities come off the binary rather than out of this file. They are
+// facts about the engine, they change in the commit that changes the engine,
+// and the reviewer of that commit is the one who knows whether they moved. As
+// long as they lived here the two drifted, and a stale "no" is expensive in a
+// way a stale "yes" is not: it turns a case the engine would now pass into a
+// silent skip, which reads as coverage.
 func New(opts adapter.Options) (adapter.Driver, error) {
 	bin := opts.Binary
 	if bin == "" {
@@ -67,7 +92,82 @@ func New(opts adapter.Options) (adapter.Driver, error) {
 	if err != nil {
 		return nil, fmt.Errorf("zu: cannot find binary %q: %w", bin, err)
 	}
-	return &Driver{binary: resolved}, nil
+	// New takes no context, and printing a constant string should not need
+	// one, but a binary that wedges here would wedge driver construction
+	// with no way out. Ten seconds is far past generous for the work and
+	// well short of a person deciding the harness has hung.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, resolved, "conformance", "--declare", "--format", "json").Output()
+	if err != nil {
+		return nil, fmt.Errorf("zu: %s cannot declare its capabilities, which every "+
+			"zu since 0.0.1 can: run `%s conformance --declare` to see why: %w", resolved, resolved, err)
+	}
+	caps, err := parseDeclaration(out)
+	if err != nil {
+		return nil, fmt.Errorf("zu: %s: %w", resolved, err)
+	}
+	return &Driver{binary: resolved, caps: caps}, nil
+}
+
+// parseDeclaration turns the engine's declaration into capabilities, and
+// refuses anything it cannot account for.
+//
+// The two vocabularies are checked against each other in both directions. A
+// name zu declares that this harness does not know is a typo or a capability
+// nobody taught the fixtures about, and a name the harness knows that zu is
+// silent on is the drift this whole arrangement exists to catch. Either way
+// the run should stop rather than proceed on a half-known engine, because
+// both mistakes come out the other end as skips and a skip looks like a
+// decision.
+func parseDeclaration(raw []byte) (adapter.Capabilities, error) {
+	var d declaration
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&d); err != nil {
+		return adapter.Capabilities{}, fmt.Errorf("declaration is not the shape this harness reads: %w", err)
+	}
+	caps := adapter.Capabilities{
+		Data:  make(map[fixture.Capability]bool, len(d.Data)),
+		Notes: d.Notes,
+	}
+	known := make(map[string]bool, len(fixture.AllCapabilities))
+	for _, c := range fixture.AllCapabilities {
+		known[string(c)] = true
+	}
+	for name, ok := range d.Data {
+		if !known[name] {
+			return adapter.Capabilities{}, fmt.Errorf("declares a data capability %q this harness has no fixtures for", name)
+		}
+		caps.Data[fixture.Capability(name)] = ok
+	}
+	for _, c := range fixture.AllCapabilities {
+		if _, ok := d.Data[string(c)]; !ok {
+			return adapter.Capabilities{}, fmt.Errorf("says nothing about %q, and not declared is not no", c)
+		}
+	}
+	// The engine flags are a fixed set rather than a map, so each is named
+	// once here and a missing one is as loud as a wrong one.
+	flags := map[string]*bool{
+		"gqlstatus":           &caps.GQLStatus,
+		"parameters":          &caps.Parameters,
+		"transactions":        &caps.Transactions,
+		"multiple-statements": &caps.MultipleStatements,
+		"isolated":            &caps.Isolated,
+	}
+	for name, into := range flags {
+		v, ok := d.Capabilities[name]
+		if !ok {
+			return adapter.Capabilities{}, fmt.Errorf("says nothing about the %q flag", name)
+		}
+		*into = v
+	}
+	for name := range d.Capabilities {
+		if _, ok := flags[name]; !ok {
+			return adapter.Capabilities{}, fmt.Errorf("declares an engine flag %q this harness does not read", name)
+		}
+	}
+	return caps, nil
 }
 
 // Name identifies the adapter.
@@ -82,63 +182,16 @@ func (d *Driver) Version(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// Capabilities declares what zu's storage can hold today.
+// Capabilities repeats what the binary declared at New.
 //
-// Everything absent here is absent because the loader cannot express it, not
-// because the query engine could not evaluate it — zu's own openCypher subset
-// passes scenarios over data this adapter has no way to hand it. When zu grows
-// an ingest path that takes the rest, these flags flip and a block of
-// currently skipped cases starts producing verdicts without a line of this
-// adapter changing.
-func (d *Driver) Capabilities() adapter.Capabilities {
-	return adapter.Capabilities{
-		Data: map[fixture.Capability]bool{
-			// A node table is a label and a rel table is an edge type, so both
-			// arrive, along with several rel tables in one graph.
-			fixture.CapLabels:            true,
-			fixture.CapNodeProperties:    true,
-			fixture.CapEdgeTypes:         true,
-			fixture.CapMultipleEdgeTypes: true,
-			// The converter reads a rel table's endpoints straight through, so
-			// an edge to itself and a second edge over the same ordered pair
-			// both survive.
-			fixture.CapSelfLoops:     true,
-			fixture.CapParallelEdges: true,
-
-			// A node lives in exactly one node table, and a rel table binds to
-			// one node table at both ends, so a second label — on a node or in
-			// a graph — has nowhere to go.
-			fixture.CapMultiLabel:         false,
-			fixture.CapMultipleNodeLabels: false,
-			// The converter carries a rel's endpoints and drops its columns.
-			fixture.CapEdgeProperties: false,
-			// zu1 property columns are dense and uniformly integer or string:
-			// the loader refuses a null, a double, a boolean and anything
-			// structured, by name, at convert time.
-			fixture.CapNullProperties: false,
-			fixture.CapFloatValues:    false,
-			fixture.CapBooleanValues:  false,
-			fixture.CapListValues:     false,
-			fixture.CapTemporalValues: false,
-			// Every rel table is directed.
-			fixture.CapUndirectedEdges: false,
-		},
-		GQLStatus:          true,
-		Parameters:         true,
-		Transactions:       false,
-		MultipleStatements: true,
-		Isolated:           true,
-		Notes: []string{
-			"driven through `zu shell --format jsonl`, one long-lived process per session",
-			"loaded through `zu convert`, which reads a SQLite database in zu's schema; " +
-				"`zu copy` was not used because an edge list carries no labels or properties",
-			"the shell evaluates a read-only subset — MATCH, WHERE, CALL, UNWIND, WITH, RETURN — " +
-				"so every case that writes is answered with a parse error rather than a skip",
-			"results and engine-raised failures carry GQLSTATUS; a protocol fault, a malformed " +
-				"frame or an unknown op, reports no code and is scored on the message",
-		},
-	}
-}
+// Everything absent is absent because zu's loader cannot express it, not
+// because the query engine could not evaluate it: zu's own openCypher subset
+// passes scenarios over data this adapter has no way to hand it. When zu
+// grows an ingest path that takes the rest, those flags flip in the zu repo
+// and a block of currently skipped cases starts producing verdicts without a
+// line of this adapter changing, which is the point of reading them from
+// there.
+func (d *Driver) Capabilities() adapter.Capabilities { return d.caps }
 
 // Open starts nothing yet; sessions own their processes.
 func (d *Driver) Open(ctx context.Context, workdir string) (adapter.Session, error) {
