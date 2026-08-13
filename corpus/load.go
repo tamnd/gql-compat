@@ -76,6 +76,15 @@ func Load(root fs.FS, known KnownCodes) (*Suite, *fixture.Set, error) {
 			if c.Kind == "" {
 				c.Kind = f.Defaults.Kind
 			}
+			// A generated case is a lead the grammar walk produced in memory,
+			// and a lead written down as a corpus file would be a case citing
+			// nothing that a later reader would count. The promotion path goes
+			// the other way: a lead that survives review is rewritten by hand
+			// as a case that cites a clause, under one of the five kinds.
+			if c.Kind == KindGenerated {
+				return nil, nil, fmt.Errorf("%s: case %s declares kind %q, which only the grammar walk may produce and only in memory",
+					path, c.ID, KindGenerated)
+			}
 			if c.Fixture == "" {
 				c.Fixture = f.Defaults.Fixture
 			}

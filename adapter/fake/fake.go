@@ -59,6 +59,14 @@ type Config struct {
 	// Answers is keyed by the statement text with leading and trailing space
 	// removed. Statements not in it get Default.
 	Answers map[string]Answer
+	// Respond answers a statement Answers does not name, and returning false
+	// falls through to Default.
+	//
+	// It exists because not every caller knows the statements in advance. The
+	// grammar walk writes its own and then shrinks them, so a test of the
+	// reducer has to describe an engine as a rule about text rather than as a
+	// list: refuse anything containing this construct, accept the rest.
+	Respond func(stmt string) (Answer, bool)
 	// Default is the answer for an unscripted statement.
 	Default Answer
 	// Latency is the default per-statement delay.
@@ -190,6 +198,9 @@ func (s *session) Exec(ctx context.Context, stmt string, _ map[string]any) (*ada
 	}
 
 	ans, ok := s.cfg.Answers[strings.TrimSpace(stmt)]
+	if !ok && s.cfg.Respond != nil {
+		ans, ok = s.cfg.Respond(strings.TrimSpace(stmt))
+	}
 	if !ok {
 		ans = s.cfg.Default
 	}

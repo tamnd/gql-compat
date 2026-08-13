@@ -93,6 +93,11 @@ Adapters in this binary: %s
 		out    = fs.String("out", "", "directory to write reports into; empty writes one report to stdout")
 		failOn = fs.String("fail-on", "mandatory", "exit nonzero on: mandatory, any, or none")
 		quiet  = fs.Bool("quiet", false, "suppress per-case progress")
+
+		generate      = fs.Int("generate", 0, "statements to walk out of the published grammar after the corpus runs; 0 runs no walk")
+		generateSeed  = fs.Uint64("generate-seed", 1, "seed for the walk; the same seed writes the same statements everywhere")
+		generateStart = fs.String("generate-start", "", "production to walk from (default GQL-program)")
+		generateDepth = fs.Int("generate-depth", 0, "how deep the walk may descend before every construct takes its shortest form (default 40)")
 	)
 	var kinds, features, tags, skipTags, formats stringList
 	opts := keyValue{}
@@ -170,6 +175,21 @@ Adapters in this binary: %s
 	}
 	if !*quiet {
 		cfg.Progress = progress(os.Stderr)
+	}
+	// The walk is opt-in and stays that way. It costs an execution per
+	// statement plus one per reduction step, it writes whatever the grammar
+	// admits including statements that drop a graph, and nothing it produces is
+	// a conformance result. A run that did not ask for it should be the same
+	// run it has always been.
+	if *generate > 0 {
+		cfg.Explore = &runner.Explore{
+			Grammar:  std.Grammar,
+			Seed:     *generateSeed,
+			Count:    *generate,
+			Start:    *generateStart,
+			MaxDepth: *generateDepth,
+			Promoted: std.Promoted,
+		}
 	}
 
 	rep, err := std.Run(ctx, drv, cfg)
@@ -258,6 +278,12 @@ func emit(rep *runner.Report, formats []report.Format, out, engine string) error
 // implement is a lawful choice under the standard, and a CI job that failed on
 // one would be enforcing a rule ISO does not have. Harness errors always fail:
 // they mean the run did not measure what it claims to have measured.
+//
+// No policy sees the grammar walk. Every quantity read here comes from
+// rep.Totals, which is summed from rep.Cases, and the walk's statements are in
+// rep.Exploration instead. That is the whole mechanism: -fail-on any cannot
+// turn a build red over a lead even if someone later decides it should,
+// without moving the walk into the corpus first.
 func verdict(rep *runner.Report, policy string) error {
 	if rep.Totals.Error > 0 {
 		return fmt.Errorf("%d case(s) could not be measured; the report says why", rep.Totals.Error)

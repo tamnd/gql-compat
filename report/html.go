@@ -43,6 +43,7 @@ func WriteHTML(w io.Writer, rep *runner.Report) error {
 	h.latency(rep)
 	h.resources(rep)
 	h.loads(rep)
+	h.exploration(rep)
 	h.implementation(rep)
 	h.methodology(rep)
 	h.p(`</main>`)
@@ -101,6 +102,7 @@ func sections(rep *runner.Report) []section {
 		{"latency", "Latency", ran},
 		{"resources", "Process and storage", ran},
 		{"ingest", "Ingest", hasLoads},
+		{"exploration", ExplorationHeading, rep.Exploration != nil && rep.Exploration.Totals.Cases > 0},
 		{"implementation", impdef.Heading, rep.Implementation.Len() > 0},
 		{"methodology", "How to read this", true},
 	}
@@ -263,7 +265,19 @@ func (h *htmlWriter) scoreboard(rep *runner.Report) {
 	total := runner.KindTotals{Cases: t.Cases, Pass: t.Pass, Fail: t.Fail, Skip: t.Skip, Error: t.Error}
 	h.p(`<tr class="total"><td>total</td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="n">%s</td><td class="barcell">%s</td></tr>`,
 		t.Cases, t.Pass, t.Fail, t.Skip, t.Error, rate(total), bar(total))
-	h.p(`</tbody></table></section>`)
+	// Below the total line, and marked as not being part of it. The rate cell
+	// is the report's dash for a value that does not exist, which is what a
+	// pass rate over statements that cite no clause is.
+	if x := rep.Exploration; x != nil && x.Totals.Cases > 0 {
+		g := x.Totals
+		h.p(`<tr class="aside"><td><em>generated</em></td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="n na">&mdash;</td><td class="barcell">%s</td></tr>`,
+			g.Cases, g.Pass, g.Fail, g.Skip, g.Error, bar(g))
+	}
+	h.p(`</tbody></table>`)
+	if x := rep.Exploration; x != nil && x.Totals.Cases > 0 {
+		h.p(`<p>The generated row is below the total because it is not in it. Those statements came from a walk of the published grammar, they cite no clause, and nothing in that row is a conformance result. See <a href="#exploration">%s</a>.</p>`, e(ExplorationHeading))
+	}
+	h.p(`</section>`)
 }
 
 // bar draws the pass/fail split with the skips alongside, in the same widths
@@ -559,6 +573,75 @@ func (h *htmlWriter) loads(rep *runner.Report) {
 	h.p(`</tbody></table></section>`)
 }
 
+// exploration renders the walk of the published grammar.
+//
+// The one thing this section must not look like is the failures section. Both
+// are lists of statements an engine refused, and only one of them is a finding.
+// So the leads carry no status class, no colour, and no verdict word: they are
+// rendered as what they are, a question with the smallest statement that raises
+// it and the productions it came from.
+func (h *htmlWriter) exploration(rep *runner.Report) {
+	x := rep.Exploration
+	if x == nil || x.Totals.Cases == 0 {
+		return
+	}
+	h.p(`<section id="exploration"><h2>%s</h2>`, e(ExplorationHeading))
+	h.p(`<p>These statements were written by a walk of ISO's published BNF, not by a person. They cite no clause and carry no expectation, so nothing here is a conformance result and nothing here is in the scoreboard. What the section is for is the opposite direction: the corpus is hand written, 814 productions cannot be covered by hand, and a walk reaches constructs nobody would think to write.</p>`)
+
+	h.p(`<table class="kv">`)
+	h.kv("Seed", fmt.Sprintf(`<code>%d</code>`, x.Seed))
+	h.kv("Start production", fmt.Sprintf(`<code>&lt;%s&gt;</code>`, e(x.Start)))
+	h.kv("Statements walked", fmt.Sprintf("%d, of which %d were different", x.Walked, x.Distinct))
+	h.kv("Productions reachable", fmt.Sprintf("%d of %d, with %d replaced by a token the harness supplies",
+		x.Coverage.Reachable, x.Coverage.Total, x.Coverage.Cut))
+	if n := len(x.Coverage.Unwritable); n > 0 {
+		h.kv("Reachable but unwritable", fmt.Sprintf("%d, because every path through them ends in a production ISO defines in prose", n))
+	}
+	if x.Known > 0 {
+		h.kv("Already reviewed", strconv.Itoa(x.Known))
+	}
+	h.kv("Leads", strconv.Itoa(len(x.Leads)))
+	h.p(`</table>`)
+	h.p(`<p>The same seed and the same grammar give the same statements in the same order on every machine, so a lead below can be reproduced exactly.</p>`)
+
+	if len(x.Leads) == 0 {
+		h.p(`<p>The engine accepted, or refused on grounds other than syntax, every statement the walk put to it. That is not a claim that its parser matches the standard: %d statements is a sample of a language, the walk stops at tokens this harness chooses rather than at characters, and the grammar admits far more than any walk of this size reaches.</p>`, x.Distinct)
+		h.p(`</section>`)
+		return
+	}
+
+	h.p(`<h3>Leads</h3>`)
+	h.p(`<p>Each of these is a statement the published grammar admits and the engine rejected with GQLSTATUS %s, invalid syntax. A lead is the beginning of work and not the end of it: the walk knows only that the statement is well formed, the harness supplies its own tokens for the productions ISO writes in prose, and &sect;24.5.3 lets an implementation document a restriction. What makes a lead worth a person's time is the reduced form, which is the smallest statement the engine still called a syntax error.</p>`,
+		e(runner.StatusSyntaxError))
+	for i := range x.Leads {
+		l := x.Leads[i]
+		h.p(`<article class="lead"><h3><code>%s</code></h3>`, e(l.ID))
+		h.p(`<pre class="gql">%s</pre>`, e(l.Reduced))
+		if l.Reduced != l.Statement {
+			h.p(`<p>Reduced from %d candidate%s put to the engine. The statement the walk originally wrote was:</p>`, l.Tried, plural(l.Tried))
+			h.p(`<pre class="gql orig">%s</pre>`, e(l.Statement))
+		}
+		h.p(`<table class="kv">`)
+		h.kv("GQLSTATUS", fmt.Sprintf(`<code>%s</code>`, e(l.GQLStatus)))
+		if l.Message != "" {
+			h.kv("Engine's words", e(oneLine(l.Message)))
+		}
+		h.kv("Fingerprint", fmt.Sprintf(`<code>%s</code>`, e(l.Fingerprint)))
+		h.p(`</table>`)
+		if len(l.Path) > 0 {
+			parts := make([]string, len(l.Path))
+			for j, name := range l.Path {
+				parts[j] = fmt.Sprintf(`<code>&lt;%s&gt;</code>`, e(name))
+			}
+			h.p(`<p class="path">Productions on the way down, outermost first: %s</p>`,
+				strings.Join(parts, " &rarr; "))
+		}
+		h.p(`</article>`)
+	}
+	h.p(`<p>To settle a lead, add its fingerprint to the promotion list with either the id of the hand-written case it became or a note saying why it is not a defect. The walk is seeded and would report it again on every run otherwise.</p>`)
+	h.p(`</section>`)
+}
+
 // implementation renders what the run observed of the behaviour ISO delegates.
 //
 // The words are the impdef package's, not this file's, so the HTML and the
@@ -754,6 +837,13 @@ td.case { white-space: nowrap }
   font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; vertical-align: middle }
 .failure { border: 1px solid var(--line); border-radius: .5rem; padding: .2rem 1rem 1rem; margin: 1rem 0; background: var(--panel) }
 .failure h3 { margin-top: 1rem }
+/* A lead is not a failure and must not be dressed as one: no panel fill, no
+   status colour, a dashed rule instead of a border. */
+.lead { border-left: 2px dashed var(--line); padding: .1rem 0 .1rem 1rem; margin: 1.4rem 0 }
+.lead h3 { margin-top: .6rem }
+pre.gql.orig { color: var(--dim) }
+tr.aside td { color: var(--dim); border-top: 1px dashed var(--line) }
+p.path { font-size: .85rem; color: var(--dim); line-height: 1.9 }
 pre.gql { background: var(--bg); border: 1px solid var(--line); border-radius: .4rem;
   padding: .7rem .9rem; overflow-x: auto; font-size: .85rem; white-space: pre-wrap }
 ul.ids { margin: .4rem 0; padding-left: 1.1rem; columns: 3; font-size: .82rem }

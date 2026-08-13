@@ -61,6 +61,10 @@ type Config struct {
 	// cases have run. They are not cases: they carry no expectation, produce no
 	// outcome, and touch no total. A nil set skips the phase entirely.
 	Probes *impdef.Set
+	// Explore is a walk of the published grammar, run after the suite. What it
+	// produces is a lead and never a conformance result, and it lands in
+	// Report.Exploration rather than among the cases. Nil skips the phase.
+	Explore *Explore
 
 	// Mode chooses standard text or the engine's own spelling.
 	Mode Mode
@@ -214,6 +218,14 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 		}
 	}
 
+	// The walk runs after the suite, so that a hundred statements nobody wrote
+	// can never delay or disturb the cases that cite a clause, and before the
+	// observations, so that the last thing to touch the session is still the
+	// phase that is forbidden to write to it.
+	if cfg.Explore != nil && cfg.Explore.Count > 0 && cfg.Explore.Grammar != nil && ctx.Err() == nil {
+		rep.Exploration = ex.explore(ctx, cfg.Explore)
+	}
+
 	// The observations run last and on the same session, which is why a probe
 	// is forbidden to write: whatever it left behind would belong to no case
 	// and be nobody's business to clean up. They are inside the run's wall
@@ -312,6 +324,9 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 	}
 	r.Statement = stmt
 
+	if e.generatedSkip(c, stmt, &r) {
+		return r
+	}
 	if len(c.Params) > 0 && !e.caps.Parameters {
 		r.Outcome, r.Skip = Skip, SkipParameters
 		r.Reason = "the engine cannot bind named parameters, and inlining them would change the statement"
@@ -728,6 +743,14 @@ func judge(c *corpus.Case, res *adapter.Result, err error, caps adapter.Capabili
 			r.Reason = f.Message
 			return
 		}
+	}
+
+	// A generated statement carries an accept expectation because the grammar
+	// admits it, but it is not judged the way a hand-written accept case is.
+	// See judgeGenerated for why the rule is narrower.
+	if c.Kind == corpus.KindGenerated {
+		judgeGenerated(err, r)
+		return
 	}
 
 	switch c.Expect.Kind {

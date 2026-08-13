@@ -64,6 +64,19 @@ func WriteCSV(w io.Writer, rep *runner.Report) error {
 			return err
 		}
 	}
+	// The grammar walk's statements are here too, and the `kind` column says
+	// `generated` on every one of them. That column is the filter: a script
+	// computing a conformance rate must exclude them, the same way the
+	// scoreboard does. Leaving them out entirely was the alternative and it is
+	// worse, because this file is the metric archive and a statement that ran
+	// on the engine belongs in it.
+	if x := rep.Exploration; x != nil {
+		for i := range x.Cases {
+			if err := cw.Write(csvRow(&x.Cases[i])); err != nil {
+				return err
+			}
+		}
+	}
 	cw.Flush()
 	return cw.Error()
 }

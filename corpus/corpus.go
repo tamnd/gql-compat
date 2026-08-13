@@ -42,9 +42,22 @@ const (
 	// KindPerformance carries no pass criterion beyond completing. It exists
 	// so the metrics tables have workloads with known shapes in them.
 	KindPerformance Kind = "performance"
+	// KindGenerated is a statement a walk of the BNF produced, and it cites
+	// nothing. Every other kind names a clause, a feature, a code or a
+	// production the standard defines, and a person decided the case was worth
+	// writing. A generated statement has neither: the walk knows it is well
+	// formed and knows nothing about what it means.
+	//
+	// So it is not in AllKinds, it is not in a scoreboard the other five share,
+	// and it is not in any pass rate. It is a lead. What it produces goes to a
+	// person, who either writes a case that cites a clause or does not, and the
+	// corpus stays the record either way. Load refuses this kind for the same
+	// reason: a generated case on disk would be a claim nobody checked.
+	KindGenerated Kind = "generated"
 )
 
-// AllKinds lists kinds in report order.
+// AllKinds lists the kinds a corpus file may declare, in report order.
+// KindGenerated is deliberately absent; see its documentation.
 var AllKinds = []Kind{KindMandatory, KindOptional, KindCondition, KindGrammar, KindPerformance}
 
 // ExpectKind is how a case's outcome is judged.
@@ -176,7 +189,7 @@ func (c *Case) Validate(known KnownCodes) error {
 		return fmt.Errorf("%s: missing query", where)
 	}
 	switch c.Kind {
-	case KindMandatory, KindOptional, KindCondition, KindGrammar, KindPerformance:
+	case KindMandatory, KindOptional, KindCondition, KindGrammar, KindPerformance, KindGenerated:
 	default:
 		return fmt.Errorf("%s: unknown kind %q", where, c.Kind)
 	}

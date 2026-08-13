@@ -81,9 +81,14 @@ validate:
 
 ## smoke: the whole pipeline end to end against the scripted engine. Needs no
 ## database, and proves that a run produces all five report formats.
+##
+## The walk of the grammar is in here too, and the fake is told to report
+## GQLSTATUS so the phase actually runs rather than skipping itself. Twenty
+## five statements is enough to exercise the generator, the case path, and all
+## five renderings of a section that has no verdict in it.
 smoke:
-	$(GO) run ./cmd/gql-compat run -adapter fake -repeats 1 -warmups 0 \
-		-fail-on none -quiet -out $(OUT)/fake
+	$(GO) run ./cmd/gql-compat run -adapter fake -opt gqlstatus=true -repeats 1 -warmups 0 \
+		-generate 25 -fail-on none -quiet -out $(OUT)/fake
 
 ## report: run against a real engine. ADAPTER is required; pass BINARY for an
 ## embedded engine or URI/USER for a server. Example:
