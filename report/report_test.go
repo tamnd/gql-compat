@@ -11,6 +11,7 @@ import (
 	"github.com/tamnd/gql-compat/adapter"
 	"github.com/tamnd/gql-compat/corpus"
 	"github.com/tamnd/gql-compat/fixture"
+	"github.com/tamnd/gql-compat/impdef"
 	"github.com/tamnd/gql-compat/metrics"
 	"github.com/tamnd/gql-compat/report"
 	"github.com/tamnd/gql-compat/rows"
@@ -134,8 +135,51 @@ func sample() *runner.Report {
 			Families:      []runner.FamilyCoverage{{Family: "GQ", Total: 20, Tested: 1, Supported: 0}},
 			FeaturesTotal: 228, ConditionsTotal: 68, ProductionsTotal: 814, SubclausesTotal: 317,
 		},
+		Implementation: observations(),
 	}
 	return rep
+}
+
+// observations is one probe of each kind, one of which observed nothing and
+// carries an engine message full of words the section may not print.
+func observations() *impdef.Result {
+	return &impdef.Result{
+		DefinedTotal:   117,
+		DependentTotal: 20,
+		Observations: []impdef.Observation{
+			{
+				ID: "impdef/ia015/trailing-space-comparison", Item: "IA015", Kind: impdef.Defined,
+				Description: "Whether character strings are padded for comparison.",
+				Question:    "Whether 'a' and 'a  ' compare equal.",
+				Statement:   "RETURN 'a' = 'a  ' AS v",
+				Value:       "false", Wall: ms(3),
+			},
+			{
+				ID: "impdef/ia010/integer-overflow", Item: "IA010", Kind: impdef.Defined,
+				Description: "The boundaries within which the normal rules of arithmetic apply.",
+				Question:    "What happens when an integer addition leaves the 64-bit range.",
+				Statement:   "RETURN 9223372036854775807 + 1 AS v",
+				Silence:     impdef.Refused,
+				Detail:      "SYNTAX ERROR: the statement failed; case skipped, 0 passed",
+				Wall:        ms(2),
+			},
+			{
+				ID: "impdep/us001/unordered-sequence", Item: "US001", Kind: impdef.Dependent,
+				Description: "The order of a sequence of records with no ordering specified.",
+				Question:    "What order records come back in when nothing asked for one.",
+				Statement:   "MATCH (p:Person) RETURN p.name AS v",
+				Value:       "Alice, Bob", Wall: ms(4),
+			},
+			{
+				ID: "extension/trailing-semicolon", Item: "IE005", Kind: impdef.Extension,
+				Description: "The treatment of language that does not conform to the Formats and Syntax Rules.",
+				Question:    "Whether a trailing semicolon is accepted.",
+				Statement:   "RETURN 1 AS v;",
+				Note:        "the semicolon appears in none of the 814 productions",
+				Value:       "accepted", Wall: ms(1),
+			},
+		},
+	}
 }
 
 func render(t *testing.T, f report.Format) string {
@@ -372,6 +416,127 @@ func TestJUnitCountsSkipsAsSkippedAndErrorsAsErrors(t *testing.T) {
 	}
 	if !found {
 		t.Error("the failing case is not in the XML at all")
+	}
+}
+
+// section returns the implementation-defined section of a Markdown report and
+// nothing else, because the rest of the report is full of the words this
+// section may not use.
+func section(t *testing.T, out string) string {
+	t.Helper()
+	start := strings.Index(out, "## "+impdef.Heading)
+	if start < 0 {
+		t.Fatal("the report has no implementation-defined section")
+	}
+	rest := out[start+3:]
+	before, _, _ := strings.Cut(rest, "\n## ")
+	return before
+}
+
+// TestTheImplementationSectionCarriesNoVerdict. An implementation-defined
+// choice cannot be wrong: the standard asked a question and invited the engine
+// to answer it. Any of the four outcome words inside this section would tell a
+// reader that some of these answers are better than others, which is exactly
+// what ISO declined to say.
+func TestTheImplementationSectionCarriesNoVerdict(t *testing.T) {
+	sec := section(t, render(t, report.FormatMarkdown))
+	got := strings.ToLower(sec)
+	for _, v := range []runner.Outcome{runner.Pass, runner.Fail, runner.Skip, runner.Error} {
+		if strings.Contains(got, string(v)) {
+			t.Errorf("the section contains %q", v)
+		}
+	}
+	// The engine said all four of them in one message, and the section still
+	// says none of them, because the message goes to the archive and no further.
+	if strings.Contains(sec, observations().Observations[1].Detail) {
+		t.Error("the engine's own message reached the rendered prose")
+	}
+}
+
+// TestTheImplementationSectionIsInNoTotal. It is a section of the report and
+// not a result: nothing in it may move the pass rate, the case count, the
+// coverage denominators, or the exit status a CI gate reads.
+func TestTheImplementationSectionIsInNoTotal(t *testing.T) {
+	with, without := sample(), sample()
+	without.Implementation = nil
+
+	a, b := with.Totals, without.Totals
+	if a.Cases != b.Cases || a.Pass != b.Pass || a.Fail != b.Fail || a.Skip != b.Skip || a.Error != b.Error {
+		t.Error("the observations changed the totals")
+	}
+	if len(with.Cases) != len(without.Cases) {
+		t.Error("an observation was counted as a case")
+	}
+
+	// The two machine-readable formats a gate consumes must not differ at all.
+	for _, f := range []report.Format{report.FormatCSV, report.FormatJUnit} {
+		var a, b bytes.Buffer
+		if err := report.Write(&a, with, f); err != nil {
+			t.Fatal(err)
+		}
+		if err := report.Write(&b, without, f); err != nil {
+			t.Fatal(err)
+		}
+		if a.String() != b.String() {
+			t.Errorf("%s output changed when the observations were added; a gate would see them", f)
+		}
+	}
+
+	// And the JSON must carry them, because the statement command reads them
+	// back out of it.
+	var j bytes.Buffer
+	if err := report.WriteJSON(&j, with); err != nil {
+		t.Fatal(err)
+	}
+	back, err := report.ReadJSON(&j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Implementation.Len() != with.Implementation.Len() {
+		t.Errorf("the archive kept %d observations of %d", back.Implementation.Len(), with.Implementation.Len())
+	}
+	if back.Implementation.Observations[1].Detail == "" {
+		t.Error("the engine's own words did not survive the round trip; the archive is the only place they live")
+	}
+}
+
+// TestAnUnobservedChoiceRendersAsADash, in both human formats, under the same
+// rule an unavailable metric follows.
+func TestAnUnobservedChoiceRendersAsADash(t *testing.T) {
+	md := section(t, render(t, report.FormatMarkdown))
+	if !strings.Contains(md, "— ("+string(impdef.Refused)+")") {
+		t.Error("the probe that observed nothing does not render as a dash with a reason")
+	}
+	html := render(t, report.FormatHTML)
+	if !strings.Contains(html, `id="implementation"`) {
+		t.Error("the HTML report has no implementation-defined section")
+	}
+	if !strings.Contains(html, "&#39;a&nbsp;&nbsp;&#39;") && !strings.Contains(html, "&#39;a  &#39;") {
+		t.Error("the HTML section did not escape the statement it printed")
+	}
+	if !strings.Contains(html, `<td class="na">`) {
+		t.Error("the unobserved answer is not marked unavailable in the HTML")
+	}
+}
+
+// TestAReportWithNoObservationsPrintsNoSection. A run of an engine nothing
+// could be asked of should not carry an empty table with a heading over it.
+func TestAReportWithNoObservationsPrintsNoSection(t *testing.T) {
+	rep := sample()
+	rep.Implementation = nil
+	var b bytes.Buffer
+	if err := report.WriteMarkdown(&b, rep); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(b.String(), impdef.Heading) {
+		t.Error("a run with no observations printed the section anyway")
+	}
+	var h bytes.Buffer
+	if err := report.WriteHTML(&h, rep); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(h.String(), `id="implementation"`) {
+		t.Error("the HTML table of contents links to a section that is not there")
 	}
 }
 

@@ -42,6 +42,7 @@ import (
 	"github.com/tamnd/gql-compat/adapter"
 	"github.com/tamnd/gql-compat/corpus"
 	"github.com/tamnd/gql-compat/fixture"
+	"github.com/tamnd/gql-compat/impdef"
 	"github.com/tamnd/gql-compat/iso"
 	"github.com/tamnd/gql-compat/metrics"
 	"github.com/tamnd/gql-compat/rows"
@@ -56,6 +57,10 @@ type Config struct {
 	Fixtures *fixture.Set
 	// Catalog supplies the ISO denominators for the coverage tables.
 	Catalog *iso.Catalog
+	// Probes are the implementation-defined observations to take after the
+	// cases have run. They are not cases: they carry no expectation, produce no
+	// outcome, and touch no total. A nil set skips the phase entirely.
+	Probes *impdef.Set
 
 	// Mode chooses standard text or the engine's own spelling.
 	Mode Mode
@@ -207,6 +212,14 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 		if cfg.Progress != nil {
 			cfg.Progress(i+1, len(cases), &rep.Cases[len(rep.Cases)-1])
 		}
+	}
+
+	// The observations run last and on the same session, which is why a probe
+	// is forbidden to write: whatever it left behind would belong to no case
+	// and be nobody's business to clean up. They are inside the run's wall
+	// clock, because they cost what they cost, and outside everything else.
+	if cfg.Probes.Len() > 0 && ctx.Err() == nil {
+		rep.Implementation = ex.observe(ctx, cfg.Probes, cfg.Catalog)
 	}
 
 	rep.Run.Finished = time.Now()
@@ -392,6 +405,79 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 		e.dirty = true
 	}
 	return r
+}
+
+// observe takes every probe, in order, and returns what they saw.
+//
+// The phase has no verdict to reach, so it has no reason to stop early and no
+// reason to repeat: each probe is one execution, unwarmed and untimed beyond
+// its own wall clock, and a probe the engine refuses is either an answer or a
+// silence, never a mark against the engine. That is why this is a separate
+// method from run and not a fifth case kind.
+//
+// A probe that has to reload a fixture pays for the ingest inside its own wall
+// time and produces no ingest row. The ingest table is one row per fixture load
+// a case triggered, and adding rows to it that no case triggered would put
+// loads in a table whose whole use is attributing them.
+func (e *executor) observe(ctx context.Context, set *impdef.Set, cat *iso.Catalog) *impdef.Result {
+	out := &impdef.Result{
+		DefinedTotal:   len(cat.ImplementationDefined),
+		DependentTotal: len(cat.ImplementationDependent),
+		Observations:   make([]impdef.Observation, 0, set.Len()),
+	}
+	for _, p := range set.Probes {
+		if ctx.Err() != nil {
+			break
+		}
+		out.Observations = append(out.Observations, e.probe(ctx, p))
+	}
+	return out
+}
+
+// probe runs one probe and returns the observation, including the observation
+// that nothing could be observed.
+func (e *executor) probe(ctx context.Context, p *impdef.Probe) (o impdef.Observation) {
+	started := time.Now()
+	defer func() { o.Wall = time.Since(started) }()
+
+	var fx *fixture.Fixture
+	if p.Fixture != "" {
+		if e.cfg.Fixtures == nil {
+			return p.Silent(impdef.NoFixture, "the run has no fixtures")
+		}
+		f, found := e.cfg.Fixtures.Get(p.Fixture)
+		if !found {
+			return p.Silent(impdef.NoFixture, "fixture "+p.Fixture+" is not defined")
+		}
+		if _, err := f.Materialize(); err != nil {
+			return p.Silent(impdef.NoLoad, err.Error())
+		}
+		if missing := f.Missing(e.caps.Data); len(missing) > 0 {
+			return p.Silent(impdef.NoFixture, capList(missing))
+		}
+		fx = f
+	}
+
+	sess, err := e.session(ctx)
+	if err != nil {
+		return p.Silent(impdef.NoSession, err.Error())
+	}
+	if fx != nil {
+		reloaded, _, err := e.ensureLoaded(ctx, sess, fx)
+		if err != nil {
+			e.discard()
+			return p.Silent(impdef.NoLoad, err.Error())
+		}
+		sess = reloaded
+	}
+
+	qctx, cancel := context.WithTimeout(ctx, e.cfg.Timeout)
+	res, err := sess.Exec(qctx, p.Statement, nil)
+	cancel()
+	if f := adapter.AsFailure(err); f != nil && f.Fatal {
+		e.discard()
+	}
+	return p.Observe(res, err)
 }
 
 func (e *executor) repeats(c *corpus.Case) int {

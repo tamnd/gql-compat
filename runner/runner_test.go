@@ -12,6 +12,8 @@ import (
 	"github.com/tamnd/gql-compat/adapter/fake"
 	"github.com/tamnd/gql-compat/corpus"
 	"github.com/tamnd/gql-compat/fixture"
+	"github.com/tamnd/gql-compat/impdef"
+	"github.com/tamnd/gql-compat/iso"
 	"github.com/tamnd/gql-compat/rows"
 	"github.com/tamnd/gql-compat/runner"
 )
@@ -522,6 +524,86 @@ func TestAnIngestThatNeverFinishesIsAFindingNotAHang(t *testing.T) {
 	// answer, or a suite of a hundred pays the timeout a hundred times.
 	if rep.Run.Wall > 5*time.Second {
 		t.Errorf("run took %s; a failed load should be attempted once", rep.Run.Wall)
+	}
+}
+
+// probes builds a probe set of one question, against a graph the mini corpus
+// actually holds.
+func probes(t *testing.T, p *impdef.Probe) *impdef.Set {
+	t.Helper()
+	cat, err := iso.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := impdef.New([]*impdef.Probe{p}, iso.Codes{Catalog: cat})
+	if err != nil {
+		t.Fatalf("building the probe set: %v", err)
+	}
+	return set
+}
+
+// TestAnObservationIsInNoTotal. The probes run in the same session as the
+// cases and against the same graphs, and none of what they see may reach the
+// scoreboard: ISO delegated these choices, so there is no right answer for an
+// engine to miss and nothing here for a CI gate to read.
+func TestAnObservationIsInNoTotal(t *testing.T) {
+	set := probes(t, &impdef.Probe{
+		ID: "impdef/ia015/padding", Item: "IA015", Kind: impdef.Defined,
+		Question: "Whether 'a' and 'a  ' compare equal.",
+		Fixture:  "two", Statement: "RETURN 'a' = 'a  ' AS v", Read: impdef.Cell,
+	})
+	d := engine(t, func(c *fake.Config) {
+		c.Answers["RETURN 'a' = 'a  ' AS v"] = fake.Answer{Table: table("v", false)}
+	})
+	rep := run(t, d, runner.Config{Repeats: 1, Probes: set})
+	base := run(t, engine(t, nil), runner.Config{Repeats: 1, Probes: &impdef.Set{}})
+
+	if rep.Implementation.Len() != 1 {
+		t.Fatalf("%d observations, want the one probe that ran", rep.Implementation.Len())
+	}
+	o := rep.Implementation.Observations[0]
+	if !o.Observed() || o.Value != "false" {
+		t.Errorf("observed %q, silence %q; want the engine's answer", o.Value, o.Silence)
+	}
+	if o.Description == "" {
+		t.Error("the observation does not carry the standard's own words for IA015")
+	}
+	if rep.Totals.Cases != base.Totals.Cases || rep.Totals.Pass != base.Totals.Pass {
+		t.Errorf("totals moved from %+v to %+v when a probe ran", base.Totals, rep.Totals)
+	}
+	if len(rep.Cases) != len(base.Cases) {
+		t.Error("a probe was counted as a case")
+	}
+	if got := len(rep.Coverage.Subclauses); got != len(base.Coverage.Subclauses) {
+		t.Error("a probe entered a coverage denominator")
+	}
+}
+
+// TestAProbeThatCannotBeAskedObservesNothing. A caller running their own
+// corpus has no obligation to define the graphs the shipped probes want, and
+// the honest report of a question nobody could put is silence, not a default.
+func TestAProbeThatCannotBeAskedObservesNothing(t *testing.T) {
+	set := probes(t, &impdef.Probe{
+		ID: "impdef/id022/collation", Item: "ID022", Kind: impdef.Defined,
+		Question: "What order strings sort in by default.",
+		Fixture:  "no-such-graph", Statement: "RETURN 1 AS v", Read: impdef.Cell,
+	})
+	rep := run(t, engine(t, nil), runner.Config{Repeats: 1, Probes: set})
+	if rep.Implementation.Len() != 1 {
+		t.Fatalf("%d observations, want one", rep.Implementation.Len())
+	}
+	o := rep.Implementation.Observations[0]
+	if o.Observed() {
+		t.Errorf("a probe whose graph does not exist reported %q as an answer", o.Value)
+	}
+	if o.Silence != impdef.NoFixture {
+		t.Errorf("silence %q, want %q", o.Silence, impdef.NoFixture)
+	}
+	if o.Display() != "—" {
+		t.Errorf("it renders as %q rather than an em dash", o.Display())
+	}
+	if rep.Totals.Error != 0 {
+		t.Error("a probe nobody could ask was counted as an error")
 	}
 }
 

@@ -195,6 +195,8 @@ gql-compat run -adapter zu -kind performance -keep-workdir -out ./reports
 | `run` | run the corpus against an engine and write reports |
 | `list` | `cases`, `fixtures`, or `adapters` in this binary |
 | `iso` | print the vendored catalogue: `summary`, `features`, `families`, `conditions`, `productions`, `subclauses`, `keywords`, `impdef`, `impdep` |
+| `consensus` | compare two or more reports and queue the cases every engine failed |
+| `statement` | print the Clause 24.5.2 template a vendor has to fill in, with a run's answers in it |
 | `validate` | load a corpus and check every ISO reference in it |
 | `version` | |
 
@@ -240,6 +242,7 @@ baseline.
 | `metrics` | latency statistics, process sampler, disk measurement |
 | `rows` | result normalisation and comparison |
 | `report` | JSON, Markdown, HTML, CSV, JUnit |
+| `impdef` | the choices ISO delegates, the probes that observe them, the 24.5.2 template |
 
 ## Reports
 
@@ -291,6 +294,35 @@ The method has a limit, and it is printed with every report rather than kept in
 the documentation: consensus only detects a shared misreading between engines
 that are actually independent. Three engines that all grew out of Cypher will
 agree about Cypher.
+
+## The choices the standard leaves open
+
+ISO/IEC 39075 does not specify everything. It leaves 117 items to the
+implementation, which Clause 24.5.2 then obliges to write down what it chose,
+20 to the running system, which nobody has to document and no program may rely
+on, and it permits extensions under 24.5.3 on the same condition as the first:
+say what they are.
+
+No case tests any of that, and none ever will: an engine that pads character
+strings for comparison and an engine that does not are both conforming. Every
+run instead ends with an observation phase, seventeen probes deep, and prints
+what it saw in a section that carries no verdict at all. There is no `pass`,
+`fail`, `skip` or `error` anywhere in it, which is asserted by a test rather
+than left to care, and nothing in it enters a total, a coverage denominator or
+the exit status. A probe that could not be put to the engine prints an em dash
+and the reason, because not observed is not the same as none and not the same
+as unlimited.
+
+```
+$ gql-compat statement reports/zu/zu.json -out STATEMENT.md
+note: 7 of the 117 implementation-defined items carry an observed answer; the rest are yours to write
+```
+
+That is the point of the exercise. `statement` prints every delegated item in
+ISO code order with the standard's own words for each, the answers this run
+observed already filled in beside the statement that observed them, and a dash
+against everything a vendor still has to answer themselves. It is the only
+output of this tool that is meant to be edited.
 
 ## Reproducibility
 
