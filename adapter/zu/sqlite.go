@@ -239,9 +239,9 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 
 // buildNodeTable derives one label's column set from its nodes.
 //
-// zu1 property columns are dense and uniformly integer or string, so a
-// property some node of the label lacks, or holds at a different type, cannot
-// be stored. Both are refused rather than papered over with a default: a
+// zu1 property columns are dense and uniformly typed, so a property some node
+// of the label lacks, or holds at a different type, cannot be stored. Both are
+// refused rather than papered over with a default: a
 // column silently filled with zeros would answer aggregate cases with numbers
 // no fixture contains.
 func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, error) {
@@ -288,16 +288,29 @@ func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, 
 	return t, nil
 }
 
-// columnKind maps a fixture value to the only two column types zu1's property
-// loader accepts.
+// columnKind maps a fixture value to the column type the staged table declares
+// it as.
+//
+// The declaration is not decoration here. zu's converter reads a column's type
+// back out of the staged file, and for three of these four the storage class
+// carries it: an integer, a double and a byte string are each their own class.
+// A boolean is not, because SQLite has no such class and stores one as the
+// integers 0 and 1, so BOOLEAN is what tells the converter the column was meant
+// as truth values rather than a count that happens to be small.
 func columnKind(v any) (string, error) {
 	switch v.(type) {
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return "INTEGER", nil
+	case float32, float64:
+		return "REAL", nil
+	case bool:
+		return "BOOLEAN", nil
 	case string:
 		return "TEXT", nil
+	case []byte:
+		return "BLOB", nil
 	default:
-		return "", fmt.Errorf("value %v of type %T is neither an integer nor a string", v, v)
+		return "", fmt.Errorf("value %v of type %T is not a scalar a zu1 property column can hold", v, v)
 	}
 }
 

@@ -16,7 +16,7 @@ const declared = `{"engine":{"name":"zu","version":"0.0.1"},` +
 	`"data":{"labels":true,"multi-label":false,"node-properties":true,` +
 	`"edge-properties":false,"edge-types":true,"multiple-edge-types":true,` +
 	`"multiple-node-labels":false,"temporal-values":false,"list-values":false,` +
-	`"null-properties":false,"float-values":false,"boolean-values":false,` +
+	`"null-properties":false,"float-values":true,"boolean-values":true,` +
 	`"undirected-edges":false,"self-loops":true,"parallel-edges":true},` +
 	`"capabilities":{"gqlstatus":true,"parameters":true,"transactions":false,` +
 	`"multiple-statements":true,"isolated":true},` +
@@ -33,8 +33,11 @@ func TestDeclarationBecomesCapabilities(t *testing.T) {
 	if !caps.Data[fixture.CapLabels] || !caps.Data[fixture.CapSelfLoops] {
 		t.Error("labels and self-loops are declared true and did not arrive true")
 	}
-	if caps.Data[fixture.CapFloatValues] || caps.Data[fixture.CapEdgeProperties] {
-		t.Error("float-values and edge-properties are declared false and arrived true")
+	if !caps.Data[fixture.CapFloatValues] || !caps.Data[fixture.CapBooleanValues] {
+		t.Error("float-values and boolean-values are declared true and did not arrive true")
+	}
+	if caps.Data[fixture.CapEdgeProperties] {
+		t.Error("edge-properties is declared false and arrived true")
 	}
 	if !caps.GQLStatus || !caps.Parameters || !caps.MultipleStatements || !caps.Isolated {
 		t.Error("an engine flag declared true did not arrive true")
