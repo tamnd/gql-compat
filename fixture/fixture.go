@@ -120,8 +120,8 @@ type Fixture struct {
 // worst case for recursion, a clique the worst case for intersection, and a
 // power-law graph the one real workloads look like.
 type Generator struct {
-	// Shape is "path", "cycle", "star", "grid", "clique", "erdos-renyi", or
-	// "power-law".
+	// Shape is "path", "cycle", "star", "grid", "clique", "erdos-renyi",
+	// "power-law", or "diamonds".
 	Shape string `yaml:"shape" json:"shape"`
 	// Nodes is the vertex count.
 	Nodes int `yaml:"nodes" json:"nodes"`
@@ -298,6 +298,21 @@ func (f *Fixture) Validate() error {
 func (g *Generator) validate(fixture string) error {
 	switch g.Shape {
 	case "path", "cycle", "star", "grid", "clique", "erdos-renyi", "power-law":
+	case "diamonds":
+		// The shape only closes on a multiple of three plus one, and a node
+		// count that does not close would leave a tail nothing reaches, which
+		// is the one thing this fixture must not have: its whole value is that
+		// the number of paths across it is known from the node count alone.
+		if g.Nodes < 4 || (g.Nodes-1)%3 != 0 {
+			return fmt.Errorf("fixture %s: a chain of diamonds has 3k+1 nodes for k of at least one, and %d is not one of those",
+				fixture, g.Nodes)
+		}
+		// 2^k paths. Twenty diamonds is already a million of them, which is a
+		// fixture of 61 nodes that can hang an engine that materializes each
+		// one, and past that the answer stops fitting anywhere.
+		if k := (g.Nodes - 1) / 3; k > 20 {
+			return fmt.Errorf("fixture %s: %d diamonds is 2^%d paths, and the answer is the point", fixture, k, k)
+		}
 	default:
 		return fmt.Errorf("fixture %s: unknown generated shape %q", fixture, g.Shape)
 	}

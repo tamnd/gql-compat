@@ -33,7 +33,7 @@ against the standard's own denominators.
 	var (
 		corpusIn = fs.String("corpus", "", "directory of case files; empty uses the embedded corpus")
 		asJSON   = fs.Bool("json", false, "emit JSON instead of a table")
-		missing  = fs.Bool("missing", false, "list the feature codes no case claims")
+		missing  = fs.Bool("missing", false, "list the features, conditions and subclauses no case claims")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -117,8 +117,36 @@ against the standard's own denominators.
 			f, _ := std.Catalog.Feature(code)
 			fmt.Printf("  %-6s %s\n", code, f.Description)
 		}
+		// The other two denominators are worth the same treatment. A reader
+		// who wants to close the gap needs the names of what is open, and
+		// counting down from 68 or 317 by hand is how a corpus ends up with
+		// two cases for one code and none for the next.
+		haveCondition := set(std.Suite.CoveredConditions())
+		fmt.Println("\nGQLSTATUS codes no case asserts:")
+		for _, cl := range std.Catalog.Classes {
+			for _, sc := range cl.Subclasses {
+				if code := cl.Code + sc.Code; !haveCondition[code] {
+					fmt.Printf("  %-6s %s: %s\n", code, cl.Name, sc.Name)
+				}
+			}
+		}
+		haveSubclause := set(std.Suite.CoveredSubclauses())
+		fmt.Println("\nnormative subclauses no case cites:")
+		for _, s := range std.Catalog.NormativeSubclauses() {
+			if !haveSubclause[s.Number] {
+				fmt.Printf("  %-8s %s\n", s.Number, s.Title)
+			}
+		}
 	}
 	return nil
+}
+
+func set(codes []string) map[string]bool {
+	m := make(map[string]bool, len(codes))
+	for _, c := range codes {
+		m[c] = true
+	}
+	return m
 }
 
 func unclaimed(cat *iso.Catalog, claimed map[string]bool) []string {

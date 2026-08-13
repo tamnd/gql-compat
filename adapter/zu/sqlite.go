@@ -141,6 +141,12 @@ type relTable struct {
 // loaded into a file the next case would then query.
 func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 	zrow := make(map[string]int64, len(fx.Nodes))
+	// labelOf answers what table a node key lives in. It is a map rather than a
+	// scan because the edge loop below asks it twice per edge: on a hundred
+	// thousand nodes and a hundred thousand edges, a scan is ten billion
+	// comparisons, and staging perf-path-100k spent nineteen seconds in it
+	// while the SQLite writes it was blamed for took a quarter of one.
+	labelOf := make(map[string]string, len(fx.Nodes))
 	byLabel := map[string][]int{}
 	labels := []string{}
 	for i, n := range fx.Nodes {
@@ -162,6 +168,7 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 		if _, seen := byLabel[label]; !seen {
 			labels = append(labels, label)
 		}
+		labelOf[n.Key] = label
 		zrow[n.Key] = int64(len(byLabel[label]))
 		byLabel[label] = append(byLabel[label], i)
 	}
@@ -176,6 +183,10 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 	}
 
 	byType := map[string][][2]int64{}
+	// A rel table binds to the node table its edges run between, which the
+	// first edge of each type settles; the rest are checked against it by the
+	// cross-label test below.
+	endpointOf := map[string]string{}
 	types := []string{}
 	for _, e := range fx.Edges {
 		typ := "EDGE"
@@ -194,19 +205,21 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 		// endpoints carry different labels has nowhere to go. Capabilities
 		// declares multiple-node-labels unsupported for exactly this reason;
 		// the check is here so the reason is legible if that ever slips.
-		if fl, tl := labelOf(fx, e.From), labelOf(fx, e.To); fl != tl {
+		fl, tl := labelOf[e.From], labelOf[e.To]
+		if fl != tl {
 			return nil, fmt.Errorf("edge %s -> %s crosses labels %s and %s; zu binds a rel table to one node table",
 				e.From, e.To, fl, tl)
 		}
 		if _, seen := byType[typ]; !seen {
 			types = append(types, typ)
+			endpointOf[typ] = fl
 		}
 		byType[typ] = append(byType[typ], [2]int64{from, to})
 	}
 	for _, typ := range types {
 		plan.relTables = append(plan.relTables, &relTable{
 			typ:      typ,
-			endpoint: labelOf(fx, edgeSource(fx, typ)),
+			endpoint: endpointOf[typ],
 			edges:    byType[typ],
 		})
 	}
@@ -222,24 +235,6 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 		plan.relTables = append(plan.relTables, &relTable{typ: "ZU_COMPAT_EMPTY_" + nt.label, endpoint: nt.label})
 	}
 	return plan, nil
-}
-
-func labelOf(fx *fixture.Fixture, key string) string {
-	for _, n := range fx.Nodes {
-		if n.Key == key && len(n.Labels) == 1 {
-			return n.Labels[0]
-		}
-	}
-	return "Node"
-}
-
-func edgeSource(fx *fixture.Fixture, typ string) string {
-	for _, e := range fx.Edges {
-		if e.Type == typ || (e.Type == "" && typ == "EDGE") {
-			return e.From
-		}
-	}
-	return ""
 }
 
 // buildNodeTable derives one label's column set from its nodes.

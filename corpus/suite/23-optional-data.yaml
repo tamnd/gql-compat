@@ -483,3 +483,100 @@ cases:
       SESSION RESET PROPERTY GRAPH
     expect:
       kind: accept
+
+  - id: optional/gs01/session-set-graph-parameter
+    name: SESSION SET PROPERTY GRAPH names a graph the session can then use
+    features: [GS01, GS12]
+    subclauses: ["7.1", "11.1", "4.5.2.3"]
+    productions: [session set graph parameter clause, opt typed graph initializer, graph initializer, current graph]
+    requires: [GQ01]
+    tags: [write, session, catalog]
+    mutating: true
+    # The initializer is a graph expression, and CURRENT_PROPERTY_GRAPH is the
+    # only one every engine can write without knowing what graphs exist here.
+    # Binding the parameter is GS01 and initializing it from a reference rather
+    # than a subquery is GS12, so the statement claims both; a USE of the
+    # parameter is what shows the session kept it.
+    setup:
+      - "SESSION SET PROPERTY GRAPH $working = CURRENT_PROPERTY_GRAPH"
+    query: |
+      USE $working MATCH (n) RETURN COUNT(*) AS n
+    expect:
+      kind: accept
+
+  - id: optional/gs15/session-set-time-zone
+    name: SESSION SET TIME ZONE moves the session's zone displacement
+    features: [GS15]
+    subclauses: ["7.1", "4.5.2.3"]
+    productions: [session set time zone clause, set time zone value, time zone string]
+    tags: [write, session, temporal]
+    mutating: true
+    # The zone is session context, not data, so the evidence available is that
+    # the command was taken. Reading it back would need LOCAL_DATETIME and a
+    # clock, and a case that compared two clocks would be timing the run.
+    query: |
+      SESSION SET TIME ZONE '+00:00'
+    expect:
+      kind: accept
+
+  - id: optional/gs07/session-reset-time-zone
+    name: SESSION RESET TIME ZONE puts the zone displacement back
+    features: [GS07, GS15]
+    subclauses: ["7.2", "4.5.2.3"]
+    productions: [session reset command, session reset arguments]
+    tags: [write, session, temporal]
+    mutating: true
+    setup:
+      - "SESSION SET TIME ZONE '+00:00'"
+    query: |
+      SESSION RESET TIME ZONE
+    expect:
+      kind: accept
+
+  - id: optional/gs05/session-reset-schema
+    name: SESSION RESET SCHEMA puts the session schema back
+    features: [GS05]
+    subclauses: ["7.2", "4.5.2.3"]
+    productions: [session reset command, session reset arguments]
+    tags: [write, session, catalog]
+    mutating: true
+    query: |
+      SESSION RESET SCHEMA
+    expect:
+      kind: accept
+
+  - id: optional/gs16/session-reset-one-parameter
+    name: SESSION RESET PARAMETER clears one parameter and leaves the rest
+    features: [GS03, GS16]
+    subclauses: ["7.2", "4.5.2.3"]
+    productions: [session reset arguments, session parameter specification, general parameter reference]
+    tags: [write, session]
+    mutating: true
+    # `$kept` is still readable after `$dropped` is reset, which is the whole
+    # difference between this and SESSION RESET ALL PARAMETERS. An engine that
+    # cleared both would answer the query with an unbound parameter rather than
+    # with a row.
+    setup:
+      - "SESSION SET VALUE $dropped = 1"
+      - "SESSION SET VALUE $kept = 2"
+      - "SESSION RESET PARAMETER $dropped"
+    query: |
+      RETURN $kept AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[2]]
+
+  - id: optional/gs04/session-reset-all-characteristics
+    name: SESSION RESET ALL CHARACTERISTICS returns the session to how it started
+    features: [GS04]
+    subclauses: ["7.2", "4.5.2.2", "4.5.2.3"]
+    productions: [session reset command, session reset arguments]
+    tags: [write, session]
+    mutating: true
+    # The widest of the resets: schema, working graph, zone and parameters at
+    # once. It runs last of the session cases because it undoes what they set.
+    query: |
+      SESSION RESET ALL CHARACTERISTICS
+    expect:
+      kind: accept

@@ -1,0 +1,208 @@
+# Conditions a session, a transaction or the catalog raises.
+#
+# The codes in this file are not about a value that went wrong. They are about
+# a request that asked the engine for something its session, its transaction or
+# its catalog is not in a state to give: a second transaction inside the first,
+# a data statement after a catalog statement, an edge to a node that was
+# deleted a clause earlier. They need setup statements and they change what
+# they touch, so every one of them is marked mutating and most need the
+# engine's transaction control.
+#
+# Three of these conditions are ones ISO only requires of an implementation
+# that lacks a feature. An engine with GT03 may use two graphs in a
+# transaction, an engine with GP18 may mix catalog and data statements, and for
+# those engines the statement here is ordinary work rather than a violation. So
+# the cases carry `limit` with the feature named, and an engine that accepts is
+# recorded as having the feature rather than failed for not raising a condition
+# the standard does not ask it for.
+
+defaults:
+  kind: condition
+  tags: [error, write]
+  fixture: blank
+
+cases:
+  - id: condition/25g01/transaction-inside-a-transaction
+    name: Starting a transaction inside one raises active GQL-transaction
+    conditions: ["25G01"]
+    subclauses: ["8.1"]
+    productions: [start transaction command]
+    requires: [GT01]
+    tags: [error, write, transaction]
+    mutating: true
+    setup:
+      - "START TRANSACTION"
+    query: |
+      START TRANSACTION
+    expect:
+      kind: error
+      gqlstatus: "25G01"
+
+  - id: condition/25g02/data-statement-after-a-catalog-statement
+    name: Mixing catalog and data statements in one transaction raises the mixing condition
+    conditions: ["25G02"]
+    subclauses: ["8.1", "12.4", "13.2"]
+    productions: [create graph statement, insert statement]
+    requires: [GT01, GC04, GD01]
+    limit: GP18
+    tags: [error, write, transaction, catalog]
+    mutating: true
+    # The transaction has already created a graph when the insert arrives, so
+    # committing it would commit both kinds of change at once. ISO makes that
+    # optional (GP18) and requires an engine without the feature to refuse.
+    setup:
+      - "START TRANSACTION"
+      - "CREATE PROPERTY GRAPH gqlcompat_mixed ANY"
+    query: |
+      INSERT (:Person {name: 'Mixed'})
+    expect:
+      kind: error
+      gqlstatus: "25G02"
+
+  - id: condition/25g04/two-graphs-in-one-transaction
+    name: Reading a second graph in one transaction raises accessing multiple graphs not supported
+    conditions: ["25G04"]
+    subclauses: ["8.1", "16.2"]
+    productions: [use graph clause, graph expression]
+    requires: [GT01, GC04, GQ01]
+    limit: GT03
+    tags: [error, write, transaction, catalog]
+    mutating: true
+    # Both statements are reads and neither is unusual on its own. What the
+    # case asks is whether the engine will hold two graphs open in one
+    # transaction, which ISO makes an optional feature and this is the
+    # condition it names for the engines without it.
+    setup:
+      - "CREATE PROPERTY GRAPH gqlcompat_two_a ANY"
+      - "CREATE PROPERTY GRAPH gqlcompat_two_b ANY"
+      - "START TRANSACTION"
+      - "USE gqlcompat_two_a MATCH (n) RETURN COUNT(*) AS n"
+    query: |
+      USE gqlcompat_two_b MATCH (n) RETURN COUNT(*) AS n
+    expect:
+      kind: error
+      gqlstatus: "25G04"
+
+  - id: condition/01g03/dropping-a-graph-that-is-not-there
+    name: DROP GRAPH IF EXISTS on an absent graph completes with a warning
+    conditions: ["01G03"]
+    subclauses: ["12.5"]
+    productions: [drop graph statement]
+    requires: [GC04, GC05]
+    tags: [write, catalog, warning]
+    mutating: true
+    # A completion condition: IF EXISTS is what turns the missing graph from an
+    # exception into a warning, so the statement succeeds and the case asserts
+    # the success. The subclass lives in the diagnostic record, where an engine
+    # may report it or not.
+    query: |
+      DROP PROPERTY GRAPH IF EXISTS gqlcompat_never_created
+    expect:
+      kind: accept
+
+  - id: condition/01g04/dropping-a-graph-type-that-is-not-there
+    name: DROP GRAPH TYPE IF EXISTS on an absent graph type completes with a warning
+    conditions: ["01G04"]
+    subclauses: ["12.7"]
+    productions: [drop graph type statement]
+    requires: [GC01, GC03]
+    tags: [write, catalog, warning]
+    mutating: true
+    query: |
+      DROP PROPERTY GRAPH TYPE IF EXISTS gqlcompat_never_created_type
+    expect:
+      kind: accept
+
+  - id: condition/g1002/edge-to-a-node-deleted-in-the-same-statement
+    name: Inserting an edge to a deleted node raises endpoint node is deleted
+    conditions: ["G1002"]
+    subclauses: ["13.2", "13.5"]
+    productions: [delete statement, insert statement, insert edge pointing right]
+    requires: [GD01]
+    fixture: pair
+    mutating: true
+    # `a` is still bound and no longer exists, so the insert has an endpoint it
+    # cannot attach to. The control is the same statement without the delete,
+    # which every engine with an insert should take.
+    query: |
+      MATCH (a:Person {name: 'Ada'}), (b:Person {name: 'Linus'})
+      DETACH DELETE a
+      INSERT (a)-[:KNOWS]->(b)
+    parses: |
+      MATCH (a:Person {name: 'Ada'}), (b:Person {name: 'Linus'})
+      INSERT (a)-[:KNOWS]->(b)
+    expect:
+      kind: error
+      gqlstatus: "G1002"
+
+  - id: condition/g1003/edge-to-a-node-from-another-graph
+    name: Inserting an edge to a node of another graph raises endpoint node not in the working graph
+    conditions: ["G1003", "25G04"]
+    subclauses: ["13.2", "16.2"]
+    productions: [use graph clause, insert statement, insert edge pointing right]
+    requires: [GC04, GD01, GQ01, GQ20]
+    tags: [error, write, catalog]
+    mutating: true
+    # The node bound by the first query statement lives in one graph and the
+    # insert runs against another, so the edge would leave the graph it is in.
+    # An engine that will not hold two graphs open at once refuses earlier and
+    # with 25G04, which is the condition for the thing it actually declined,
+    # and both answers are counted.
+    setup:
+      - "CREATE PROPERTY GRAPH gqlcompat_far_a ANY"
+      - "CREATE PROPERTY GRAPH gqlcompat_far_b ANY"
+      - "USE gqlcompat_far_a INSERT (:Person {name: 'Far'})"
+      - "USE gqlcompat_far_b INSERT (:Person {name: 'Near'})"
+    query: |
+      USE gqlcompat_far_a MATCH (far:Person {name: 'Far'})
+      NEXT USE gqlcompat_far_b MATCH (near:Person {name: 'Near'})
+      INSERT (far)-[:KNOWS]->(near)
+    expect:
+      kind: error
+      gqlstatus: "G1003"
+      also_gqlstatus: ["25G04"]
+
+  # The last two codes of the sixty-eight, and the only two this corpus cannot
+  # put to an engine. Both are raised when the channel the answer would come
+  # back on is gone, so the statement that provokes one is an ordinary commit
+  # and the thing that makes it raise is a socket dying at a chosen instant.
+  # They are written out anyway, with the code they name and the reason no run
+  # will ever judge them, so that a reader counting the corpus against the
+  # condition surface finds two skips with an explanation rather than two codes
+  # nobody mentioned.
+  - id: condition/08007/commit-whose-outcome-never-came-back
+    name: A connection lost while a transaction is resolving leaves the outcome unknown
+    conditions: ["08007"]
+    subclauses: ["8.4", "23.1", "4.9.3"]
+    productions: [commit command]
+    requires: [GT01]
+    tags: [error, transaction, unreachable]
+    mutating: true
+    unprovokable: >-
+      the condition is the connection failing between the commit being sent and
+      its outcome being reported, so raising it means killing the socket at one
+      instant and reading it means trusting a driver's account of a connection
+      that no longer exists
+    query: |
+      COMMIT
+    expect:
+      kind: error
+      gqlstatus: "08007"
+
+  - id: condition/40003/statement-whose-completion-is-unknown
+    name: A rollback that leaves a statement's completion unknown
+    conditions: ["40003"]
+    subclauses: ["8.3", "23.1", "4.9.3"]
+    productions: [rollback command]
+    requires: [GT01]
+    tags: [error, transaction, unreachable]
+    mutating: true
+    unprovokable: >-
+      the condition is a rollback after which the engine cannot say whether a
+      statement completed, which is a state the engine reaches by losing track
+      of its own work rather than by anything the statement said
+    query: |
+      ROLLBACK
+    expect:
+      kind: error
+      gqlstatus: "40003"

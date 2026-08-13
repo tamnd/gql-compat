@@ -37,6 +37,18 @@ fixtures:
       before the query runs rather than measured from the answer.
     generated: {shape: path, nodes: 100000, properties: 2, seed: 1}
 
+  - name: perf-path-1m
+    description: >-
+      A million nodes on the same chain. This is the fixture that exists to be
+      big rather than to be interesting: an engine's store has a floor, and a
+      bits-per-edge figure taken on a graph smaller than that floor measures
+      the floor. At a million nodes the data is the store on every engine the
+      harness drives, so the density figures on this row describe an encoding.
+      It carries the two selectivity properties for the same reason
+      perf-path-100k does, so the two are the same graph at two scales and the
+      cost per node can be read off the pair.
+    generated: {shape: path, nodes: 1000000, properties: 2, seed: 1}
+
   - name: perf-star-10k
     description: >-
       One node with ten thousand out-edges. The worst case for an adjacency
@@ -67,6 +79,14 @@ fixtures:
       Erdos-Renyi with mean out-degree eight. Uniform degree, no locality: the
       control against which the other shapes' locality effects are read.
     generated: {shape: erdos-renyi, nodes: 10000, degree: 8, seed: 1}
+
+  - name: perf-diamonds-8
+    description: >-
+      Eight diamonds in a chain: 25 nodes, 32 edges, and exactly 256 paths from
+      the first junction to the last, every one of them 16 edges long. The
+      answer is arithmetic rather than a measurement, which is what the lattice
+      does not offer.
+    generated: {shape: diamonds, nodes: 25, seed: 1}
 
   - name: perf-wide-10k
     description: >-
@@ -116,6 +136,40 @@ cases:
       kind: rows
       columns: [n]
       rows: [[100000]]
+
+  - id: performance/scan/count-path-1m
+    name: Count every node in a million-node graph
+    fixture: perf-path-1m
+    # The `large` tag keeps this out of a default run. It is here for the
+    # storage figures its fixture produces, not for the count, and an ingest
+    # this size in every run would dominate the wall clock of a suite whose
+    # other 260 cases take seconds between them. Ask for it with -large.
+    tags: [performance, scan, large]
+    repeat: 3
+    timeout_ms: 600000
+    query: |
+      MATCH (n:N)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1000000]]
+
+  - id: performance/scan/sum-property-1m
+    name: Sum a property across a million nodes
+    fixture: perf-path-1m
+    tags: [performance, scan, aggregate, large]
+    repeat: 3
+    timeout_ms: 600000
+    # 0 through 999999 sums to 499999500000, which is past 2^32 and so is also
+    # a test that the whole path from the store to the report keeps 64 bits.
+    query: |
+      MATCH (n:N)
+      RETURN SUM(n.id) AS total
+    expect:
+      kind: rows
+      columns: [total]
+      rows: [[499999500000]]
 
   - id: performance/scan/sum-property-100k
     name: Sum a property across a hundred thousand nodes
@@ -361,10 +415,16 @@ cases:
   - id: performance/recursion/shortest-path-across-a-lattice
     name: Find one shortest path across a lattice
     fixture: perf-grid-10k
-    tags: [performance, recursive]
+    tags: [performance, recursive, large]
     requires: [G019, G036, G061]
     repeat: 3
     timeout_ms: 300000
+    # Tagged large, and excluded from a default run, because the cost is the
+    # query rather than the fixture: this ran for the whole 300 s against
+    # Neo4j and was cut off. It stays in the corpus because a shortest path
+    # across a hundred by a hundred lattice is a real workload, but what it
+    # cannot say is how much work the answer was, so the two diamond cases
+    # below carry that job and this one carries the scale.
     query: |
       MATCH SHORTEST 1 (a:N {id: 0})-[:E]->+(b:N {id: 9999})
       RETURN COUNT(*) AS n
@@ -373,6 +433,45 @@ cases:
       columns: [n]
       rows: [[1]]
 
+  - id: performance/recursion/any-shortest-through-diamonds
+    name: One shortest path where two hundred and fifty six of them exist
+    fixture: perf-diamonds-8
+    tags: [performance, recursive]
+    requires: [G018, G036, G061]
+    repeat: 5
+    # Every path across this fixture is a shortest path, and the fixture is
+    # built so that there are 2^8 of them. An engine that returns one without
+    # walking the other 255 answers in microseconds; an engine that
+    # materializes the set first pays for all of them. Both answer 1, so the
+    # difference is entirely in the latency beside it, which is the comparison
+    # the lattice case was meant to support and could not.
+    query: |
+      MATCH ANY SHORTEST (a:N {id: 0})-[:E]->+(b:N {id: 24})
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: performance/recursion/all-shortest-through-diamonds
+    name: Every shortest path across a chain of eight diamonds
+    fixture: perf-diamonds-8
+    tags: [performance, recursive]
+    requires: [G017, G036, G061]
+    repeat: 5
+    # 256 paths of 16 edges each, by construction: eight diamonds, two ways
+    # through each, and no other route. The count is arithmetic and not an
+    # observation, so an engine that returns 255 or 512 is wrong rather than
+    # differently optimised, and the time beside it is the cost of a known
+    # amount of work.
+    query: |
+      MATCH ALL SHORTEST (a:N {id: 0})-[:E]->+(b:N {id: 24})
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[256]]
+
   - id: performance/write/insert-one-node
     name: Insert a single node
     fixture: perf-path-10k
@@ -380,12 +479,14 @@ cases:
     requires: [GD01]
     mutating: true
     repeat: 20
-    # The runner reloads a mutating fixture between cases, not between
-    # repetitions, so these twenty inserts land on a graph that grows from
-    # 10000 to 10020 nodes. That is deliberate: the spread across the twenty
-    # samples is what separates an engine whose write cost is constant from
-    # one whose write cost grows with what is already stored. Mutating cases
-    # get no warm-up, so none of the twenty is discarded.
+    restore: false
+    # These twenty inserts land on a graph that grows from 10000 to 10020
+    # nodes. That is deliberate, and it is why this case turns restoring off:
+    # the spread across the twenty samples is what separates an engine whose
+    # write cost is constant from one whose write cost grows with what is
+    # already stored, and putting the graph back between them would erase
+    # exactly the effect being measured. Mutating cases get no warm-up, so none
+    # of the twenty is discarded.
     query: |
       INSERT (x:N {id: -1})
       RETURN x.id AS id
@@ -400,11 +501,12 @@ cases:
     tags: [performance, write]
     requires: [GD01]
     mutating: true
-    repeat: 1
     timeout_ms: 300000
-    # One repetition only. The second would be assigning a property that is
+    # The second application of this statement would assign a property that is
     # already there, which is a different operation on most storage engines,
-    # and averaging it with the first would report neither.
+    # and averaging it with the first would report neither. So the runner puts
+    # the fixture back between executions and every sample is a first
+    # application, as many of them as the restore budget pays for.
     query: |
       MATCH (n:N)
       SET n.touched = 1

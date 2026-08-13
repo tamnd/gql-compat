@@ -554,6 +554,43 @@ cases:
       columns: [n]
       rows: [[1]]
 
+  - id: optional/ge09/horizontal-aggregation
+    name: An aggregate over a group variable folds one row's group into a value
+    features: [GE09, G035, G038]
+    subclauses: ["22.7", "20.9"]
+    productions: [aggregate function, general set function, quantified path primary]
+    # `y` is a group variable: the quantifier binds it twice within one row, to
+    # n1 and n2. Horizontal aggregation is aggregating across that group rather
+    # than down the rows, so the answer is 1 + 2 on a single row, and an engine
+    # that aggregated vertically instead would return one row per binding.
+    query: |
+      MATCH (a:Step)((x:Step)-[:LINK]->(y:Step)){2}(b:Step)
+      WHERE a.step = 0
+      RETURN SUM(y.step) AS total
+    expect:
+      kind: rows
+      columns: [total]
+      rows: [[3]]
+
+  - id: optional/gq17/group-variable-element-wise
+    name: A property read on a group variable answers with a list
+    features: [GQ17, G035, G038]
+    subclauses: ["22.7", "20.11"]
+    productions: [property reference, quantified path primary]
+    # The same group variable without an aggregate around it. With the feature
+    # the read is applied to each binding and the row holds the list of the
+    # results, in the order the path visited them. Without it the group
+    # variable cannot stand where one value is wanted, which is 22G13 and the
+    # case in 31-conditions-value.yaml that names GQ17 as its limit.
+    query: |
+      MATCH (a:Step)((x:Step)-[:LINK]->(y:Step)){2}(b:Step)
+      WHERE a.step = 0
+      RETURN y.step AS steps
+    expect:
+      kind: rows
+      columns: [steps]
+      rows: [[[1, 2]]]
+
   - id: optional/g115/property-exists-predicate
     name: PROPERTY_EXISTS tests for a property without reading its value
     features: [G115]

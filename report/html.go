@@ -544,9 +544,10 @@ func (h *htmlWriter) loads(rep *runner.Report) {
 	h.p(`<section id="ingest"><h2>Ingest</h2>`)
 	h.p(`<p>One row per fixture load. Cases that reused a graph another case had already loaded contribute nothing here, which is why these times must not be summed into a per-case cost.</p>`)
 	h.p(`<p><b>Wall</b> is everything the harness waited for; <b>engine</b> is the part of it the engine itself spent, where the adapter can separate the two, and is what the rates are computed against. The gap between them is this harness's cost of getting the fixture in &mdash; a staging file, an encoded batch, a process start &mdash; and belongs to the route rather than to the store.</p>`)
+	h.p(`<p>%s</p>`, e(floorSentence(rep)))
 	h.p(`<table class="grid wide"><thead><tr>`)
 	for _, col := range []string{"Fixture", "Triggered by", "Nodes", "Edges", "Wall", "Engine", "nodes/s", "edges/s",
-		"Apparent Δ", "Allocated Δ", "bits/edge", "bytes/node", "RSS peak", "CPU"} {
+		"Apparent Δ", "Allocated Δ", "× floor", "bits/edge", "bytes/node", "RSS peak", "CPU"} {
 		h.p(`<th class="n">%s</th>`, e(col))
 	}
 	h.p(`</tr></thead><tbody>`)
@@ -564,13 +565,21 @@ func (h *htmlWriter) loads(rep *runner.Report) {
 			strconv.Itoa(l.Nodes), strconv.Itoa(l.Edges), metrics.Format(l.Wall), engine,
 			num(l.NodesPerSec), num(l.EdgesPerSec),
 			dashSigned(l.Disk.OK, l.Disk.Growth()), dashSigned(l.Disk.OK, l.Disk.AllocGrowth()),
-			dashFloat(l.Disk.OK, l.BitsPerEdge), dashFloat(l.Disk.OK, l.BytesPerNode),
+			floorCell(l), dashFloat(l.DensityOK, l.BitsPerEdge), dashFloat(l.DensityOK, l.BytesPerNode),
 			dashBytes(l.Process.MemoryOK, l.Process.RSSPeak), cpu,
 		}
 		h.p(`<tr><td>%s</td><td><code>%s</code></td>%s</tr>`,
 			e(c.Fixture), e(c.ID), numCells(cells))
 	}
-	h.p(`</tbody></table></section>`)
+	h.p(`</tbody></table>`)
+	if notes := densityNotes(loadsOf(rep.Cases)); len(notes) > 0 {
+		h.p(`<p>Where the density columns hold a dash, the run declined to divide:</p><ul>`)
+		for _, n := range notes {
+			h.p(`<li>%s</li>`, e(n))
+		}
+		h.p(`</ul>`)
+	}
+	h.p(`</section>`)
 }
 
 // exploration renders the walk of the published grammar.

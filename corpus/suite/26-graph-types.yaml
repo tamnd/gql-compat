@@ -1,0 +1,127 @@
+# The GG family: what a graph type may say about the graph.
+#
+# A graph type is the closest thing GQL has to a schema, and ISO makes almost
+# every part of it optional. An engine may have graph types with no names for
+# the element types in them, or names but no key label sets, or key label sets
+# it infers rather than reads. It may insist that two node types sharing a
+# label agree on their properties, or relax that. Each of those is a separate
+# feature code, and an engine that has graph types at all has some subset of
+# them.
+#
+# Every case here creates a type rather than a graph, so nothing it does is
+# visible in a later query and the only evidence available is whether the
+# catalog took the statement. That makes these accept cases, which is the
+# weakest verdict the harness records. It is the right one: a graph type that
+# was accepted and then ignored is a difference this corpus cannot see from
+# outside, and claiming otherwise would be claiming evidence it does not have.
+#
+# Two of the features are hard to separate from a statement. ISO distinguishes
+# a key label set that was inferred from one that was omitted, and a single
+# CREATE either has the key label set written or it does not. The case that
+# leaves it out claims both codes and says so, because its evidence supports
+# the pair and neither one alone.
+
+defaults:
+  kind: optional
+  tags: [write, catalog, graph-type]
+
+cases:
+  - id: optional/gg20/named-element-types
+    name: An element type in a graph type may carry its own name
+    features: [GG20]
+    subclauses: ["12.6", "18.1", "18.2", "4.13.2.2", "4.13.2.3"]
+    productions: [nested graph type specification, node type pattern, node type name]
+    mutating: true
+    # Without GG20 the node type is anonymous and can only be referred to by
+    # its labels. With it the type has a name of its own, which is what lets a
+    # later element type point at it instead of repeating the pattern.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg20 {
+        NODE TYPE PersonType (:Person {name :: STRING})
+      }
+    expect:
+      kind: accept
+
+  - id: optional/gg21/explicit-key-label-set
+    name: An element type may declare which of its labels identify it
+    features: [GG21]
+    subclauses: ["12.6", "18.2", "4.13.2.6"]
+    productions: [node type pattern, node type key label set, node type implied content]
+    mutating: true
+    # The labels before the double arrow are the key: a node of this type is
+    # identified as a Person, and Employee is a label it also carries.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg21 {
+        (:Person => :Employee {name :: STRING})
+      }
+    expect:
+      kind: accept
+
+  - id: optional/gg22/inferred-key-label-set
+    name: An element type with no declared key label set gets one anyway
+    features: [GG22, GG23]
+    subclauses: ["12.6", "18.2", "4.13.2.6"]
+    productions: [node type pattern, node type implied content, node type label set]
+    mutating: true
+    # There is no double arrow here, so either the engine inferred the key
+    # label set from the label set (GG22) or it accepted an element type that
+    # has none (GG23). Both features are claimed because the statement cannot
+    # tell them apart, and a case that picked one would be guessing which.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg22 {
+        (:Person {name :: STRING})
+      }
+    expect:
+      kind: accept
+
+  - id: optional/gg24/two-node-types-with-one-label
+    name: Relaxed structural consistency lets one label appear in two node types
+    features: [GG24]
+    subclauses: ["12.6", "18.2", "4.13.2.7"]
+    productions: [nested graph type specification, node type pattern, property types specification]
+    mutating: true
+    # Structural consistency is the rule that all the element types matching a
+    # label agree. These two do not: one Person has a name and the other has an
+    # age. An engine enforcing the rule refuses this, which is a conformant
+    # answer and the reason the feature exists.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg24 {
+        (:Person {name :: STRING}),
+        (:Person {age :: INT})
+      }
+    expect:
+      kind: accept
+
+  - id: optional/gg25/two-edge-types-with-one-key-label
+    name: Relaxed key label uniqueness lets two edge types share a key label set
+    features: [GG25]
+    subclauses: ["12.6", "18.3", "4.13.2.4"]
+    productions: [edge type pattern pointing right, edge type key label set, arc type pointing right]
+    mutating: true
+    # The same key label on two edge types between different endpoints. Without
+    # the relaxation a key label set identifies exactly one edge type, and this
+    # statement asks the catalog to hold two of them under one key.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg25 {
+        (:Person)-[:KNOWS => :Close]->(:Person),
+        (:Person)-[:KNOWS => :Distant]->(:Company)
+      }
+    expect:
+      kind: accept
+
+  - id: optional/gg26/one-property-name-two-types
+    name: Relaxed property value type consistency lets one property name take two types
+    features: [GG26]
+    subclauses: ["12.6", "18.5", "18.6", "18.7", "4.13.2.5", "22.17"]
+    productions: [property types specification, property type, property value type]
+    mutating: true
+    # `code` is a string on one node type and an integer on the other. ISO's
+    # default is that a property name has one value type across the graph type,
+    # and 22.17 is the rule this statement asks the engine to relax.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg26 {
+        (:Person {code :: STRING}),
+        (:Company {code :: INT})
+      }
+    expect:
+      kind: accept

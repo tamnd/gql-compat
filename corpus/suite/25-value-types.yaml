@@ -1,0 +1,696 @@
+# The GV family: the value types an engine may support.
+#
+# Fifty-two of ISO's 228 optional features are value types, which is nearly a
+# quarter of the standard's optional surface and the largest single block of it.
+# They are optional one by one: an engine may have 64 bit signed integers and no
+# 8 bit ones, decimals and no 16 bit floats, lists and no records. So each has
+# its own case, and a corpus that tested "numbers" would be reporting one answer
+# where ISO asks twenty-six questions.
+#
+# A type is not a value, and a query language offers no way to ask an engine
+# what types it has. What it offers is two places a type name may be written, so
+# that is where these cases write one.
+#
+# Most use a cast. `CAST(127 AS INT8)` names the type and hands it a value at
+# the edge of what the type holds, so an engine that accepts the name and then
+# stores the value somewhere narrower disagrees with the case rather than
+# passing it. The cast specification is itself optional (GA05), so every such
+# case requires it: against an engine without casts these skip, and the skip is
+# recorded under GA05 where it belongs instead of being counted as an absent
+# type.
+#
+# The rest use the value type predicate (GA06), because a cast to a record, a
+# path or the null type is either meaningless or unwritable. Where ISO's answer
+# to the predicate is beyond argument the case asserts it — null is a value of
+# the null type, nothing at all is a value of the empty type. Where the answer
+# turns on whether the predicate reads the value or its static type, a question
+# this corpus has no standing to settle, the case asserts only that the engine
+# accepted the type name. That is weaker evidence and the report labels it as
+# accepted rather than as rows, which is the honest record of what was learned.
+#
+# Widths above 64 bits are named with small values. A case cannot assert the
+# largest INT128 because the harness compares against numbers written in YAML
+# and read into Go, and neither carries one. What the case establishes is that
+# the name is accepted and a value survives it, which is the part that can be
+# checked here; the width itself is between the engine and its documentation.
+
+defaults:
+  kind: optional
+  fixture: unit
+  tags: [read, value-type]
+
+cases:
+  # ------------------------------------------------ signed binary exact types
+
+  - id: optional/gv02/int8
+    name: INT8 is the 8 bit signed integer type
+    features: [GV02]
+    requires: [GA05]
+    subclauses: ["4.16.5.1", "4.16.5.3", "18.9", "20.8"]
+    productions: [signed binary exact numeric type, value type, cast specification]
+    query: |
+      RETURN CAST(127 AS INT8) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[127]]
+
+  - id: optional/gv04/int16
+    name: INT16 is the 16 bit signed integer type
+    features: [GV04]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [signed binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(32767 AS INT16) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[32767]]
+
+  - id: optional/gv07/int32
+    name: INT32 is the 32 bit signed integer type
+    features: [GV07]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [signed binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(2147483647 AS INT32) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[2147483647]]
+
+  - id: optional/gv12/int64
+    name: INT64 is the 64 bit signed integer type
+    features: [GV12]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [signed binary exact numeric type, cast specification]
+    # The largest signed 64 bit integer, which is also the largest number the
+    # report's JSON and this file's YAML can both carry without losing a digit.
+    query: |
+      RETURN CAST(9223372036854775807 AS INT64) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[9223372036854775807]]
+
+  - id: optional/gv14/int128
+    name: INT128 is the 128 bit signed integer type
+    features: [GV14]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [signed binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(1 AS INT128) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: optional/gv16/int256
+    name: INT256 is the 256 bit signed integer type
+    features: [GV16]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [signed binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(1 AS INT256) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: optional/gv18/smallint
+    name: SMALLINT is the small signed integer type
+    features: [GV18]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [signed binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(1 AS SMALLINT) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: optional/gv19/bigint
+    name: BIGINT is the big signed integer type
+    features: [GV19]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [signed binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(1 AS BIGINT) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: optional/gv09/specified-integer-precision
+    name: A signed integer type may name its precision
+    features: [GV09]
+    requires: [GA05]
+    subclauses: ["4.16.5.2", "4.16.5.3", "18.9", "20.8"]
+    productions: [signed binary exact numeric type, precision, cast specification]
+    # INT(9) is an integer of nine decimal digits, which holds 123456789 and
+    # is a different type from a plain INT. The value is chosen to use all nine.
+    query: |
+      RETURN CAST(123456789 AS INT(9)) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[123456789]]
+
+  # ---------------------------------------------- unsigned binary exact types
+
+  - id: optional/gv01/uint8
+    name: UINT8 is the 8 bit unsigned integer type
+    features: [GV01]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [unsigned binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(255 AS UINT8) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[255]]
+
+  - id: optional/gv03/uint16
+    name: UINT16 is the 16 bit unsigned integer type
+    features: [GV03]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [unsigned binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(65535 AS UINT16) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[65535]]
+
+  - id: optional/gv06/uint32
+    name: UINT32 is the 32 bit unsigned integer type
+    features: [GV06]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [unsigned binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(4294967295 AS UINT32) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[4294967295]]
+
+  - id: optional/gv11/uint64
+    name: UINT64 is the 64 bit unsigned integer type
+    features: [GV11]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [unsigned binary exact numeric type, cast specification]
+    # Not the largest UINT64: that is 18446744073709551615, which does not fit
+    # the signed 64 bit integer a JSON report reads back into.
+    query: |
+      RETURN CAST(4294967296 AS UINT64) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[4294967296]]
+
+  - id: optional/gv13/uint128
+    name: UINT128 is the 128 bit unsigned integer type
+    features: [GV13]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [unsigned binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(1 AS UINT128) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: optional/gv15/uint256
+    name: UINT256 is the 256 bit unsigned integer type
+    features: [GV15]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [unsigned binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(1 AS UINT256) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: optional/gv05/usmallint
+    name: USMALLINT is the small unsigned integer type
+    features: [GV05]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [unsigned binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(1 AS USMALLINT) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: optional/gv08/uint
+    name: UINT is the regular unsigned integer type
+    features: [GV08]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [unsigned binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(1 AS UINT) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: optional/gv10/ubigint
+    name: UBIGINT is the big unsigned integer type
+    features: [GV10]
+    requires: [GA05]
+    subclauses: ["4.16.5.3", "18.9", "20.8"]
+    productions: [unsigned binary exact numeric type, cast specification]
+    query: |
+      RETURN CAST(1 AS UBIGINT) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  # ------------------------------------------------------------ other numbers
+
+  - id: optional/gv17/decimal
+    name: DECIMAL is an exact number with a precision and a scale
+    features: [GV17]
+    requires: [GA05]
+    subclauses: ["4.16.5.4", "18.9", "20.8"]
+    productions: [decimal exact numeric type, precision, scale, cast specification]
+    # Two digits after the point, which 1.25 does not fit: the case asserts the
+    # value that survives a scale of 2, so an engine that ignored the scale and
+    # kept 1.25 disagrees.
+    query: |
+      RETURN CAST('1.20' AS DECIMAL(5, 2)) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1.20]]
+
+  - id: optional/gv20/float16
+    name: FLOAT16 is the 16 bit floating point type
+    features: [GV20]
+    requires: [GA05]
+    subclauses: ["4.16.5.5", "18.9", "20.8"]
+    productions: [approximate numeric type, cast specification]
+    # 0.5 is exact in every binary floating point width, so the comparison does
+    # not turn on how many bits the engine kept.
+    query: |
+      RETURN CAST(0.5 AS FLOAT16) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[0.5]]
+
+  - id: optional/gv21/float32
+    name: FLOAT32 is the 32 bit floating point type
+    features: [GV21]
+    requires: [GA05]
+    subclauses: ["4.16.5.5", "18.9", "20.8"]
+    productions: [approximate numeric type, cast specification]
+    query: |
+      RETURN CAST(0.5 AS FLOAT32) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[0.5]]
+
+  - id: optional/gv24/float64
+    name: FLOAT64 is the 64 bit floating point type
+    features: [GV24]
+    requires: [GA05]
+    subclauses: ["4.16.5.5", "18.9", "20.8"]
+    productions: [approximate numeric type, cast specification]
+    query: |
+      RETURN CAST(0.5 AS FLOAT64) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[0.5]]
+
+  - id: optional/gv25/float128
+    name: FLOAT128 is the 128 bit floating point type
+    features: [GV25]
+    requires: [GA05]
+    subclauses: ["4.16.5.5", "18.9", "20.8"]
+    productions: [approximate numeric type, cast specification]
+    query: |
+      RETURN CAST(0.5 AS FLOAT128) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[0.5]]
+
+  - id: optional/gv26/float256
+    name: FLOAT256 is the 256 bit floating point type
+    features: [GV26]
+    requires: [GA05]
+    subclauses: ["4.16.5.5", "18.9", "20.8"]
+    productions: [approximate numeric type, cast specification]
+    query: |
+      RETURN CAST(0.5 AS FLOAT256) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[0.5]]
+
+  - id: optional/gv22/specified-float-precision
+    name: A floating point type may name its precision
+    features: [GV22]
+    requires: [GA05]
+    subclauses: ["4.16.5.5", "18.9", "20.8"]
+    productions: [approximate numeric type, precision, cast specification]
+    query: |
+      RETURN CAST(0.5 AS FLOAT(10)) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[0.5]]
+
+  - id: optional/gv23/float-synonyms
+    name: REAL and DOUBLE PRECISION are floating point type names
+    features: [GV23]
+    requires: [GA05]
+    subclauses: ["4.12.4", "4.16.5.5", "18.9", "20.8"]
+    productions: [approximate numeric type, cast specification]
+    # Both synonyms in one statement, because the feature is the pair of names
+    # and an engine with one of them has implemented half of it.
+    query: |
+      RETURN CAST(0.5 AS REAL) AS a, CAST(0.5 AS DOUBLE PRECISION) AS b
+    expect:
+      kind: rows
+      columns: [a, b]
+      rows: [[0.5, 0.5]]
+
+  # ------------------------------------------------------------------ strings
+
+  - id: optional/gv31/string-maximum-length
+    name: A character string type may name a maximum length
+    features: [GV31]
+    requires: [GA05]
+    subclauses: ["4.16.3.1", "18.9", "20.8"]
+    productions: [character string type, max length, cast specification]
+    query: |
+      RETURN CAST('abc' AS STRING(10)) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["abc"]]
+
+  - id: optional/gv30/string-minimum-length
+    name: A character string type may name a minimum and a maximum length
+    features: [GV30]
+    requires: [GA05]
+    subclauses: ["4.16.3.1", "18.9", "20.8"]
+    productions: [character string type, min length, max length, cast specification]
+    query: |
+      RETURN CAST('abc' AS STRING(2, 10)) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["abc"]]
+
+  - id: optional/gv32/string-fixed-length
+    name: CHAR is the fixed length character string type
+    features: [GV32]
+    requires: [GA05]
+    subclauses: ["4.16.3.1", "18.9", "20.8"]
+    productions: [character string type, fixed length, cast specification]
+    # A fixed length type pads, so the answer is three characters and not one.
+    # An engine that returned 'a' has implemented VARCHAR under CHAR's name.
+    query: |
+      RETURN CAST('a' AS CHAR(3)) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["a  "]]
+
+  # -------------------------------------------------------------------- bytes
+
+  - id: optional/gv35/byte-string
+    name: BYTES is the byte string type
+    features: [GV35]
+    requires: [GA06]
+    subclauses: ["4.16.4", "18.9", "19.6"]
+    productions: [byte string type, value type predicate]
+    # There is no portable byte string literal to cast, so the type name is
+    # written where a type name is all that is needed. An integer is not a byte
+    # string under any reading of the predicate.
+    query: |
+      RETURN (1 IS TYPED BYTES) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  - id: optional/gv37/byte-string-maximum-length
+    name: A byte string type may name a maximum length
+    features: [GV37]
+    requires: [GA06]
+    subclauses: ["4.16.4", "18.9", "19.6"]
+    productions: [byte string type, max length, value type predicate]
+    query: |
+      RETURN (1 IS TYPED BYTES(10)) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  - id: optional/gv36/byte-string-minimum-length
+    name: A byte string type may name a minimum and a maximum length
+    features: [GV36]
+    requires: [GA06]
+    subclauses: ["4.16.4", "18.9", "19.6"]
+    productions: [byte string type, min length, max length, value type predicate]
+    query: |
+      RETURN (1 IS TYPED BYTES(2, 10)) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  - id: optional/gv38/byte-string-fixed-length
+    name: BINARY is the fixed length byte string type
+    features: [GV38]
+    requires: [GA06]
+    subclauses: ["4.16.4", "18.9", "19.6"]
+    productions: [byte string type, fixed length, value type predicate]
+    query: |
+      RETURN (1 IS TYPED BINARY(4)) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  # ----------------------------------------------------------------- temporal
+
+  - id: optional/gv40/zoned-temporal-types
+    name: ZONED DATETIME and ZONED TIME are the temporal types that carry a zone
+    features: [GV40]
+    requires: [GA06]
+    subclauses: ["4.16.6.1", "18.9", "19.6"]
+    productions: [datetime type, time type, value type predicate]
+    tags: [read, value-type, temporal]
+    # GV39 covers the local temporal types and has its own case over a literal.
+    # This one is written as a predicate because a zoned literal needs the
+    # engine to have a zone, which is session state and not a type.
+    query: |
+      RETURN (1 IS TYPED ZONED DATETIME) AS a, (1 IS TYPED ZONED TIME) AS b
+    expect:
+      kind: rows
+      columns: [a, b]
+      rows: [[false, false]]
+
+  # -------------------------------------------------------- constructed types
+
+  - id: optional/gv55/path-value-type
+    name: PATH is the path value type
+    features: [GV55]
+    requires: [GA06]
+    subclauses: ["4.15.1", "4.15.2", "18.9", "19.6"]
+    productions: [path value type, constructed value type, value type predicate]
+    query: |
+      RETURN (1 IS TYPED PATH) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  - id: optional/gv45/record-type
+    name: RECORD is the record type
+    features: [GV45, GV47]
+    requires: [GA06]
+    subclauses: ["4.12.7", "4.15.4", "18.9", "19.6"]
+    productions: [record type, constructed value type, value type predicate]
+    # ANY RECORD is the open record type, which is GV47: a record type that
+    # names no fields admits records with any fields at all. An integer is not
+    # one of them.
+    query: |
+      RETURN (1 IS TYPED ANY RECORD) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  - id: optional/gv46/closed-record-type
+    name: A record type that lists its fields is a closed record type
+    features: [GV46]
+    requires: [GA06]
+    subclauses: ["4.12.7", "18.9", "18.10", "19.6"]
+    productions: [record type, field types specification, field type list, field type]
+    query: |
+      RETURN (1 IS TYPED RECORD { a :: INT }) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  - id: optional/gv48/nested-record-type
+    name: A record type may name a record as the type of one of its fields
+    features: [GV48]
+    requires: [GA06]
+    subclauses: ["4.12.2", "18.9", "18.10", "19.6"]
+    productions: [record type, field types specification, field type]
+    query: |
+      RETURN (1 IS TYPED RECORD { a :: RECORD { b :: INT } }) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  # ----------------------------------------------------------- reference types
+
+  - id: optional/gv60/graph-reference-type
+    name: ANY GRAPH is the open graph reference value type
+    features: [GV60]
+    requires: [GA06]
+    subclauses: ["4.4.4", "4.16.7", "18.9", "19.6"]
+    productions: [graph reference value type, open graph reference value type, value type predicate]
+    query: |
+      RETURN (1 IS TYPED ANY GRAPH) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  - id: optional/gv61/binding-table-reference-type
+    name: BINDING TABLE is the binding table reference value type
+    features: [GV61]
+    requires: [GA06]
+    subclauses: ["4.13.3", "18.8", "18.9", "19.6"]
+    productions: [binding table reference value type, binding table type, value type predicate]
+    query: |
+      RETURN (1 IS TYPED BINDING TABLE) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  # ------------------------------------------------------------- union types
+
+  - id: optional/gv66/open-dynamic-union
+    name: ANY VALUE is the open dynamic union type, which every value belongs to
+    features: [GV65, GV66]
+    requires: [GA06]
+    subclauses: ["4.14.1", "4.14.3", "18.9", "19.6"]
+    productions: [open dynamic union type, dynamic union type, value type predicate]
+    # This one has an answer no reading of the predicate can disagree with: the
+    # open dynamic union is the type of every value there is.
+    query: |
+      RETURN (1 IS TYPED ANY VALUE) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv67/closed-dynamic-union
+    name: A list of types separated by vertical bars is a closed dynamic union type
+    features: [GV67]
+    requires: [GA06]
+    subclauses: ["4.14.3", "18.9", "19.6"]
+    productions: [closed dynamic union type, component type list, value type predicate]
+    # Whether an integer belongs to INT|STRING depends on whether the predicate
+    # reads the value or the value's declared type, and ISO's answer to that is
+    # not something this corpus can settle from the outside. So the case asserts
+    # only that the engine took the syntax, which is what it can establish.
+    query: |
+      RETURN (1 IS TYPED INT | STRING) AS v
+    expect:
+      kind: accept
+
+  - id: optional/gv68/dynamic-property-value-type
+    name: ANY PROPERTY VALUE is the type of everything a property may hold
+    features: [GV68]
+    requires: [GA06]
+    subclauses: ["4.14.2", "18.9", "19.6"]
+    productions: [dynamic property value type, value type predicate]
+    query: |
+      RETURN (1 IS TYPED ANY PROPERTY VALUE) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  # ------------------------------------------------------- immaterial types
+
+  - id: optional/gv71/null-type
+    name: NULL is the null type, whose only value is the null value
+    features: [GV70, GV71]
+    requires: [GA06]
+    subclauses: ["4.12.5", "4.16.8", "18.9", "19.6"]
+    productions: [null type, immaterial value type, value type predicate]
+    tags: [read, value-type, "null"]
+    query: |
+      RETURN (NULL IS TYPED NULL) AS a, (1 IS TYPED NULL) AS b
+    expect:
+      kind: rows
+      columns: [a, b]
+      rows: [[true, false]]
+
+  - id: optional/gv72/empty-type
+    name: NOTHING is the empty type, which no value belongs to
+    features: [GV72]
+    requires: [GA06]
+    subclauses: ["4.12.5", "4.16.8", "18.9", "19.6"]
+    productions: [empty type, immaterial value type, value type predicate]
+    tags: [read, value-type, "null"]
+    # Both answers are false and that is the whole point of the type: the empty
+    # type is the one with no values, so not even the null value is of it.
+    query: |
+      RETURN (1 IS TYPED NOTHING) AS a, (NULL IS TYPED NOTHING) AS b
+    expect:
+      kind: rows
+      columns: [a, b]
+      rows: [[false, false]]
+
+  - id: optional/gv90/explicit-nullability
+    name: NOT NULL on a value type makes the type material
+    features: [GV90]
+    requires: [GA06]
+    subclauses: ["4.17.4", "4.17.4.1", "4.17.4.2", "18.9", "19.6"]
+    productions: [value type, not null, value type predicate]
+    tags: [read, value-type, "null"]
+    # The null value is of type INT under ISO's nullable-by-default reading and
+    # is not of type INT NOT NULL under any reading, so the pair separates an
+    # engine that parsed the nullability from one that discarded it.
+    query: |
+      RETURN (NULL IS TYPED INT NOT NULL) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
