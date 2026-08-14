@@ -163,6 +163,41 @@ probes:
     statement: RETURN 'héllo ☃' AS v
     read: answer
 
+  - id: impdef/iv002/durations-of-two-kinds
+    item: IV002
+    kind: implementation-defined
+    question: >-
+      Whether one month is less than thirty days, which is a comparison
+      between two durations that no arithmetic settles because no number of
+      days is a month.
+    fixture: unit
+    statement: RETURN DURATION 'P1M' < DURATION 'P30D' AS v
+    read: cell
+    note: >-
+      Both operands are durations, so this is an inequality between two
+      essentially comparable values that ISO does not otherwise specify. A true
+      and a false are both choices and so is a null, which is what an engine
+      answers when it orders the two kinds apart rather than against each
+      other.
+
+  - id: impdef/iv010/comparing-two-types
+    item: IV010
+    kind: implementation-defined
+    question: >-
+      Whether a number is less than a string, which is the order this engine
+      puts two types in when a comparison meets both.
+    fixture: unit
+    statement: RETURN 1 < 'a' AS v
+    read: cell
+    note: >-
+      Universal comparison is optional feature GA04, and an engine without it
+      raises 22G04 here rather than answering, which the corpus already has a
+      condition case for. This probe is for the engines that do answer: the
+      standard gives every one of them the whole choice of what the answer is,
+      so the observation is a fact about the engine and never a defect. The
+      order a sort key uses is the same question asked a second way and ID022
+      and IS001 report the parts of it that ISO does name.
+
   - id: impdef/iv023/truncating-whitespace
     item: IV023
     kind: implementation-defined
