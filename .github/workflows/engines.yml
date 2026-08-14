@@ -26,8 +26,8 @@ on:
         description: "Timed executions per case"
         default: "7"
       neo4j_version:
-        description: "Neo4j image tag"
-        default: "5-community"
+        description: "Neo4j image tag; needs a release that speaks Cypher 25"
+        default: "2026.07-community"
       ladybug_version:
         description: "Ladybug release to download"
         default: "0.19.1"
@@ -43,10 +43,17 @@ jobs:
     runs-on: ubuntu-latest
     services:
       neo4j:
-        image: neo4j:${{ github.event.inputs.neo4j_version || '5-community' }}
+        image: neo4j:${{ github.event.inputs.neo4j_version || '2026.07-community' }}
         env:
           NEO4J_AUTH: neo4j/gqlcompatci
           NEO4J_server_memory_pagecache_size: 512M
+          # The database has to parse Cypher 25. Cypher 5 predates the GQL
+          # alignment and answers a large part of the corpus with a syntax
+          # error, which would make this job a measurement of the language
+          # version rather than of the engine, and the adapter refuses to run
+          # against it. The tag above has to be a release that has Cypher 25 in
+          # it; the 5 series does not.
+          NEO4J_db_query_default__language: CYPHER_25
         ports:
           - 7687:7687
           - 7474:7474
