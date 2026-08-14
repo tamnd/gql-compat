@@ -157,7 +157,7 @@ Every case, not just the performance ones, carries a full measurement:
 | Adapter | Engine | How |
 |---|---|---|
 | `zu` | [tamnd/zu](https://github.com/tamnd/zu) | subprocess, embedded store |
-| `neo4j` | Neo4j 5+ | Bolt, `neo4j-go-driver/v6` |
+| `neo4j` | Neo4j, a release that speaks Cypher 25 | Bolt, `neo4j-go-driver/v6` |
 | `ladybug` | Ladybug / Kùzu-lineage | subprocess |
 | `fake` | scriptable in-process engine | for testing the harness itself |
 
@@ -221,6 +221,43 @@ gql-compat run -adapter neo4j -uri bolt://localhost:7687 -user neo4j \
 Exit status: `0` clean, `1` the engine failed cases the run was set to fail on
 (`-fail-on mandatory` by default, because declining an optional feature is
 lawful), `2` a usage error.
+
+### A Neo4j to measure
+
+Two things about the server matter to the result. It has to parse Cypher 25,
+because Cypher 5 predates the GQL alignment and answers a large part of the
+corpus with a syntax error, and the adapter aborts rather than record a run
+that measures the language version instead of the engine. And it should be a
+server you are willing to throw away, because the corpus creates and drops
+graphs and writes fixtures into the database it is pointed at.
+
+```sh
+# a store that exists only for this run, on a port nothing else is using
+export NEO4J_HOME=/tmp/gql-compat-neo4j NEO4J_CONF=$NEO4J_HOME/conf
+mkdir -p "$NEO4J_CONF" "$NEO4J_HOME"/{data,logs,run,import,plugins,licenses}
+cat > "$NEO4J_CONF/neo4j.conf" <<CONF
+server.directories.data=$NEO4J_HOME/data
+server.directories.logs=$NEO4J_HOME/logs
+server.directories.run=$NEO4J_HOME/run
+server.directories.transaction.logs.root=$NEO4J_HOME/data/transactions
+server.bolt.listen_address=127.0.0.1:7688
+server.http.enabled=false
+db.query.default_language=CYPHER_25
+CONF
+cp "$(dirname "$(readlink -f "$(command -v neo4j)")")"/../conf/*.xml "$NEO4J_CONF/"
+
+neo4j-admin dbms set-initial-password "$PW"   # before the first start, or it is ignored
+neo4j console &
+
+GQL_COMPAT_PASSWORD=$PW gql-compat run -adapter neo4j \
+    -uri bolt://127.0.0.1:7688 -user neo4j -fail-on none -out ./reports
+```
+
+An existing database that already has a default language can be moved with
+`ALTER DATABASE neo4j SET DEFAULT LANGUAGE CYPHER 25`, and
+`GQL_COMPAT_NEO4J_ANY_LANGUAGE=1` measures an older language on purpose. The
+password is read from the environment and there is a `-password` flag only
+because some setups have nowhere else to put it.
 
 ## Use as a library
 
