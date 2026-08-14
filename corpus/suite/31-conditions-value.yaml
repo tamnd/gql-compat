@@ -211,6 +211,24 @@ cases:
       gqlstatus: "22G0C"
       also_gqlstatus: ["22018"]
 
+  - id: condition/22g03/cast-between-unrelated-types
+    name: Casting a number to a date raises invalid value type
+    conditions: ["22G03"]
+    subclauses: ["18.9", "20.8"]
+    productions: [cast specification, cast target, temporal type]
+    requires: [GA05, GV39]
+    # There is no rule in ISO that reads a number as an instant, because a
+    # number is not one until something says which epoch and which unit it
+    # counts. The pair is forbidden rather than badly spelled, which is what
+    # separates this from the 22018 a string that is not a date raises.
+    query: |
+      RETURN CAST(1 AS DATE) AS v
+    parses: |
+      RETURN CAST('2024-01-15' AS DATE) AS v
+    expect:
+      kind: error
+      gqlstatus: "22G03"
+
   - id: condition/22g04/comparing-a-number-with-a-string
     name: Comparing values of unrelated types raises values not comparable
     conditions: ["22G04"]
