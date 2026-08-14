@@ -453,6 +453,54 @@ cases:
       columns: [note]
       rows: [[null], [present]]
 
+  - id: optional/ga03/nulls-last
+    name: NULLS LAST puts the null values at the tail of an ordered result
+    features: [GA03]
+    subclauses: ["16.17"]
+    productions: [null ordering, sort specification]
+    fixture: ranked
+    tags: [ordered, "null"]
+    query: |
+      MATCH (i:Item)
+      RETURN i.rank AS rank, i.name AS name
+      ORDER BY rank NULLS LAST, name
+    expect:
+      kind: rows
+      columns: [rank, name]
+      rows: [[1, c], [2, e], [3, a], [null, b], [null, d]]
+
+  - id: optional/ga03/nulls-first-among-values
+    name: A null ordering places the nulls and leaves the values to the direction
+    features: [GA03]
+    subclauses: ["16.17"]
+    productions: [null ordering, sort specification]
+    fixture: ranked
+    tags: [ordered, "null"]
+    query: |
+      MATCH (i:Item)
+      RETURN i.rank AS rank, i.name AS name
+      ORDER BY rank NULLS FIRST, name
+    expect:
+      kind: rows
+      columns: [rank, name]
+      rows: [[null, b], [null, d], [1, c], [2, e], [3, a]]
+
+  - id: optional/ga03/desc-nulls-first
+    name: A descending key with NULLS FIRST still leads with its nulls
+    features: [GA03]
+    subclauses: ["16.17"]
+    productions: [null ordering, sort specification, ordering specification]
+    fixture: ranked
+    tags: [ordered, "null"]
+    query: |
+      MATCH (i:Item)
+      RETURN i.rank AS rank, i.name AS name
+      ORDER BY rank DESC NULLS FIRST, name
+    expect:
+      kind: rows
+      columns: [rank, name]
+      rows: [[null, b], [null, d], [3, a], [2, e], [1, c]]
+
   - id: optional/ga07/order-by-discarded-variable
     name: A sort key may read a value the projection discards
     features: [GA07]

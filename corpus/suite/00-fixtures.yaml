@@ -117,6 +117,19 @@ fixtures:
       - {key: p1, labels: [Maybe], props: {id: 1, note: present}}
       - {key: p2, labels: [Maybe], props: {id: 2, note: null}}
 
+  - name: ranked
+    description: >-
+      Five nodes whose sort key is missing on two of them. A null ordering
+      case needs values on both sides of the nulls and a second key that
+      never ties, or a result that looks right could be the input order
+      showing through instead of the order the query asked for.
+    nodes:
+      - {key: r1, labels: [Item], props: {name: a, rank: 3}}
+      - {key: r2, labels: [Item], props: {name: b, rank: null}}
+      - {key: r3, labels: [Item], props: {name: c, rank: 1}}
+      - {key: r4, labels: [Item], props: {name: d, rank: null}}
+      - {key: r5, labels: [Item], props: {name: e, rank: 2}}
+
   - name: listed
     description: A node whose property is a list, for list value cases.
     nodes:
