@@ -182,6 +182,70 @@ cases:
       columns: [v]
       rows: [["42"]]
 
+  - id: optional/ga05/cast-string-to-date
+    name: CAST reads a character string as a date
+    features: [GA05]
+    requires: [GV39]
+    subclauses: ["20.8", "21.2"]
+    productions: [cast specification, cast target, temporal type]
+    tags: [temporal]
+    # The value is compared with the literal of the same type rather than
+    # returned, because a returned date crosses the driver boundary as whatever
+    # that driver calls a date and the corpus would be asserting the driver.
+    query: |
+      RETURN CAST('2024-01-15' AS DATE) = DATE '2024-01-15' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/ga05/cast-datetime-to-date
+    name: CAST of a datetime to a date keeps the day and drops the time
+    features: [GA05]
+    requires: [GV39]
+    subclauses: ["20.8", "21.2"]
+    productions: [cast specification, cast target, temporal type]
+    tags: [temporal]
+    # A quarter to two in the afternoon is the same day as midnight, so the
+    # cast that truncates agrees with the date literal and the one that rounds
+    # to the nearest day does not.
+    query: |
+      RETURN CAST(LOCAL DATETIME '2024-01-15T13:45:00' AS DATE) = DATE '2024-01-15' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/ga05/cast-date-to-datetime
+    name: CAST of a date to a datetime fills the time of day with midnight
+    features: [GA05]
+    requires: [GV39]
+    subclauses: ["20.8", "21.2"]
+    productions: [cast specification, cast target, temporal type]
+    tags: [temporal]
+    query: |
+      RETURN CAST(DATE '2024-01-15' AS LOCAL DATETIME) = LOCAL DATETIME '2024-01-15T00:00:00' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/ga05/cast-date-to-string
+    name: CAST of a date to a character string writes it the way a date is written
+    features: [GA05]
+    requires: [GV39]
+    subclauses: ["20.8", "21.2"]
+    productions: [cast specification, character string type]
+    tags: [temporal]
+    # The one temporal case whose result is a string, which is what makes it
+    # comparable across drivers without asking any of them what a date is.
+    query: |
+      RETURN CAST(DATE '2024-01-15' AS STRING) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["2024-01-15"]]
+
   - id: optional/ga06/value-type-predicate
     name: A value type predicate tests a value against a type
     features: [GA06]
