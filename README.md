@@ -183,7 +183,7 @@ into an engine that will then fail cases about the missing half.
 go install github.com/tamnd/gql-compat/cmd/gql-compat@latest
 ```
 
-Go 1.26.5. The corpus and the ISO artifacts are embedded in the binary, so a
+Go 1.26.5 or newer, and CI builds on 1.26.6, which is where three standard library advisories are fixed. The corpus and the ISO artifacts are embedded in the binary, so a
 report produced by a vendored copy is comparable to one produced by the CLI.
 
 ## Use as a CLI
