@@ -168,3 +168,43 @@ func TestAListZuCannotHoldIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// A node that leaves a property out and a node that sets it to null both stage
+// as SQL NULL, and neither one gets a say in what type the column is declared.
+func TestAMissingOrNullPropertyStagesAsNull(t *testing.T) {
+	fx := &fixture.Fixture{
+		Name: "nulls",
+		Nodes: []fixture.Node{
+			{Key: "a", Labels: []string{"P"}, Props: map[string]any{"age": 30, "name": "a"}},
+			{Key: "b", Labels: []string{"P"}, Props: map[string]any{"name": "b"}},
+			{Key: "c", Labels: []string{"P"}, Props: map[string]any{"age": nil, "name": "c"}},
+		},
+	}
+	plan, err := planFixture(fx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nt := plan.nodeTables[0]
+	// Column order is sorted, so age is first and name is second.
+	if nt.types[0] != "INTEGER" {
+		t.Errorf("age is declared %s, want INTEGER from the one row that holds a value", nt.types[0])
+	}
+	for _, row := range []int{1, 2} {
+		if got := nt.rows[row][0]; got != nil {
+			t.Errorf("age on node %s staged as %v, want a null", fx.Nodes[row].Key, got)
+		}
+	}
+	if got := nt.rows[0][0]; got != 30 {
+		t.Errorf("age on node a staged as %v, want 30", got)
+	}
+
+	// A column with a value on no row names no type, and declaring one would
+	// answer every case against it about a graph nobody described.
+	for i := range fx.Nodes {
+		delete(fx.Nodes[i].Props, "age")
+	}
+	fx.Nodes[0].Props["age"] = nil
+	if _, err := planFixture(fx); err == nil {
+		t.Error("planned a column that is null on every row, which names no type")
+	}
+}

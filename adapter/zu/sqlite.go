@@ -41,9 +41,12 @@ const (
 // per node, integer, string, float, boolean and temporal node properties, and
 // typed directed edges including self-loops and parallel pairs. Edge
 // properties do not, since zu's converter reads only the endpoints of a rel
-// table, and neither do nulls, which its property loader refuses outright. A
-// list does cross, as a JSON array in a text column whose declared type names
-// the element type, which is the shape zu's converter reads one back from.
+// table. A null does cross, as a SQL NULL in a column whose declared type
+// comes from the rows that hold a value, which is the shape zu's converter
+// reads a column's validity words back from; a column that is null on every
+// row names no type and is refused. A list does cross, as a JSON array in a
+// text column whose declared type names the element type, which is the shape
+// zu's converter reads one back from.
 // Nothing here works around any of that; a fixture needing it is filtered by
 // Capabilities before Load is ever called.
 func writeFixtureDB(ctx context.Context, path string, fx *fixture.Fixture) error {
@@ -263,10 +266,13 @@ func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, 
 		}
 		kind := ""
 		for _, i := range idx {
-			v, ok := nodes[i].Props[name]
-			if !ok {
-				return nil, fmt.Errorf("node %q has no property %q; zu1 property columns are dense",
-					nodes[i].Key, name)
+			// A node without the property and a node whose property is
+			// null are the same thing here: the row holds no value, the
+			// column says so in its validity words, and neither row has
+			// a type to contribute to the declaration.
+			v := nodes[i].Props[name]
+			if v == nil {
+				continue
 			}
 			k, err := columnKind(v)
 			if err != nil {
@@ -296,6 +302,10 @@ func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, 
 		}
 		if kind == anyList {
 			return nil, fmt.Errorf("property %q is an empty list on every node, which names no element type",
+				name)
+		}
+		if kind == "" {
+			return nil, fmt.Errorf("property %q is null on every node, which names no type for its column",
 				name)
 		}
 		t.types = append(t.types, kind)
