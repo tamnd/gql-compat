@@ -37,12 +37,12 @@ const (
 // and opens such a file read-only, which is all a conversion needs.
 //
 // What survives the conversion is what the capability set declares: one label
-// per node, integer and string node properties, and typed directed edges
-// including self-loops and parallel pairs. Edge properties do not — zu's
-// converter reads only the endpoints of a rel table — and neither do doubles,
-// booleans, nulls, lists or temporals, which its property loader refuses
-// outright. Nothing here works around any of that; a fixture needing it is
-// filtered by Capabilities before Load is ever called.
+// per node, integer, string, float, boolean and temporal node properties, and
+// typed directed edges including self-loops and parallel pairs. Edge
+// properties do not — zu's converter reads only the endpoints of a rel table —
+// and neither do nulls or lists, which its property loader refuses outright.
+// Nothing here works around any of that; a fixture needing it is filtered by
+// Capabilities before Load is ever called.
 func writeFixtureDB(ctx context.Context, path string, fx *fixture.Fixture) error {
 	plan, err := planFixture(fx)
 	if err != nil {
@@ -281,7 +281,17 @@ func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, 
 	for _, i := range idx {
 		row := make([]any, len(t.cols))
 		for c, name := range t.cols {
-			row[c] = nodes[i].Props[name]
+			v := nodes[i].Props[name]
+			// A temporal value becomes its count here, where the column
+			// type it was checked against is still in hand.
+			if tv, ok := fixture.AsTemporal(v); ok {
+				count, err := temporalCount(tv)
+				if err != nil {
+					return nil, fmt.Errorf("property %q on node %q: %w", name, nodes[i].Key, err)
+				}
+				v = count
+			}
+			row[c] = v
 		}
 		t.rows = append(t.rows, row)
 	}
@@ -296,8 +306,14 @@ func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, 
 // carries it: an integer, a double and a byte string are each their own class.
 // A boolean is not, because SQLite has no such class and stores one as the
 // integers 0 and 1, so BOOLEAN is what tells the converter the column was meant
-// as truth values rather than a count that happens to be small.
+// as truth values rather than a count that happens to be small. A date and a
+// duration are the same problem again and are told apart the same way: each is
+// a count stored as an integer, and the declared type is the only place that
+// says which count it is.
 func columnKind(v any) (string, error) {
+	if t, ok := fixture.AsTemporal(v); ok {
+		return temporalKind(t)
+	}
 	switch v.(type) {
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return "INTEGER", nil
@@ -313,6 +329,82 @@ func columnKind(v any) (string, error) {
 		return "", fmt.Errorf("value %v of type %T is not a scalar a zu1 property column can hold", v, v)
 	}
 }
+
+// temporalKind is the declared type of a column holding t, and the place the
+// two zoned kinds are refused.
+//
+// zu's property lanes carry a count and nothing beside it, so a zoned value
+// has nowhere to keep its offset. Storing one as though it were local would
+// load a different value than the fixture wrote and then answer cases about
+// it, which is the failure worth avoiding here.
+func temporalKind(t fixture.Temporal) (string, error) {
+	switch t.Kind {
+	case fixture.KindDate:
+		return "DATE", nil
+	case fixture.KindLocalTime:
+		return "LOCALTIME", nil
+	case fixture.KindLocalDateTime:
+		return "LOCALDATETIME", nil
+	case fixture.KindDuration:
+		d, err := t.Duration()
+		if err != nil {
+			return "", err
+		}
+		if d.Months != 0 {
+			if d.Days != 0 || d.Seconds != 0 || d.Nanos != 0 {
+				return "", fmt.Errorf("duration %q mixes months with days and seconds; "+
+					"the two unit groups are two types and a zu1 column holds one", t.Literal)
+			}
+			return "YEARMONTHDURATION", nil
+		}
+		return "DURATION", nil
+	default:
+		return "", fmt.Errorf("a %s carries a zone and a zu1 property column carries a count", t.Kind)
+	}
+}
+
+// temporalCount is the integer a temporal value is stored as, in the unit its
+// declared type names: days for a date, nanoseconds for a time, a datetime and
+// a day-time duration, and months for a year-month one.
+func temporalCount(t fixture.Temporal) (int64, error) {
+	if t.Kind == fixture.KindDuration {
+		d, err := t.Duration()
+		if err != nil {
+			return 0, err
+		}
+		if d.Months != 0 {
+			return int64(d.Months), nil
+		}
+		return (int64(d.Days)*secondsPerDay+d.Seconds)*nanosPerSecond + int64(d.Nanos), nil
+	}
+	when, err := t.Time()
+	if err != nil {
+		return 0, err
+	}
+	switch t.Kind {
+	case fixture.KindDate:
+		// A date is a whole number of days and Go's division truncates
+		// towards zero, so a date before the epoch has to floor instead.
+		secs := when.Unix()
+		days := secs / secondsPerDay
+		if secs%secondsPerDay != 0 && secs < 0 {
+			days--
+		}
+		return days, nil
+	case fixture.KindLocalTime:
+		h, m, sec := when.Clock()
+		return (int64(h)*3600+int64(m)*60+int64(sec))*nanosPerSecond + int64(when.Nanosecond()), nil
+	case fixture.KindLocalDateTime:
+		return when.UnixNano(), nil
+	default:
+		return 0, fmt.Errorf("a %s carries a zone and a zu1 property column carries a count", t.Kind)
+	}
+}
+
+const (
+	secondsPerDay  = 24 * 60 * 60
+	nanosPerSecond = 1000 * 1000 * 1000
+)
 
 func (t *nodeTable) create(ctx context.Context, tx *sql.Tx) error {
 	var b strings.Builder
