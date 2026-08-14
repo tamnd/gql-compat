@@ -3,6 +3,7 @@ package zu
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -39,8 +40,10 @@ const (
 // What survives the conversion is what the capability set declares: one label
 // per node, integer, string, float, boolean and temporal node properties, and
 // typed directed edges including self-loops and parallel pairs. Edge
-// properties do not — zu's converter reads only the endpoints of a rel table —
-// and neither do nulls or lists, which its property loader refuses outright.
+// properties do not, since zu's converter reads only the endpoints of a rel
+// table, and neither do nulls, which its property loader refuses outright. A
+// list does cross, as a JSON array in a text column whose declared type names
+// the element type, which is the shape zu's converter reads one back from.
 // Nothing here works around any of that; a fixture needing it is filtered by
 // Capabilities before Load is ever called.
 func writeFixtureDB(ctx context.Context, path string, fx *fixture.Fixture) error {
@@ -269,11 +272,31 @@ func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, 
 			if err != nil {
 				return nil, fmt.Errorf("property %q on node %q: %w", name, nodes[i].Key, err)
 			}
+			// An empty list names no element type, so it takes the one
+			// the rest of the column has. A column of nothing but empty
+			// lists has none to take and is refused below. An empty list
+			// beside a scalar is still a mismatch and falls through to
+			// the check under this one.
+			if k == anyList && isListKind(kind) {
+				continue
+			}
+			if kind == anyList && isListKind(k) {
+				kind = k
+				continue
+			}
+			if kind == "" && k == anyList {
+				kind = anyList
+				continue
+			}
 			if kind != "" && kind != k {
 				return nil, fmt.Errorf("property %q is %s on some nodes and %s on others; a zu1 column is one type",
 					name, kind, k)
 			}
 			kind = k
+		}
+		if kind == anyList {
+			return nil, fmt.Errorf("property %q is an empty list on every node, which names no element type",
+				name)
 		}
 		t.types = append(t.types, kind)
 	}
@@ -290,6 +313,16 @@ func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, 
 					return nil, fmt.Errorf("property %q on node %q: %w", name, nodes[i].Key, err)
 				}
 				v = count
+			}
+			// A list becomes the text its column holds here, for the
+			// same reason: this is where the column type it was checked
+			// against is still in hand.
+			if lv, ok := v.([]any); ok {
+				text, err := listText(lv)
+				if err != nil {
+					return nil, fmt.Errorf("property %q on node %q: %w", name, nodes[i].Key, err)
+				}
+				v = text
 			}
 			row[c] = v
 		}
@@ -314,7 +347,7 @@ func columnKind(v any) (string, error) {
 	if t, ok := fixture.AsTemporal(v); ok {
 		return temporalKind(t)
 	}
-	switch v.(type) {
+	switch vv := v.(type) {
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return "INTEGER", nil
 	case float32, float64:
@@ -325,9 +358,65 @@ func columnKind(v any) (string, error) {
 		return "TEXT", nil
 	case []byte:
 		return "BLOB", nil
+	case []any:
+		return listKind(vv)
 	default:
 		return "", fmt.Errorf("value %v of type %T is not a scalar a zu1 property column can hold", v, v)
 	}
+}
+
+// anyList is the kind an empty list reports, which names a list whose element
+// type is not decided yet. A column of them and nothing else has no
+// declaration to make and is refused; a column that also holds a list with
+// something in it takes the element type from that one.
+const anyList = "LIST"
+
+// isListKind says whether a declared column type holds lists, which is how an
+// empty list is told apart from a value that merely has no type yet.
+func isListKind(kind string) bool {
+	return strings.HasSuffix(kind, anyList)
+}
+
+// listKind is the declared type of a column holding v.
+//
+// A zu1 list column holds one element type, and the declaration is the only
+// place it is written down, so the elements are checked to agree here. Lists
+// of lists are refused: zu's row format holds a count and then words or length
+// prefixed bytes, which has no room for a list inside a list.
+func listKind(v []any) (string, error) {
+	kind := anyList
+	for _, e := range v {
+		var k string
+		switch e.(type) {
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			k = "INTEGERLIST"
+		case float32, float64:
+			k = "REALLIST"
+		case bool:
+			k = "BOOLEANLIST"
+		case string:
+			k = "TEXTLIST"
+		default:
+			return "", fmt.Errorf("list element %v of type %T is not one a zu1 list column holds", e, e)
+		}
+		if kind != anyList && kind != k {
+			return "", fmt.Errorf("a list holds %s and %s; a zu1 list column holds one element type",
+				kind, k)
+		}
+		kind = k
+	}
+	return kind, nil
+}
+
+// listText is the JSON array a staged list column holds, which is how a list
+// crosses SQLite. The element types are the four Go kinds listKind admits, so
+// the marshalling has nothing to decide.
+func listText(v []any) (string, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "", fmt.Errorf("a list property has no JSON form: %w", err)
+	}
+	return string(raw), nil
 }
 
 // temporalKind is the declared type of a column holding t, and the place the

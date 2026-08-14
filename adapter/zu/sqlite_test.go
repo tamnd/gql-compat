@@ -90,3 +90,81 @@ func TestThePlannerBindsEachRelTableToItsOwnNodeTable(t *testing.T) {
 		t.Error("planned an edge that crosses labels; zu binds a rel table to one node table")
 	}
 }
+
+// A list property crosses SQLite as a JSON array in a column declared with its
+// element type, because that is the only place the element type is written
+// down: SQLite's storage classes have nothing for a list, so a TEXT column
+// holding `[1,2,3]` and one holding the string "[1,2,3]" are the same bytes and
+// the declaration is what tells them apart. The empty list is the interesting
+// case in both directions. It names no element type, so it takes the one the
+// rest of the column has, and a column with nothing but empty lists in it has
+// none to take.
+func TestAListColumnIsDeclaredWithItsElementType(t *testing.T) {
+	fx := &fixture.Fixture{
+		Name: "lists",
+		Nodes: []fixture.Node{
+			{Key: "a", Labels: []string{"P"}, Props: map[string]any{
+				"xs": []any{1, 2, 3}, "tags": []any{"one", `a "quoted" one`},
+			}},
+			{Key: "b", Labels: []string{"P"}, Props: map[string]any{
+				"xs": []any{}, "tags": []any{},
+			}},
+		},
+	}
+	plan, err := planFixture(fx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nt := plan.nodeTables[0]
+	want := map[string]string{"tags": "TEXTLIST", "xs": "INTEGERLIST"}
+	for i, name := range nt.cols {
+		if nt.types[i] != want[name] {
+			t.Errorf("column %s is declared %s, want %s", name, nt.types[i], want[name])
+		}
+	}
+	// Column order is sorted, so tags is first and xs is second.
+	if got := nt.rows[0][1]; got != "[1,2,3]" {
+		t.Errorf("xs staged as %v, want [1,2,3]", got)
+	}
+	if got := nt.rows[0][0]; got != `["one","a \"quoted\" one"]` {
+		t.Errorf("tags staged as %v, want the two strings with the quotes escaped", got)
+	}
+	if got := nt.rows[1][1]; got != "[]" {
+		t.Errorf("an empty list staged as %v, want []", got)
+	}
+
+	// A column of nothing but empty lists names no element type. Guessing one
+	// would declare a column the fixture never described, and every case
+	// against it would be answered about a graph nobody asked for.
+	fx.Nodes[0].Props["xs"] = []any{}
+	if _, err := planFixture(fx); err == nil {
+		t.Error("planned a column of empty lists, which names no element type")
+	}
+
+	// An empty list beside a number is a mismatch like any other, and taking
+	// the number's type for it would stage the text "[]" in an integer column.
+	fx.Nodes[0].Props["xs"] = 1
+	if _, err := planFixture(fx); err == nil {
+		t.Error("planned a column holding both a number and an empty list")
+	}
+}
+
+// The two shapes a zu1 list column cannot hold, refused where the column type
+// is decided rather than at the point a row is written.
+func TestAListZuCannotHoldIsRefused(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []any
+	}{
+		{"mixed elements", []any{1, "two"}},
+		{"a list inside a list", []any{[]any{1}}},
+		{"a map inside a list", []any{map[string]any{"a": 1}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if kind, err := listKind(c.in); err == nil {
+				t.Errorf("%v was declared %s; zu1 holds one scalar element type", c.in, kind)
+			}
+		})
+	}
+}
