@@ -15,7 +15,7 @@ import (
 const declared = `{"engine":{"name":"zu","version":"0.0.1"},` +
 	`"data":{"labels":true,"multi-label":false,"node-properties":true,` +
 	`"edge-properties":false,"edge-types":true,"multiple-edge-types":true,` +
-	`"multiple-node-labels":false,"temporal-values":false,"list-values":false,` +
+	`"multiple-node-labels":false,"temporal-values":true,"list-values":false,` +
 	`"null-properties":false,"float-values":true,"boolean-values":true,` +
 	`"undirected-edges":false,"self-loops":true,"parallel-edges":true},` +
 	`"capabilities":{"gqlstatus":true,"parameters":true,"transactions":false,` +

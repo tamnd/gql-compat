@@ -19,9 +19,8 @@
 // sqlite.go) rather than reducing every fixture to an edge list.
 //
 // What the route cannot carry is worked around nowhere: one label per node,
-// no edge properties, no doubles, booleans, nulls, lists or temporals, and no
-// edge between two different labels, since zu binds a rel table to a single
-// node table. The list is not written down here. It comes off the binary, from
+// no edge properties, no nulls or lists, and no edge between two different
+// labels, since zu binds a rel table to a single node table. The list is not written down here. It comes off the binary, from
 // `zu conformance --declare --format json`, which renders the same tables as
 // the conformance.toml checked into the zu repository. Each of those is a limit of
 // zu's loader rather than of its query engine, and each shows up in the report
