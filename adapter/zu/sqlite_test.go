@@ -3,6 +3,7 @@ package zu
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -206,5 +207,57 @@ func TestAMissingOrNullPropertyStagesAsNull(t *testing.T) {
 	fx.Nodes[0].Props["age"] = nil
 	if _, err := planFixture(fx); err == nil {
 		t.Error("planned a column that is null on every row, which names no type")
+	}
+}
+
+// An edge type's properties become columns on its rel table, derived the same
+// way a node table's are and staged in the order the edges are written in.
+//
+// The order is what matters here. zu addresses an edge property column by the
+// edge ordinal, the place an edge takes in a load sorted by source and then
+// destination, and the converter reads the staged rows back in that order. So
+// the row this plans for an edge has to be the row that edge's endpoints are
+// written with, not merely the right multiset of values.
+func TestEdgePropertiesBecomeColumnsOnTheRelTable(t *testing.T) {
+	fx := &fixture.Fixture{
+		Name: "weighted",
+		Nodes: []fixture.Node{
+			{Key: "a", Labels: []string{"P"}},
+			{Key: "b", Labels: []string{"P"}},
+			{Key: "c", Labels: []string{"P"}},
+		},
+		Edges: []fixture.Edge{
+			{Type: "KNOWS", From: "a", To: "b", Props: map[string]any{"since": 2001, "how": "work"}},
+			{Type: "KNOWS", From: "b", To: "c", Props: map[string]any{"since": 2002}},
+		},
+	}
+	plan, err := planFixture(fx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := plan.relTables[0]
+	if got := strings.Join(rt.cols, ","); got != "how,since" {
+		t.Fatalf("columns are %s, want the sorted set how,since", got)
+	}
+	if rt.types[0] != "TEXT" || rt.types[1] != "INTEGER" {
+		t.Errorf("columns are declared %v, want [TEXT INTEGER]", rt.types)
+	}
+	if len(rt.rows) != len(rt.edges) {
+		t.Fatalf("%d rows for %d edges", len(rt.rows), len(rt.edges))
+	}
+	if rt.rows[0][0] != "work" || rt.rows[0][1] != 2001 {
+		t.Errorf("the first edge staged as %v, want [work 2001]", rt.rows[0])
+	}
+	// The second edge sets no how, and an edge without a property stages the
+	// same way a node without one does.
+	if rt.rows[1][0] != nil || rt.rows[1][1] != 2002 {
+		t.Errorf("the second edge staged as %v, want [<nil> 2002]", rt.rows[1])
+	}
+
+	// A property that is one type on one edge and another on the next has no
+	// column to live in, the same as on a node.
+	fx.Edges[1].Props["since"] = "yesterday"
+	if _, err := planFixture(fx); err == nil {
+		t.Error("planned a column that is an integer on one edge and text on another")
 	}
 }

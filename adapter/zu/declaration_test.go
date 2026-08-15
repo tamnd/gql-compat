@@ -14,10 +14,11 @@ import (
 // reasons that have nothing to do with the code under it.
 const declared = `{"engine":{"name":"zu","version":"0.0.1"},` +
 	`"data":{"labels":true,"multi-label":false,"node-properties":true,` +
-	`"edge-properties":false,"edge-types":true,"multiple-edge-types":true,` +
+	`"edge-properties":true,"edge-types":true,"multiple-edge-types":true,` +
 	`"multiple-node-labels":false,"temporal-values":true,"list-values":true,` +
 	`"null-properties":true,"float-values":true,"boolean-values":true,` +
-	`"undirected-edges":true,"self-loops":true,"parallel-edges":true},` +
+	`"undirected-edges":true,"self-loops":true,"parallel-edges":true,` +
+	`"parallel-edge-properties":false},` +
 	`"capabilities":{"gqlstatus":true,"parameters":true,"transactions":false,` +
 	`"multiple-statements":true,"isolated":true},` +
 	`"notes":["driven through ` + "`zu shell --format jsonl`" + `"]}`
@@ -39,8 +40,11 @@ func TestDeclarationBecomesCapabilities(t *testing.T) {
 	if !caps.Data[fixture.CapUndirectedEdges] {
 		t.Error("undirected-edges is declared true and did not arrive true")
 	}
-	if caps.Data[fixture.CapEdgeProperties] {
-		t.Error("edge-properties is declared false and arrived true")
+	if !caps.Data[fixture.CapEdgeProperties] {
+		t.Error("edge-properties is declared true and did not arrive true")
+	}
+	if caps.Data[fixture.CapParallelEdgeProperties] {
+		t.Error("parallel-edge-properties is declared false and arrived true")
 	}
 	if !caps.GQLStatus || !caps.Parameters || !caps.MultipleStatements || !caps.Isolated {
 		t.Error("an engine flag declared true did not arrive true")
