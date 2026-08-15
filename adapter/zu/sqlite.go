@@ -300,15 +300,14 @@ func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, 
 // Nodes and edges derive identically, which is why this takes properties
 // rather than either of them; `kind` and `describe` are only there so an
 // error says which element it is talking about.
-func deriveColumns(props []map[string]any, kind string, describe func(int) string) ([]string, []string, [][]any, error) {
+func deriveColumns(props []map[string]any, kind string, describe func(int) string) (cols, types []string, rows [][]any, err error) {
 	seen := map[string]bool{}
 	for _, p := range props {
 		for name := range p {
 			seen[name] = true
 		}
 	}
-	cols := slices.Sorted(maps.Keys(seen))
-	var types []string
+	cols = slices.Sorted(maps.Keys(seen))
 
 	for _, name := range cols {
 		if err := checkIdent(name); err != nil {
@@ -361,7 +360,7 @@ func deriveColumns(props []map[string]any, kind string, describe func(int) strin
 		types = append(types, column)
 	}
 
-	rows := make([][]any, 0, len(props))
+	rows = make([][]any, 0, len(props))
 	for i, p := range props {
 		row := make([]any, len(cols))
 		for c, name := range cols {
