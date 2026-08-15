@@ -3,6 +3,7 @@ package zu
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -73,10 +74,10 @@ func TestThePlannerBindsEachRelTableToItsOwnNodeTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"KNOWS": "Person", "NEAR": "Node"}
+	want := map[string][2]string{"KNOWS": {"Person", "Person"}, "NEAR": {"Node", "Node"}}
 	for _, rt := range plan.relTables {
-		if w, ok := want[rt.typ]; ok && rt.endpoint != w {
-			t.Errorf("rel table %s binds to %s, want %s", rt.typ, rt.endpoint, w)
+		if w, ok := want[rt.typ]; ok && [2]string{rt.src, rt.dst} != w {
+			t.Errorf("rel table %s binds to %s and %s, want %s and %s", rt.typ, rt.src, rt.dst, w[0], w[1])
 		}
 		delete(want, rt.typ)
 	}
@@ -84,11 +85,25 @@ func TestThePlannerBindsEachRelTableToItsOwnNodeTable(t *testing.T) {
 		t.Errorf("no rel table for edge type %s", typ)
 	}
 
-	// An edge between two labels has nowhere to go, and the planner has to say
-	// so rather than write it into whichever table it saw first.
+	// An edge between two labels binds to both of them, one at each end.
 	fx.Edges = append(fx.Edges, fixture.Edge{Type: "LIVES_IN", From: "a", To: "c"})
+	plan, err = planFixture(fx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(plan.relTables, func(rt *relTable) bool { return rt.typ == "LIVES_IN" })
+	if i < 0 {
+		t.Fatal("no rel table for the edge that crosses labels")
+	}
+	if got := [2]string{plan.relTables[i].src, plan.relTables[i].dst}; got != [2]string{"Person", "Node"} {
+		t.Errorf("LIVES_IN binds to %v, want Person and Node", got)
+	}
+
+	// One type cannot run between two different pairs of labels, because a
+	// rel table names one pair and the second has nowhere to go.
+	fx.Edges = append(fx.Edges, fixture.Edge{Type: "LIVES_IN", From: "c", To: "a"})
 	if _, err := planFixture(fx); err == nil {
-		t.Error("planned an edge that crosses labels; zu binds a rel table to one node table")
+		t.Error("planned an edge type that runs between two different pairs of labels")
 	}
 }
 

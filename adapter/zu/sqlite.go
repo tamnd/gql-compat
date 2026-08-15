@@ -38,10 +38,11 @@ const (
 // and opens such a file read-only, which is all a conversion needs.
 //
 // What survives the conversion is what the capability set declares: one label
-// per node, integer, string, float, boolean and temporal node properties, and
-// typed directed edges including self-loops and parallel pairs. Edge
-// properties do not, since zu's converter reads only the endpoints of a rel
-// table. A null does cross, as a SQL NULL in a column whose declared type
+// per node, integer, string, float, boolean and temporal properties on nodes
+// and on edges alike, and typed directed edges including self-loops and
+// parallel pairs. A rel table names the node table at each of its ends, so an
+// edge between two labels crosses as well, as long as every edge of its type
+// runs between the same pair. A null does cross, as a SQL NULL in a column whose declared type
 // comes from the rows that hold a value, which is the shape zu's converter
 // reads a column's validity words back from; a column that is null on every
 // row names no type and is refused. A list does cross, as a JSON array in a
@@ -138,8 +139,13 @@ type nodeTable struct {
 }
 
 type relTable struct {
-	typ      string
-	endpoint string
+	typ string
+	// The node tables the edges of this type leave and arrive at. They
+	// are the same table when every edge of the type runs between two
+	// nodes of one label, and different tables when it runs between
+	// two labels, which zu binds a rel table to as a pair.
+	src string
+	dst string
 	// undirected says the edges here have no direction, which zu records on
 	// the table rather than on the edge. A fixture that gives one type both
 	// kinds of edge has nowhere to put the second, and is refused.
@@ -204,10 +210,10 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 	// line up with the edge they came from.
 	propsOf := map[string][]map[string]any{}
 	labelsOf := map[string][]string{}
-	// A rel table binds to the node table its edges run between, which the
-	// first edge of each type settles; the rest are checked against it by the
-	// cross-label test below.
-	endpointOf := map[string]string{}
+	// A rel table binds to the pair of node tables its edges run
+	// between, which the first edge of each type settles; the rest are
+	// checked against it by the test below.
+	endpointOf := map[string][2]string{}
 	// Whether a type's edges have a direction, settled by its first edge for
 	// the same reason the endpoints are.
 	undirectedOf := map[string]bool{}
@@ -225,19 +231,20 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 		if !okFrom || !okTo {
 			return nil, fmt.Errorf("edge %s -> %s names a node the fixture does not define", e.From, e.To)
 		}
-		// zu binds a rel table to a single node table, so an edge whose
-		// endpoints carry different labels has nowhere to go. Capabilities
-		// declares multiple-node-labels unsupported for exactly this reason;
-		// the check is here so the reason is legible if that ever slips.
-		fl, tl := labelOf[e.From], labelOf[e.To]
-		if fl != tl {
-			return nil, fmt.Errorf("edge %s -> %s crosses labels %s and %s; zu binds a rel table to one node table",
-				e.From, e.To, fl, tl)
-		}
+		// zu binds a rel table to one pair of node tables, so every edge
+		// of a type has to run between the same two labels. A fixture
+		// that gives one type two different pairs has nowhere to put the
+		// second, and is refused rather than half loaded.
+		ends := [2]string{labelOf[e.From], labelOf[e.To]}
 		if _, seen := byType[typ]; !seen {
 			types = append(types, typ)
-			endpointOf[typ] = fl
+			endpointOf[typ] = ends
 			undirectedOf[typ] = e.Undirected
+		}
+		if endpointOf[typ] != ends {
+			was := endpointOf[typ]
+			return nil, fmt.Errorf("edge type %s runs between %s and %s here and between %s and %s elsewhere; zu binds a rel table to one pair of node tables",
+				typ, ends[0], ends[1], was[0], was[1])
 		}
 		if undirectedOf[typ] != e.Undirected {
 			return nil, fmt.Errorf("edge type %s has both directed and undirected edges; zu records the direction on the table", typ)
@@ -254,7 +261,8 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 		}
 		plan.relTables = append(plan.relTables, &relTable{
 			typ:        typ,
-			endpoint:   endpointOf[typ],
+			src:        endpointOf[typ][0],
+			dst:        endpointOf[typ][1],
 			undirected: undirectedOf[typ],
 			edges:      byType[typ],
 			cols:       cols,
@@ -268,10 +276,12 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 	// nodes and no edges is therefore carried by an empty rel table: it adds
 	// no edges, no case can match one, and the nodes arrive.
 	for _, nt := range plan.nodeTables {
-		if slices.ContainsFunc(plan.relTables, func(rt *relTable) bool { return rt.endpoint == nt.label }) {
+		if slices.ContainsFunc(plan.relTables, func(rt *relTable) bool {
+			return rt.src == nt.label || rt.dst == nt.label
+		}) {
 			continue
 		}
-		plan.relTables = append(plan.relTables, &relTable{typ: "ZU_COMPAT_EMPTY_" + nt.label, endpoint: nt.label})
+		plan.relTables = append(plan.relTables, &relTable{typ: "ZU_COMPAT_EMPTY_" + nt.label, src: nt.label, dst: nt.label})
 	}
 	return plan, nil
 }
@@ -593,7 +603,7 @@ func (t *relTable) create(ctx context.Context, tx *sql.Tx) error {
 	}
 	fmt.Fprintf(&b, ");\nCREATE INDEX r_%[1]s_fwd ON r_%[1]s (src, dst);\nCREATE INDEX r_%[1]s_bwd ON r_%[1]s (dst, src);",
 		t.typ)
-	return createTable(ctx, tx, "rel", t.typ, b.String(), &[2]string{t.endpoint, t.endpoint}, t.undirected)
+	return createTable(ctx, tx, "rel", t.typ, b.String(), &[2]string{t.src, t.dst}, t.undirected)
 }
 
 func (t *relTable) fill(ctx context.Context, tx *sql.Tx) error {
