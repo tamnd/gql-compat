@@ -191,17 +191,18 @@ func joinVersions(v any) string {
 func (d *Driver) Capabilities() adapter.Capabilities {
 	return adapter.Capabilities{
 		Data: map[fixture.Capability]bool{
-			fixture.CapLabels:             true,
-			fixture.CapMultiLabel:         true,
-			fixture.CapNodeProperties:     true,
-			fixture.CapEdgeProperties:     true,
-			fixture.CapEdgeTypes:          true,
-			fixture.CapMultipleEdgeTypes:  true,
-			fixture.CapMultipleNodeLabels: true,
-			fixture.CapTemporalValues:     true,
-			fixture.CapListValues:         true,
-			fixture.CapSelfLoops:          true,
-			fixture.CapParallelEdges:      true,
+			fixture.CapLabels:                 true,
+			fixture.CapMultiLabel:             true,
+			fixture.CapNodeProperties:         true,
+			fixture.CapEdgeProperties:         true,
+			fixture.CapEdgeTypes:              true,
+			fixture.CapMultipleEdgeTypes:      true,
+			fixture.CapMultipleNodeLabels:     true,
+			fixture.CapTemporalValues:         true,
+			fixture.CapListValues:             true,
+			fixture.CapSelfLoops:              true,
+			fixture.CapParallelEdges:          true,
+			fixture.CapParallelEdgeProperties: true,
 			// These two were left out of the map until the run of 2026-08-12,
 			// and a missing key reads as false, so the report said Neo4j could
 			// not hold a float or a boolean and skipped four cases on the

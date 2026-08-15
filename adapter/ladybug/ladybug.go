@@ -110,17 +110,18 @@ func (d *Driver) Version(ctx context.Context) (string, error) {
 func (d *Driver) Capabilities() adapter.Capabilities {
 	return adapter.Capabilities{
 		Data: map[fixture.Capability]bool{
-			fixture.CapLabels:             true,
-			fixture.CapMultiLabel:         true,
-			fixture.CapNodeProperties:     true,
-			fixture.CapEdgeProperties:     true,
-			fixture.CapEdgeTypes:          true,
-			fixture.CapMultipleEdgeTypes:  true,
-			fixture.CapMultipleNodeLabels: true,
-			fixture.CapTemporalValues:     true,
-			fixture.CapListValues:         true,
-			fixture.CapSelfLoops:          true,
-			fixture.CapParallelEdges:      true,
+			fixture.CapLabels:                 true,
+			fixture.CapMultiLabel:             true,
+			fixture.CapNodeProperties:         true,
+			fixture.CapEdgeProperties:         true,
+			fixture.CapEdgeTypes:              true,
+			fixture.CapMultipleEdgeTypes:      true,
+			fixture.CapMultipleNodeLabels:     true,
+			fixture.CapTemporalValues:         true,
+			fixture.CapListValues:             true,
+			fixture.CapSelfLoops:              true,
+			fixture.CapParallelEdges:          true,
+			fixture.CapParallelEdgeProperties: true,
 			// An ANY graph's property map holds whatever value it is given, so
 			// these two are the same yes as the rest. They were missing from
 			// this map, which is not the same as being false, and the runner

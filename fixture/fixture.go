@@ -66,6 +66,15 @@ const (
 	// CapParallelEdges is the ability to store two edges of one type between
 	// the same ordered pair of nodes.
 	CapParallelEdges Capability = "parallel-edges"
+	// CapParallelEdgeProperties is the ability to give two such edges their
+	// own property values. It is separate from holding the edges themselves
+	// because an engine that identifies an edge by its endpoints can store
+	// both and still have one place to read a property from: the pair names
+	// the edge, and two edges with one pair between them name the same place.
+	// Such an engine holds the fixture and answers one of the two values
+	// twice, which is a wrong answer rather than a missing feature, so the
+	// distinction is drawn here where it can be declared.
+	CapParallelEdgeProperties Capability = "parallel-edge-properties"
 )
 
 // AllCapabilities is every capability a fixture can require, in a stable
@@ -76,7 +85,7 @@ var AllCapabilities = []Capability{
 	CapEdgeTypes, CapMultipleEdgeTypes, CapMultipleNodeLabels,
 	CapTemporalValues, CapListValues, CapNullProperties,
 	CapFloatValues, CapBooleanValues,
-	CapUndirectedEdges, CapSelfLoops, CapParallelEdges,
+	CapUndirectedEdges, CapSelfLoops, CapParallelEdges, CapParallelEdgeProperties,
 }
 
 // Node is one vertex. Key is the fixture-local identity used by edges and by
@@ -149,6 +158,9 @@ func (f *Fixture) Requires() map[Capability]bool {
 	labels := map[string]bool{}
 	types := map[string]bool{}
 	pairs := map[string]int{}
+	// How many edges of each ordered pair carry properties, which is what
+	// says whether a parallel pair needs telling apart by value.
+	propped := map[string]int{}
 
 	for _, n := range f.Nodes {
 		if len(n.Labels) > 0 {
@@ -179,7 +191,11 @@ func (f *Fixture) Requires() map[Capability]bool {
 		if e.From == e.To {
 			req[CapSelfLoops] = true
 		}
-		pairs[e.Type+"\x00"+e.From+"\x00"+e.To]++
+		pair := e.Type + "\x00" + e.From + "\x00" + e.To
+		pairs[pair]++
+		if len(e.Props) > 0 {
+			propped[pair]++
+		}
 		markValueCaps(e.Props, req)
 	}
 	if len(labels) > 1 {
@@ -188,10 +204,12 @@ func (f *Fixture) Requires() map[Capability]bool {
 	if len(types) > 1 {
 		req[CapMultipleEdgeTypes] = true
 	}
-	for _, n := range pairs {
+	for pair, n := range pairs {
 		if n > 1 {
 			req[CapParallelEdges] = true
-			break
+			if propped[pair] > 0 {
+				req[CapParallelEdgeProperties] = true
+			}
 		}
 	}
 	f.requires = req

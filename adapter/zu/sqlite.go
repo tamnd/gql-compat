@@ -145,6 +145,11 @@ type relTable struct {
 	// kinds of edge has nowhere to put the second, and is refused.
 	undirected bool
 	edges      [][2]int64
+	// The property columns of the type, derived the same way a node
+	// table's are, with one row per edge in the order edges holds them.
+	cols  []string
+	types []string
+	rows  [][]any
 }
 
 // planFixture works out the schema before any of it is written, because a
@@ -194,6 +199,11 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 	}
 
 	byType := map[string][][2]int64{}
+	// The properties of each type's edges, in the same order as its
+	// endpoint pairs, so the column derivation and the row it renders
+	// line up with the edge they came from.
+	propsOf := map[string][]map[string]any{}
+	labelsOf := map[string][]string{}
 	// A rel table binds to the node table its edges run between, which the
 	// first edge of each type settles; the rest are checked against it by the
 	// cross-label test below.
@@ -233,13 +243,23 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 			return nil, fmt.Errorf("edge type %s has both directed and undirected edges; zu records the direction on the table", typ)
 		}
 		byType[typ] = append(byType[typ], [2]int64{from, to})
+		propsOf[typ] = append(propsOf[typ], e.Props)
+		labelsOf[typ] = append(labelsOf[typ], fmt.Sprintf("%s -> %s", e.From, e.To))
 	}
 	for _, typ := range types {
+		names := labelsOf[typ]
+		cols, colTypes, rows, err := deriveColumns(propsOf[typ], "edge", func(i int) string { return names[i] })
+		if err != nil {
+			return nil, err
+		}
 		plan.relTables = append(plan.relTables, &relTable{
 			typ:        typ,
 			endpoint:   endpointOf[typ],
 			undirected: undirectedOf[typ],
 			edges:      byType[typ],
+			cols:       cols,
+			types:      colTypes,
+			rows:       rows,
 		})
 	}
 
@@ -257,83 +277,101 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 }
 
 // buildNodeTable derives one label's column set from its nodes.
-//
-// zu1 property columns are dense and uniformly typed, so a property some node
-// of the label lacks, or holds at a different type, cannot be stored. Both are
-// refused rather than papered over with a default: a
-// column silently filled with zeros would answer aggregate cases with numbers
-// no fixture contains.
 func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, error) {
-	t := &nodeTable{label: label}
+	props := make([]map[string]any, len(idx))
+	for j, i := range idx {
+		props[j] = nodes[i].Props
+	}
+	cols, types, rows, err := deriveColumns(props, "node", func(j int) string { return nodes[idx[j]].Key })
+	if err != nil {
+		return nil, err
+	}
+	return &nodeTable{label: label, cols: cols, types: types, rows: rows}, nil
+}
+
+// deriveColumns works out one staged table's column set from the properties
+// of the elements that will fill it, and renders each element into a row of
+// that set.
+//
+// zu1 property columns are dense and uniformly typed, so a property some
+// element lacks, or holds at a different type, cannot be stored. Both are
+// refused rather than papered over with a default: a column silently filled
+// with zeros would answer aggregate cases with numbers no fixture contains.
+// Nodes and edges derive identically, which is why this takes properties
+// rather than either of them; `kind` and `describe` are only there so an
+// error says which element it is talking about.
+func deriveColumns(props []map[string]any, kind string, describe func(int) string) ([]string, []string, [][]any, error) {
 	seen := map[string]bool{}
-	for _, i := range idx {
-		for name := range nodes[i].Props {
+	for _, p := range props {
+		for name := range p {
 			seen[name] = true
 		}
 	}
-	t.cols = slices.Sorted(maps.Keys(seen))
+	cols := slices.Sorted(maps.Keys(seen))
+	var types []string
 
-	for _, name := range t.cols {
+	for _, name := range cols {
 		if err := checkIdent(name); err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
-		kind := ""
-		for _, i := range idx {
-			// A node without the property and a node whose property is
+		column := ""
+		for i, p := range props {
+			// An element without the property and one whose property is
 			// null are the same thing here: the row holds no value, the
 			// column says so in its validity words, and neither row has
 			// a type to contribute to the declaration.
-			v := nodes[i].Props[name]
+			v := p[name]
 			if v == nil {
 				continue
 			}
 			k, err := columnKind(v)
 			if err != nil {
-				return nil, fmt.Errorf("property %q on node %q: %w", name, nodes[i].Key, err)
+				return nil, nil, nil, fmt.Errorf("property %q on %s %q: %w", name, kind, describe(i), err)
 			}
 			// An empty list names no element type, so it takes the one
 			// the rest of the column has. A column of nothing but empty
 			// lists has none to take and is refused below. An empty list
 			// beside a scalar is still a mismatch and falls through to
 			// the check under this one.
-			if k == anyList && isListKind(kind) {
+			if k == anyList && isListKind(column) {
 				continue
 			}
-			if kind == anyList && isListKind(k) {
-				kind = k
+			if column == anyList && isListKind(k) {
+				column = k
 				continue
 			}
-			if kind == "" && k == anyList {
-				kind = anyList
+			if column == "" && k == anyList {
+				column = anyList
 				continue
 			}
-			if kind != "" && kind != k {
-				return nil, fmt.Errorf("property %q is %s on some nodes and %s on others; a zu1 column is one type",
-					name, kind, k)
+			if column != "" && column != k {
+				return nil, nil, nil, fmt.Errorf("property %q is %s on some %ss and %s on others; a zu1 column is one type",
+					name, column, kind, k)
 			}
-			kind = k
+			column = k
 		}
-		if kind == anyList {
-			return nil, fmt.Errorf("property %q is an empty list on every node, which names no element type",
-				name)
+		if column == anyList {
+			return nil, nil, nil, fmt.Errorf("property %q is an empty list on every %s, which names no element type",
+				name, kind)
 		}
-		if kind == "" {
-			return nil, fmt.Errorf("property %q is null on every node, which names no type for its column",
-				name)
+		if column == "" {
+			return nil, nil, nil, fmt.Errorf("property %q is null on every %s, which names no type for its column",
+				name, kind)
 		}
-		t.types = append(t.types, kind)
+		types = append(types, column)
 	}
 
-	for _, i := range idx {
-		row := make([]any, len(t.cols))
-		for c, name := range t.cols {
-			v := nodes[i].Props[name]
+	rows := make([][]any, 0, len(props))
+	for i, p := range props {
+		row := make([]any, len(cols))
+		for c, name := range cols {
+			v := p[name]
 			// A temporal value becomes its count here, where the column
 			// type it was checked against is still in hand.
 			if tv, ok := fixture.AsTemporal(v); ok {
 				count, err := temporalCount(tv)
 				if err != nil {
-					return nil, fmt.Errorf("property %q on node %q: %w", name, nodes[i].Key, err)
+					return nil, nil, nil, fmt.Errorf("property %q on %s %q: %w", name, kind, describe(i), err)
 				}
 				v = count
 			}
@@ -343,15 +381,15 @@ func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, 
 			if lv, ok := v.([]any); ok {
 				text, err := listText(lv)
 				if err != nil {
-					return nil, fmt.Errorf("property %q on node %q: %w", name, nodes[i].Key, err)
+					return nil, nil, nil, fmt.Errorf("property %q on %s %q: %w", name, kind, describe(i), err)
 				}
 				v = text
 			}
 			row[c] = v
 		}
-		t.rows = append(t.rows, row)
+		rows = append(rows, row)
 	}
-	return t, nil
+	return cols, types, rows, nil
 }
 
 // columnKind maps a fixture value to the column type the staged table declares
@@ -548,24 +586,30 @@ func (t *nodeTable) fill(ctx context.Context, tx *sql.Tx) error {
 }
 
 func (t *relTable) create(ctx context.Context, tx *sql.Tx) error {
-	ddl := fmt.Sprintf(
-		"CREATE TABLE r_%[1]s (zrel INTEGER PRIMARY KEY, src INTEGER NOT NULL, dst INTEGER NOT NULL);\n"+
-			"CREATE INDEX r_%[1]s_fwd ON r_%[1]s (src, dst);\nCREATE INDEX r_%[1]s_bwd ON r_%[1]s (dst, src);",
+	var b strings.Builder
+	fmt.Fprintf(&b, "CREATE TABLE r_%s (zrel INTEGER PRIMARY KEY, src INTEGER NOT NULL, dst INTEGER NOT NULL",
 		t.typ)
-	return createTable(ctx, tx, "rel", t.typ, ddl, &[2]string{t.endpoint, t.endpoint}, t.undirected)
+	for i, c := range t.cols {
+		fmt.Fprintf(&b, ", p_%s %s", c, t.types[i])
+	}
+	fmt.Fprintf(&b, ");\nCREATE INDEX r_%[1]s_fwd ON r_%[1]s (src, dst);\nCREATE INDEX r_%[1]s_bwd ON r_%[1]s (dst, src);",
+		t.typ)
+	return createTable(ctx, tx, "rel", t.typ, b.String(), &[2]string{t.endpoint, t.endpoint}, t.undirected)
 }
 
 func (t *relTable) fill(ctx context.Context, tx *sql.Tx) error {
 	if len(t.edges) == 0 {
 		return nil
 	}
-	stmt, err := tx.PrepareContext(ctx, fmt.Sprintf("INSERT INTO r_%s VALUES (NULL, ?, ?)", t.typ))
+	stmt, err := tx.PrepareContext(ctx, fmt.Sprintf("INSERT INTO r_%s VALUES (NULL, ?, ?%s)",
+		t.typ, strings.Repeat(", ?", len(t.cols))))
 	if err != nil {
 		return err
 	}
 	defer func() { _ = stmt.Close() }()
-	for _, e := range t.edges {
-		if _, err := stmt.ExecContext(ctx, e[0], e[1]); err != nil {
+	for i, e := range t.edges {
+		args := append([]any{e[0], e[1]}, t.rows[i]...)
+		if _, err := stmt.ExecContext(ctx, args...); err != nil {
 			return err
 		}
 	}
