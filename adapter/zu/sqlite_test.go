@@ -342,7 +342,7 @@ func TestExtraLabelsBecomeRowsOfTheLabelTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	rows, err := db.Query("SELECT tbl, zrow, label FROM zu_labels ORDER BY tbl, zrow, label")
+	rows, err := db.QueryContext(context.Background(), "SELECT tbl, zrow, label FROM zu_labels ORDER BY tbl, zrow, label")
 	if err != nil {
 		t.Fatal(err)
 	}
