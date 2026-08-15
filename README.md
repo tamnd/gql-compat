@@ -438,7 +438,11 @@ machines building the same graph build it edge for edge — otherwise a
 cross-machine comparison is comparing graphs, not engines.
 
 Warmups are never applied to a mutating case, because running an `INSERT` eight
-times measures something other than the `INSERT`.
+times measures something other than the `INSERT`. A mutating case is measured
+by putting the fixture back between repetitions, and the case's setup
+statements run again each time the fixture goes back, so every repetition
+starts from the state the case described rather than from whatever the
+previous one left.
 
 ## Contributing a case
 

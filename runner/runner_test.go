@@ -125,6 +125,19 @@ cases:
       INSERT (:Person {name: 'Cy'})
     expect:
       kind: accept
+
+  - id: mandatory/test/setup-then-read
+    name: A case that reads what its own setup wrote
+    kind: mandatory
+    subclauses: ["13.2"]
+    fixture: two
+    mutating: true
+    setup:
+      - "INSERT (:Person {name: 'Di'})"
+    query: |
+      MATCH (p:Person) RETURN p.name AS name
+    expect:
+      kind: accept
 `
 
 func load(t *testing.T) *gqlcompat.Standard {
@@ -440,6 +453,37 @@ func TestMutatingCaseIsNotWarmedUp(t *testing.T) {
 	if got := result(t, run(t, engine(t, nil), runner.Config{Warmups: 3, Repeats: 2}),
 		"mandatory/test/right-answer").Warmups; got != 3 {
 		t.Errorf("a read-only case recorded %d warmups, want 3", got)
+	}
+}
+
+// A case that puts the write in setup and the read in query is describing a
+// pre-state for the statement under test. Restoring the fixture between
+// repetitions undoes that pre-state along with everything else, so the setup
+// has to run again or every repetition after the first measures a graph
+// nobody described. A copy of a graph that holds rows was the case that found
+// this: the copy existed for the first execution and for none after it.
+func TestSetupRunsAgainAfterTheFixtureIsPutBack(t *testing.T) {
+	var mu sync.Mutex
+	setups := 0
+	d := engine(t, func(c *fake.Config) {
+		c.Capabilities.MultipleStatements = true
+		c.Respond = func(stmt string) (fake.Answer, bool) {
+			if strings.Contains(stmt, "Di") {
+				mu.Lock()
+				setups++
+				mu.Unlock()
+			}
+			return fake.Answer{}, false
+		}
+	})
+	r := result(t, run(t, d, runner.Config{Repeats: 3}), "mandatory/test/setup-then-read")
+	if r.Outcome != runner.Pass {
+		t.Fatalf("outcome %s: %s", r.Outcome, r.Reason)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if setups != 3 {
+		t.Errorf("the setup ran %d times over 3 repetitions, want 3", setups)
 	}
 }
 
