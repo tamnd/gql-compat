@@ -375,6 +375,30 @@ cases:
     expect:
       kind: accept
 
+  - id: optional/gg05/graph-as-copy-of-holds-the-rows
+    name: A copy of a graph that holds data holds the same data
+    features: [GC04, GG05, GQ01]
+    subclauses: ["12.4", "16.2"]
+    productions: [graph source, create graph statement, use graph clause, current graph]
+    fixture: social
+    tags: [write, catalog]
+    mutating: true
+    # The graph copied is CURRENT_PROPERTY_GRAPH rather than a name, for the
+    # reason optional/gq01/use-current-graph gives: what the working graph is
+    # called is the adapter's business. An engine that accepts AS COPY OF and
+    # produces an empty graph fails here, which is the point of the case: the
+    # one above says the statement parses and this one says it copied.
+    setup:
+      - "CREATE PROPERTY GRAPH gqlcompat_copy_rows ANY AS COPY OF CURRENT_PROPERTY_GRAPH"
+    query: |
+      USE gqlcompat_copy_rows
+      MATCH (p:Person)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
   - id: optional/gt01/start-transaction-and-commit
     name: An explicit transaction can be opened and committed
     features: [GT01]

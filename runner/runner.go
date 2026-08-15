@@ -929,13 +929,16 @@ func (e *executor) ensureLoaded(ctx context.Context, sess adapter.Session, fx *f
 	return sess, load, nil
 }
 
-// execute runs setup, warmups, and the timed repetitions, and judges.
-func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.Case, fx *fixture.Fixture, stmt string, r *CaseResult) {
-	timeout := e.cfg.Timeout
-	if c.TimeoutMS > 0 {
-		timeout = time.Duration(c.TimeoutMS) * time.Millisecond
-	}
-
+// setup runs a case's setup statements against the session it is given and
+// reports whether the case can go on. A setup statement that fails is the
+// case's error, because the statement under test never got the graph it was
+// written for.
+//
+// It runs again after every restore. Putting the fixture back undoes the
+// setup along with everything else, and a case whose setup created a graph or
+// inserted a row would otherwise measure its second execution against a state
+// nobody described.
+func (e *executor) setup(ctx context.Context, sess adapter.Session, c *corpus.Case, timeout time.Duration, r *CaseResult) bool {
 	for _, s := range c.Setup {
 		sctx, cancel := context.WithTimeout(ctx, timeout)
 		_, err := sess.Exec(sctx, s, nil)
@@ -947,8 +950,21 @@ func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.
 			r.Outcome = Error
 			r.Reason = "setup statement failed: " + err.Error()
 			r.Message = err.Error()
-			return
+			return false
 		}
+	}
+	return true
+}
+
+// execute runs setup, warmups, and the timed repetitions, and judges.
+func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.Case, fx *fixture.Fixture, stmt string, r *CaseResult) {
+	timeout := e.cfg.Timeout
+	if c.TimeoutMS > 0 {
+		timeout = time.Duration(c.TimeoutMS) * time.Millisecond
+	}
+
+	if !e.setup(ctx, sess, c, timeout, r) {
+		return
 	}
 
 	dir := sess.DataDir()
@@ -993,6 +1009,10 @@ func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.
 				break
 			}
 			sess = restored
+			// The restore put the graph back and took the setup with it.
+			if !e.setup(ctx, sess, c, timeout, r) {
+				return
+			}
 			// An engine with no reset comes back in a new directory, so the
 			// disk baseline has to move with it. What the case then reports is
 			// the last execution's storage, which is the only one the store on
