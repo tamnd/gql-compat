@@ -50,6 +50,19 @@ against the standard's own denominators.
 	for _, f := range std.Suite.CoveredFeatures() {
 		claimed[f] = true
 	}
+	// The register of features no portable case can be written for is loaded
+	// against the same catalogue, so a wrong entry in it fails here the way a
+	// wrong reference in a case does.
+	unwritable, err := corpus.Unwritables(iso.Codes{Catalog: std.Catalog})
+	if err != nil {
+		return err
+	}
+	cannot := corpus.UnwritableCodes(unwritable)
+	for code := range cannot {
+		if claimed[code] {
+			return fmt.Errorf("%s is claimed by a case and listed as unwritable; one of the two is wrong", code)
+		}
+	}
 	byKind := map[corpus.Kind]int{}
 	for _, c := range std.Suite.Cases {
 		byKind[c.Kind]++
@@ -78,6 +91,7 @@ against the standard's own denominators.
 			Subclauses       int                 `json:"subclauses_claimed"`
 			SubclausesTotal  int                 `json:"normative_subclauses_total"`
 			Unclaimed        []string            `json:"unclaimed_features,omitempty"`
+			Unwritable       []corpus.Unwritable `json:"unwritable_features,omitempty"`
 		}
 		o := out{
 			Cases: std.Suite.Len(), ByKind: byKind, Fixtures: std.Fixtures.Len(),
@@ -85,9 +99,10 @@ against the standard's own denominators.
 			Conditions: conditions, ConditionsTotal: totalConditions,
 			Productions: productions, ProductionsTotal: len(std.Catalog.Productions),
 			Subclauses: subclauses, SubclausesTotal: normative,
+			Unwritable: unwritable,
 		}
 		if *missing {
-			o.Unclaimed = unclaimed(std.Catalog, claimed)
+			o.Unclaimed = unclaimed(std.Catalog, claimed, cannot)
 		}
 		return writeJSON(o)
 	}
@@ -111,9 +126,20 @@ against the standard's own denominators.
 		return err
 	}
 
+	if len(unwritable) > 0 {
+		fmt.Printf("\nno portable case can be written for %d of the %d, because the grammar\n"+
+			"rule the feature hangs off is one ISO writes as \"!! See the Syntax\n"+
+			"Rules.\" and the syntax is the implementer's to choose:\n",
+			len(unwritable), len(std.Catalog.Features))
+		for _, u := range unwritable {
+			f, _ := std.Catalog.Feature(u.Feature)
+			fmt.Printf("  %-6s %s, at <%s>\n", u.Feature, f.Description, u.Production)
+		}
+	}
+
 	if *missing {
 		fmt.Println("\nfeature codes no case claims:")
-		for _, code := range unclaimed(std.Catalog, claimed) {
+		for _, code := range unclaimed(std.Catalog, claimed, cannot) {
 			f, _ := std.Catalog.Feature(code)
 			fmt.Printf("  %-6s %s\n", code, f.Description)
 		}
@@ -149,10 +175,13 @@ func set(codes []string) map[string]bool {
 	return m
 }
 
-func unclaimed(cat *iso.Catalog, claimed map[string]bool) []string {
+// unclaimed is the feature codes no case claims and somebody could still
+// write one for. The register is subtracted rather than listed alongside,
+// because the point of the list is the work left and those are not work.
+func unclaimed(cat *iso.Catalog, claimed, unwritable map[string]bool) []string {
 	var out []string
 	for _, f := range cat.Features {
-		if !claimed[f.Code] {
+		if !claimed[f.Code] && !unwritable[f.Code] {
 			out = append(out, f.Code)
 		}
 	}

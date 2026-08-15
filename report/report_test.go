@@ -128,11 +128,19 @@ func sample() *runner.Report {
 			BySkip: map[runner.SkipReason]int{runner.SkipCapability: 1},
 		},
 		Coverage: runner.Coverage{
-			Features:      map[string]runner.Status{"GQ13": {Cases: 1, Fail: 1, Description: "LIMIT"}},
-			Subclauses:    map[string]runner.Status{"14.9": {Cases: 1, Pass: 1, Description: "Match statement"}},
-			Conditions:    map[string]runner.Status{"22012": {Cases: 1, Pass: 1, Description: "division by zero"}},
-			Productions:   map[string]runner.Status{"<match statement>": {Cases: 1, Pass: 1}},
-			Families:      []runner.FamilyCoverage{{Family: "GQ", Total: 20, Tested: 1, Supported: 0}},
+			Features:    map[string]runner.Status{"GQ13": {Cases: 1, Fail: 1, Description: "LIMIT"}},
+			Subclauses:  map[string]runner.Status{"14.9": {Cases: 1, Pass: 1, Description: "Match statement"}},
+			Conditions:  map[string]runner.Status{"22012": {Cases: 1, Pass: 1, Description: "division by zero"}},
+			Productions: map[string]runner.Status{"<match statement>": {Cases: 1, Pass: 1}},
+			Families: []runner.FamilyCoverage{
+				{Family: "GQ", Total: 20, Tested: 1, Supported: 0},
+				{Family: "GH", Total: 2, Tested: 0, Supported: 0, Unwritable: 1},
+			},
+			Unwritable: []corpus.Unwritable{{
+				Feature:    "GH01",
+				Production: "external object reference",
+				Note:       "The standard leaves the syntax to the implementer.",
+			}},
 			FeaturesTotal: 228, ConditionsTotal: 68, ProductionsTotal: 814, SubclausesTotal: 317,
 		},
 		Implementation: observations(),
@@ -608,6 +616,40 @@ func TestAReportWithNoObservationsPrintsNoSection(t *testing.T) {
 	}
 	if strings.Contains(h.String(), `id="implementation"`) {
 		t.Error("the HTML table of contents links to a section that is not there")
+	}
+}
+
+// A reader who sees a family at one of two tested will go looking for the
+// missing case, and for GH there is none to find: ISO does not spell the
+// syntax GH01 would be tested in. The coverage table has to say which gaps are
+// work and which are the standard, and it has to say it without moving a
+// number, because a feature nobody can test is still one of the 228 and is
+// still not supported.
+func TestCoverageSeparatesAGapThatIsWorkFromAGapThatIsTheStandard(t *testing.T) {
+	out := render(t, report.FormatMarkdown)
+	if !strings.Contains(out, "No portable case") {
+		t.Error("the family table does not have a column for the features no case can reach")
+	}
+	if !strings.Contains(out, "| GH | 2 | 0 | 0 | 1 |") {
+		t.Error("the GH row does not read as two features, none tested, one unwritable")
+	}
+	if !strings.Contains(out, "GH01, which reaches the grammar only at `<external object reference>`") {
+		t.Error("the report does not say which feature has no portable case, or where it lives")
+	}
+	if !strings.Contains(out, "See the Syntax Rules") {
+		t.Error("the report does not say why no case can be written")
+	}
+	// Not a skip, not a failure, and not subtracted from anything.
+	if strings.Contains(out, "227") {
+		t.Error("the unwritable feature was taken out of the ISO denominator")
+	}
+
+	html := render(t, report.FormatHTML)
+	if !strings.Contains(html, "No portable case") {
+		t.Error("the HTML family table lost the column")
+	}
+	if !strings.Contains(html, "<code>GH01</code>") {
+		t.Error("the HTML does not name the feature no case can reach")
 	}
 }
 

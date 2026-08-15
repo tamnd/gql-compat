@@ -352,24 +352,35 @@ func (h *htmlWriter) coverage(rep *runner.Report) {
 		cov.FeaturesTotal, cov.ConditionsTotal, cov.ProductionsTotal, cov.SubclausesTotal, cov.FeaturesTotal)
 
 	h.p(`<h3>Optional feature families</h3>`)
-	h.p(`<table class="grid"><thead><tr><th>Family</th><th class="n">ISO features</th><th class="n">Tested here</th><th class="n">Supported</th><th>&nbsp;</th></tr></thead><tbody>`)
-	var tested, supported, total int
+	h.p(`<table class="grid"><thead><tr><th>Family</th><th class="n">ISO features</th><th class="n">Tested here</th><th class="n">Supported</th><th class="n">No portable case</th><th>&nbsp;</th></tr></thead><tbody>`)
+	var tested, supported, total, unwritable int
 	for _, f := range cov.Families {
 		total += f.Total
 		tested += f.Tested
 		supported += f.Supported
-		if f.Tested == 0 {
+		unwritable += f.Unwritable
+		if f.Tested == 0 && f.Unwritable == 0 {
 			continue
 		}
-		h.p(`<tr><td><code>%s</code></td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="barcell">%s</td></tr>`,
-			e(f.Family), f.Total, f.Tested, f.Supported, familyBar(f))
+		h.p(`<tr><td><code>%s</code></td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="barcell">%s</td></tr>`,
+			e(f.Family), f.Total, f.Tested, f.Supported, f.Unwritable, familyBar(f))
 	}
-	h.p(`<tr class="total"><td>all families</td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td></td></tr>`,
-		total, tested, supported)
+	h.p(`<tr class="total"><td>all families</td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td class="n">%d</td><td></td></tr>`,
+		total, tested, supported, unwritable)
 	h.p(`</tbody></table>`)
 	if tested < total {
 		h.p(`<p class="note">%d of the %d optional features this standard defines are not exercised by the corpus at all. They are neither supported nor unsupported here; they are untested, and this report says so rather than defaulting them either way.</p>`,
 			total-tested, total)
+	}
+	if len(cov.Unwritable) > 0 {
+		h.p(`<p class="note">%d of them will stay that way. The grammar rule each of these hangs off is one ISO writes as "!! See the Syntax Rules.", so the standard supplies no words to ask two engines the same question in, and a case for it would test this project's invention rather than the standard.</p>`,
+			len(cov.Unwritable))
+		h.p(`<ul class="note">`)
+		for _, u := range cov.Unwritable {
+			h.p(`<li><code>%s</code>, which reaches the grammar only at <code>&lt;%s&gt;</code>. %s</li>`,
+				e(u.Feature), e(u.Production), e(u.Note))
+		}
+		h.p(`</ul>`)
 	}
 
 	h.statusTable("Optional features tested", "Feature", cov.Features)

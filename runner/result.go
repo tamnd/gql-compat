@@ -374,6 +374,11 @@ type Coverage struct {
 	Conditions map[string]Status `json:"conditions"`
 	// Productions is per-BNF production name.
 	Productions map[string]Status `json:"productions"`
+	// Unwritable is the features the standard describes but does not spell,
+	// carried here so a reader of a coverage table can tell a gap that is work
+	// from a gap that is the standard. It is not a result and nothing above is
+	// computed from it.
+	Unwritable []corpus.Unwritable `json:"unwritable,omitempty"`
 
 	// FeaturesTotal, ConditionsTotal, ProductionsTotal, and SubclausesTotal
 	// are the ISO denominators: 228 optional features, the codes
@@ -413,6 +418,11 @@ type FamilyCoverage struct {
 	Tested int `json:"tested"`
 	// Supported is how many of the tested ones passed everywhere.
 	Supported int `json:"supported"`
+	// Unwritable is how many of the family's features no portable case can
+	// reach, because the standard leaves their syntax to the implementer. They
+	// are part of Total and they are not part of Tested, and the difference
+	// between Total and Tested is only work for the ones this does not count.
+	Unwritable int `json:"unwritable,omitempty"`
 }
 
 // EngineInfo pins the results to something.
@@ -513,7 +523,7 @@ type Report struct {
 const ReportSchema = 1
 
 // summarize computes totals and coverage from the case results.
-func summarize(cat *iso.Catalog, results []CaseResult) (Totals, Coverage) {
+func summarize(cat *iso.Catalog, unwritable []corpus.Unwritable, results []CaseResult) (Totals, Coverage) {
 	t := Totals{
 		Cases:  len(results),
 		ByKind: map[corpus.Kind]KindTotals{},
@@ -580,7 +590,8 @@ func summarize(cat *iso.Catalog, results []CaseResult) (Totals, Coverage) {
 			cov.Subclauses[number] = st
 		}
 	}
-	cov.Families = families(cat, cov.Features)
+	cov.Unwritable = unwritable
+	cov.Families = families(cat, unwritable, cov.Features)
 	return t, cov
 }
 
@@ -649,7 +660,7 @@ func record(into map[string]Status, keys []string, outcome Outcome) {
 	}
 }
 
-func families(cat *iso.Catalog, tested map[string]Status) []FamilyCoverage {
+func families(cat *iso.Catalog, unwritable []corpus.Unwritable, tested map[string]Status) []FamilyCoverage {
 	totals := map[string]int{}
 	for _, f := range cat.Features {
 		totals[f.Family]++
@@ -657,6 +668,15 @@ func families(cat *iso.Catalog, tested map[string]Status) []FamilyCoverage {
 	agg := map[string]*FamilyCoverage{}
 	for fam, n := range totals {
 		agg[fam] = &FamilyCoverage{Family: fam, Total: n}
+	}
+	for _, u := range unwritable {
+		f, ok := cat.Feature(u.Feature)
+		if !ok {
+			continue
+		}
+		if fc := agg[f.Family]; fc != nil {
+			fc.Unwritable++
+		}
 	}
 	for code, st := range tested {
 		f, ok := cat.Feature(code)

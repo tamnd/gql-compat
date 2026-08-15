@@ -1,0 +1,42 @@
+# The optional features no portable case can be written for.
+#
+# Coverage has two kinds of gap and only one of them is work. The usual kind is
+# a feature nobody has written a case for yet, and the list of those is what
+# `gql-compat validate -missing` prints. The other kind is a feature the
+# standard describes but does not spell: the grammar rule the feature hangs off
+# is one ISO writes as "!! See the Syntax Rules.", so there is no syntax two
+# engines could be asked the same question in, and a case citing the feature
+# would be a case testing this project's invention rather than the standard.
+# Those go here, once, with the rule that makes the claim checkable.
+#
+# The bar is deliberately high. An entry is not "hard to test", "needs a
+# fixture we do not have", or "no engine implements it": those are all cases
+# somebody has not written. An entry is a feature whose syntax the standard
+# leaves to the implementer, which is a different sentence and a permanent one.
+# The loader enforces the checkable half: the feature code has to be one of
+# ISO's 228, the production has to be a rule in the grammar artifact, and that
+# rule's right-hand side has to be the see-the-rules marker. What the loader
+# cannot check is whether the feature really has no other syntactic home, so
+# each note says where the feature is reachable from and why that is the end of
+# it. A note is printed into markdown as well as into a terminal, so name a
+# grammar rule in words rather than in angle brackets, which a markdown reader
+# eats.
+#
+# Nothing here changes a denominator. GH01 is still one of the 228 and the GH
+# family is still two features wide; the report gains a column saying one of
+# them is not a case anybody can write, and the count of features tested stays
+# honest at what it is.
+
+version: 1
+unwritable:
+  - feature: GH01
+    production: external object reference
+    note: >-
+      An external object reference is reachable from exactly one place in the
+      grammar, the copy of graph type rule, where COPY OF takes either a graph
+      type reference or one of these, and subclause 17.8 defines it as "!! See
+      the Syntax Rules." with no production beneath it. So the feature is real, the
+      standard means something by it, and the syntax for naming an object
+      outside the catalogue is the implementer's to choose. Two engines can
+      both support GH01 and share not one character of spelling, which is the
+      condition under which a portable case cannot exist.

@@ -234,21 +234,30 @@ func writeCoverage(b io.Writer, rep *runner.Report) {
 		cov.FeaturesTotal, cov.ConditionsTotal, cov.ProductionsTotal, cov.SubclausesTotal, cov.FeaturesTotal)
 
 	p("### Optional feature families\n\n")
-	p("| Family | ISO features | Tested here | Supported |\n|---|---:|---:|---:|\n")
-	var tested, supported, total int
+	p("| Family | ISO features | Tested here | Supported | No portable case |\n|---|---:|---:|---:|---:|\n")
+	var tested, supported, total, unwritable int
 	for _, f := range cov.Families {
 		total += f.Total
 		tested += f.Tested
 		supported += f.Supported
-		if f.Tested == 0 {
+		unwritable += f.Unwritable
+		if f.Tested == 0 && f.Unwritable == 0 {
 			continue
 		}
-		p("| %s | %d | %d | %d |\n", f.Family, f.Total, f.Tested, f.Supported)
+		p("| %s | %d | %d | %d | %d |\n", f.Family, f.Total, f.Tested, f.Supported, f.Unwritable)
 	}
-	p("| **all families** | **%d** | **%d** | **%d** |\n\n", total, tested, supported)
+	p("| **all families** | **%d** | **%d** | **%d** | **%d** |\n\n", total, tested, supported, unwritable)
 	if tested < total {
 		p("%d of the %d optional features this standard defines are not exercised by the corpus at all. They are neither supported nor unsupported here; they are untested, and the report says so rather than defaulting them either way.\n\n",
 			total-tested, total)
+	}
+	if len(cov.Unwritable) > 0 {
+		p("%d of them will stay that way. The grammar rule each of these hangs off is one ISO writes as \"!! See the Syntax Rules.\", so the standard supplies no words to ask two engines the same question in, and a case for it would test this project's invention rather than the standard:\n\n",
+			len(cov.Unwritable))
+		for _, u := range cov.Unwritable {
+			p("- %s, which reaches the grammar only at `<%s>`. %s\n", u.Feature, u.Production, u.Note)
+		}
+		p("\n")
 	}
 
 	writeStatusTable(b, "### Optional features tested", "Feature", cov.Features)
