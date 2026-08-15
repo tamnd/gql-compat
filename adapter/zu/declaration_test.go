@@ -15,7 +15,7 @@ import (
 const declared = `{"engine":{"name":"zu","version":"0.0.1"},` +
 	`"data":{"labels":true,"multi-label":false,"node-properties":true,` +
 	`"edge-properties":true,"edge-types":true,"multiple-edge-types":true,` +
-	`"multiple-node-labels":false,"temporal-values":true,"list-values":true,` +
+	`"multiple-node-labels":true,"temporal-values":true,"list-values":true,` +
 	`"null-properties":true,"float-values":true,"boolean-values":true,` +
 	`"undirected-edges":true,"self-loops":true,"parallel-edges":true,` +
 	`"parallel-edge-properties":false},` +
@@ -42,6 +42,9 @@ func TestDeclarationBecomesCapabilities(t *testing.T) {
 	}
 	if !caps.Data[fixture.CapEdgeProperties] {
 		t.Error("edge-properties is declared true and did not arrive true")
+	}
+	if !caps.Data[fixture.CapMultipleNodeLabels] {
+		t.Error("multiple-node-labels is declared true and did not arrive true")
 	}
 	if caps.Data[fixture.CapParallelEdgeProperties] {
 		t.Error("parallel-edge-properties is declared false and arrived true")
