@@ -13,7 +13,7 @@ import (
 // shells out to whatever zu happens to be on PATH would pass or fail for
 // reasons that have nothing to do with the code under it.
 const declared = `{"engine":{"name":"zu","version":"0.0.1"},` +
-	`"data":{"labels":true,"multi-label":false,"node-properties":true,` +
+	`"data":{"labels":true,"multi-label":true,"node-properties":true,` +
 	`"edge-properties":true,"edge-types":true,"multiple-edge-types":true,` +
 	`"multiple-node-labels":true,"temporal-values":true,"list-values":true,` +
 	`"null-properties":true,"float-values":true,"boolean-values":true,` +

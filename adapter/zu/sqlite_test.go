@@ -2,6 +2,8 @@ package zu
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -274,5 +276,107 @@ func TestEdgePropertiesBecomeColumnsOnTheRelTable(t *testing.T) {
 	fx.Edges[1].Props["since"] = "yesterday"
 	if _, err := planFixture(fx); err == nil {
 		t.Error("planned a column that is an integer on one edge and text on another")
+	}
+}
+
+// A node with more than one label lives in the table its first label names
+// and carries the rest as rows of zu_labels, which is what zu's converter
+// turns into the label word each node row holds. The interesting part is that
+// nothing else changes: two nodes whose first label is the same share a table
+// whatever else they carry, so the column set and the edge endpoints are
+// derived exactly as before.
+func TestExtraLabelsBecomeRowsOfTheLabelTable(t *testing.T) {
+	fx := &fixture.Fixture{
+		Name: "multi-label",
+		Nodes: []fixture.Node{
+			{Key: "a", Labels: []string{"Person", "Employee"}},
+			{Key: "b", Labels: []string{"Person"}},
+			{Key: "c", Labels: []string{"Person", "Employee", "Manager"}},
+			{Key: "d", Labels: []string{"City"}},
+		},
+		Edges: []fixture.Edge{
+			{Type: "KNOWS", From: "a", To: "c"},
+			{Type: "LIVES_IN", From: "a", To: "d"},
+		},
+	}
+	plan, err := planFixture(fx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	person := slices.IndexFunc(plan.nodeTables, func(nt *nodeTable) bool { return nt.label == "Person" })
+	if person < 0 {
+		t.Fatal("no table for the first label")
+	}
+	if got := len(plan.nodeTables[person].rows); got != 3 {
+		t.Fatalf("Person holds %d rows, want the 3 nodes whose first label it is", got)
+	}
+	want := [][]string{{"Employee"}, nil, {"Employee", "Manager"}}
+	if got := plan.nodeTables[person].extra; !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("Person carries %v, want %v", got, want)
+	}
+	// A table nobody gave a second label to carries none, so zu does not
+	// grow a word per row for it.
+	city := slices.IndexFunc(plan.nodeTables, func(nt *nodeTable) bool { return nt.label == "City" })
+	if city < 0 {
+		t.Fatal("no table for City")
+	}
+	if plan.nodeTables[city].extra != nil {
+		t.Errorf("City carries %v, want nothing", plan.nodeTables[city].extra)
+	}
+	// The endpoints are still the tables, not the label sets.
+	livesIn := slices.IndexFunc(plan.relTables, func(rt *relTable) bool { return rt.typ == "LIVES_IN" })
+	if livesIn < 0 {
+		t.Fatal("no rel table for LIVES_IN")
+	}
+	if got := [2]string{plan.relTables[livesIn].src, plan.relTables[livesIn].dst}; got != [2]string{"Person", "City"} {
+		t.Errorf("LIVES_IN binds to %v, want Person and City", got)
+	}
+
+	// And the rows reach the file, on the row numbers the node table gave.
+	path := filepath.Join(t.TempDir(), "labels.db")
+	if err := writeFixtureDB(context.Background(), path, fx); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	rows, err := db.Query("SELECT tbl, zrow, label FROM zu_labels ORDER BY tbl, zrow, label")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var got []string
+	for rows.Next() {
+		var tbl, label string
+		var zrow int64
+		if err := rows.Scan(&tbl, &zrow, &label); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%s/%d/%s", tbl, zrow, label))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	wantRows := []string{"Person/0/Employee", "Person/2/Employee", "Person/2/Manager"}
+	if !slices.Equal(got, wantRows) {
+		t.Errorf("zu_labels holds %v, want %v", got, wantRows)
+	}
+}
+
+// A label has to be a name zu can put in its dictionary, wherever in the set
+// it sits: the second one is written into the file the same way the first is.
+func TestAnExtraLabelIsHeldToTheSameShapeAsATable(t *testing.T) {
+	fx := &fixture.Fixture{
+		Name: "bad-label",
+		Nodes: []fixture.Node{
+			{Key: "a", Labels: []string{"Person", "drop table"}},
+			{Key: "b", Labels: []string{"Person"}},
+		},
+		Edges: []fixture.Edge{{Type: "KNOWS", From: "a", To: "b"}},
+	}
+	if _, err := planFixture(fx); err == nil {
+		t.Error("planned a label that is not a name")
 	}
 }

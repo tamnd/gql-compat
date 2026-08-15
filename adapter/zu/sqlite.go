@@ -23,7 +23,7 @@ import (
 // nonzero application id, so a fixture database has to claim them too.
 const (
 	sqliteApplicationID = 0x005A_5531 // the ASCII bytes "ZU1"
-	sqliteSchemaVersion = 3           // version 3 records whether a rel table's edges have a direction
+	sqliteSchemaVersion = 4           // version 4 adds the table holding the labels a node carries beyond its own
 )
 
 // writeFixtureDB writes fx into path as a database laid out the way zu's own
@@ -37,10 +37,13 @@ const (
 // to fabricate zu1 segments. zu detects a third-party writer by schema hash
 // and opens such a file read-only, which is all a conversion needs.
 //
-// What survives the conversion is what the capability set declares: one label
-// per node, integer, string, float, boolean and temporal properties on nodes
-// and on edges alike, and typed directed edges including self-loops and
-// parallel pairs. A rel table names the node table at each of its ends, so an
+// What survives the conversion is what the capability set declares: every
+// label a node carries, integer, string, float, boolean and temporal
+// properties on nodes and on edges alike, and typed directed edges including
+// self-loops and parallel pairs. A node's first label is the table it lives
+// in and the rest ride the zu_labels table, which is what zu's converter
+// turns into the label word each row carries.
+// A rel table names the node table at each of its ends, so an
 // edge between two labels crosses as well, as long as every edge of its type
 // runs between the same pair. A null does cross, as a SQL NULL in a column whose declared type
 // comes from the rows that hold a value, which is the shape zu's converter
@@ -68,6 +71,9 @@ func writeFixtureDB(ctx context.Context, path string, fx *fixture.Fixture) error
 		return fmt.Errorf("claiming the file for zu: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, catalogDDL); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, labelsDDL); err != nil {
 		return err
 	}
 
@@ -123,6 +129,14 @@ const catalogDDL = `CREATE TABLE IF NOT EXISTS zu_catalog (` +
 	`sql TEXT NOT NULL, src_table TEXT, dst_table TEXT, ` +
 	`undirected INTEGER NOT NULL DEFAULT 0, UNIQUE (kind, name))`
 
+// labelsDDL is zu's label table, copied from the same place. One row per
+// (table, node, label) for every label a node carries beyond the one its
+// table is called, which every row of that table carries and none of these
+// repeats.
+const labelsDDL = `CREATE TABLE IF NOT EXISTS zu_labels (` +
+	`tbl TEXT NOT NULL, zrow INTEGER NOT NULL, label TEXT NOT NULL, ` +
+	`PRIMARY KEY (tbl, zrow, label)) WITHOUT ROWID`
+
 type fixturePlan struct {
 	nodeTables []*nodeTable
 	relTables  []*relTable
@@ -136,6 +150,11 @@ type nodeTable struct {
 	cols  []string
 	types []string
 	rows  [][]any
+	// The labels each row carries beyond the table's own, indexed the way
+	// rows is, and nil when no row of the table carries any. zu holds a
+	// word per row for a table that has this at all, so a table nobody
+	// gave a second label to should not grow one.
+	extra [][]string
 }
 
 type relTable struct {
@@ -173,19 +192,29 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 	labels := []string{}
 	for i, n := range fx.Nodes {
 		label := "Node"
-		switch len(n.Labels) {
-		case 0:
-			// An unlabelled node still needs a table to live in. `Node` is not
-			// a label the fixture wrote, so a case that asked for it by name
-			// would find nothing, which is the correct answer.
-		case 1:
+		if len(n.Labels) > 0 {
+			// The first label is the table the node lives in and the rest
+			// are bits on its row. Which one is the table matters for what
+			// the file looks like and not for what a query answers: a
+			// pattern naming any of them finds the node either way. The
+			// first is the choice because a fixture writes the labels in
+			// an order somebody chose, and the alternative, picking by
+			// some property of the label set, would put two nodes written
+			// the same way in different tables.
 			label = n.Labels[0]
-		default:
-			return nil, fmt.Errorf("node %q carries %d labels; zu gives a node exactly one table",
-				n.Key, len(n.Labels))
 		}
+		// An unlabelled node still needs a table to live in. `Node` is not
+		// a label the fixture wrote, so a case that asked for it by name
+		// would find nothing, which is the correct answer.
 		if err := checkIdent(label); err != nil {
 			return nil, err
+		}
+		if len(n.Labels) > 1 {
+			for _, extra := range n.Labels[1:] {
+				if err := checkIdent(extra); err != nil {
+					return nil, err
+				}
+			}
 		}
 		if _, seen := byLabel[label]; !seen {
 			labels = append(labels, label)
@@ -286,7 +315,8 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 	return plan, nil
 }
 
-// buildNodeTable derives one label's column set from its nodes.
+// buildNodeTable derives one label's column set from its nodes, and collects
+// the labels its rows carry beyond the table's own.
 func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, error) {
 	props := make([]map[string]any, len(idx))
 	for j, i := range idx {
@@ -296,7 +326,17 @@ func buildNodeTable(label string, idx []int, nodes []fixture.Node) (*nodeTable, 
 	if err != nil {
 		return nil, err
 	}
-	return &nodeTable{label: label, cols: cols, types: types, rows: rows}, nil
+	var extra [][]string
+	for j, i := range idx {
+		if len(nodes[i].Labels) < 2 {
+			continue
+		}
+		if extra == nil {
+			extra = make([][]string, len(idx))
+		}
+		extra[j] = nodes[i].Labels[1:]
+	}
+	return &nodeTable{label: label, cols: cols, types: types, rows: rows, extra: extra}, nil
 }
 
 // deriveColumns works out one staged table's column set from the properties
@@ -589,6 +629,26 @@ func (t *nodeTable) fill(ctx context.Context, tx *sql.Tx) error {
 		args := append([]any{int64(zrow)}, row...)
 		if _, err := stmt.ExecContext(ctx, args...); err != nil {
 			return err
+		}
+	}
+	if t.extra == nil {
+		return nil
+	}
+	labels, err := tx.PrepareContext(ctx, "INSERT OR IGNORE INTO zu_labels (tbl, zrow, label) VALUES (?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = labels.Close() }()
+	for zrow, set := range t.extra {
+		for _, label := range set {
+			// A node written with its own table's name twice is one
+			// label, and the row carries it because the table does.
+			if label == t.label {
+				continue
+			}
+			if _, err := labels.ExecContext(ctx, t.label, int64(zrow), label); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
