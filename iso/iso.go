@@ -109,6 +109,15 @@ type Production struct {
 	Keywords []string `json:"keywords"`
 	// Terminals are the punctuation and symbol terminals the rule names.
 	Terminals []string `json:"terminals"`
+	// SeeTheRules marks a rule the grammar declines to expand. ISO writes
+	// "!! See the Syntax Rules." where the alternatives would go, which is the
+	// grammar saying the syntax is somebody else's to define: the lexer's, in
+	// the case of <identifier start>, another standard's, in the case of
+	// <SQL-datetime literal>, and the implementation's, in the case of
+	// <external object reference>. Nothing generated from the grammar can
+	// produce one of these, so a harness that draws its inputs from the BNF
+	// needs to know which rules it cannot reach.
+	SeeTheRules bool `json:"see_the_rules,omitempty"`
 }
 
 // Subclause is one numbered clause or subclause of the standard.
@@ -318,6 +327,13 @@ func (c Codes) Production(name string) bool {
 	return ok
 }
 
+// SeeTheRules reports whether the grammar leaves this rule unexpanded, writing
+// "!! See the Syntax Rules." in place of a right-hand side.
+func (c Codes) SeeTheRules(name string) bool {
+	p, ok := c.Catalog.Production(name)
+	return ok && p.SeeTheRules
+}
+
 // Status reports whether the code is a GQLSTATUS ISO defines.
 func (c Codes) Status(code string) bool {
 	_, ok := c.Catalog.Status(code)
@@ -518,13 +534,14 @@ func parseGrammar(data []byte) ([]Production, error) {
 				p.Predicative = a.Value == "yes"
 			}
 		}
-		refs, kws, terms := map[string]bool{}, map[string]bool{}, map[string]bool{}
-		if err := walkRHS(dec, refs, kws, terms); err != nil {
+		side := rhs{refs: map[string]bool{}, kws: map[string]bool{}, terms: map[string]bool{}}
+		if err := walkRHS(dec, &side); err != nil {
 			return nil, err
 		}
-		p.References = sortedKeys(refs)
-		p.Keywords = sortedKeys(kws)
-		p.Terminals = sortedKeys(terms)
+		p.References = sortedKeys(side.refs)
+		p.Keywords = sortedKeys(side.kws)
+		p.Terminals = sortedKeys(side.terms)
+		p.SeeTheRules = side.seeTheRules
 		out = append(out, p)
 	}
 	if len(out) == 0 {
@@ -533,10 +550,18 @@ func parseGrammar(data []byte) ([]Production, error) {
 	return out, nil
 }
 
+// rhs is what one walk of a right-hand side collects.
+type rhs struct {
+	refs, kws, terms map[string]bool
+	// seeTheRules is set by the <seeTheRules/> element, the artifact's spelling
+	// of "!! See the Syntax Rules.".
+	seeTheRules bool
+}
+
 // walkRHS consumes tokens up to the end of the element the decoder has just
 // entered, collecting every <BNF> reference, <kw> keyword, and
 // <terminalsymbol> it passes.
-func walkRHS(dec *xml.Decoder, refs, kws, terms map[string]bool) error {
+func walkRHS(dec *xml.Decoder, side *rhs) error {
 	depth := 1
 	for depth > 0 {
 		tok, err := dec.Token()
@@ -550,21 +575,23 @@ func walkRHS(dec *xml.Decoder, refs, kws, terms map[string]bool) error {
 			case "BNF", "allAltsFrom":
 				for _, a := range t.Attr {
 					if a.Name.Local == "name" {
-						refs[a.Value] = true
+						side.refs[a.Value] = true
 					}
 				}
+			case "seeTheRules":
+				side.seeTheRules = true
 			case "kw":
 				if s, err := text(dec, t); err == nil {
 					depth--
 					if s != "" {
-						kws[strings.ToUpper(s)] = true
+						side.kws[strings.ToUpper(s)] = true
 					}
 				}
 			case "terminalsymbol":
 				if s, err := text(dec, t); err == nil {
 					depth--
 					if s != "" {
-						terms[s] = true
+						side.terms[s] = true
 					}
 				}
 			}

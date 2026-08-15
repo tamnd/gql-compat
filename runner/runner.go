@@ -180,6 +180,14 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 	if cfg.Catalog == nil {
 		return nil, errors.New("runner: no ISO catalogue")
 	}
+	// The register of features no portable case can be written for is read
+	// here rather than beside the summary, because a register that does not
+	// load is a coverage table that would quietly read one feature short and
+	// this is the last moment that can be said before the engine starts.
+	unwritable, err := corpus.Unwritables(iso.Codes{Catalog: cfg.Catalog})
+	if err != nil {
+		return nil, err
+	}
 
 	workdir := cfg.WorkDir
 	if workdir == "" {
@@ -284,7 +292,7 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 
 	rep.Run.Finished = time.Now()
 	rep.Run.Wall = rep.Run.Finished.Sub(started)
-	rep.Totals, rep.Coverage = summarize(cfg.Catalog, rep.Cases)
+	rep.Totals, rep.Coverage = summarize(cfg.Catalog, unwritable, rep.Cases)
 	rep.Declarations = declarations(rep.Cases)
 	return rep, nil
 }

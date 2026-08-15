@@ -34,6 +34,54 @@ func TestLoadCounts(t *testing.T) {
 	if len(c.ImplementationDependent) == 0 {
 		t.Error("implementation-dependent is empty")
 	}
+	seeTheRules := 0
+	for _, p := range c.Productions {
+		if p.SeeTheRules {
+			seeTheRules++
+		}
+	}
+	if seeTheRules != 23 {
+		t.Errorf("rules the grammar declines to expand = %d, want 23", seeTheRules)
+	}
+}
+
+// TestSeeTheRules checks the marker that tells a generator which rules it
+// cannot reach. A rule ISO writes as "!! See the Syntax Rules." has no
+// right-hand side to expand, so anything walking the grammar for inputs stops
+// there, and a feature reachable only through one of those rules has no syntax
+// the standard owns.
+func TestSeeTheRules(t *testing.T) {
+	c := MustLoad()
+	for _, name := range []string{"external object reference", "identifier start", "SQL-datetime literal"} {
+		p, ok := c.Production(name)
+		if !ok {
+			t.Fatalf("<%s> missing", name)
+		}
+		if !p.SeeTheRules {
+			t.Errorf("<%s> should be a rule the grammar leaves to the rules", name)
+		}
+		if len(p.References) != 0 || len(p.Keywords) != 0 {
+			t.Errorf("<%s> expands into something after all: %v %v", name, p.References, p.Keywords)
+		}
+	}
+	// A rule with a right-hand side must not pick up the marker, including one
+	// whose alternatives mention a rule that has it.
+	for _, name := range []string{"match statement", "copy of graph type"} {
+		p, ok := c.Production(name)
+		if !ok {
+			t.Fatalf("<%s> missing", name)
+		}
+		if p.SeeTheRules {
+			t.Errorf("<%s> is expanded by the grammar and must not carry the marker", name)
+		}
+	}
+	codes := Codes{Catalog: c}
+	if !codes.SeeTheRules("external object reference") {
+		t.Error("Codes.SeeTheRules says <external object reference> expands")
+	}
+	if codes.SeeTheRules("no such rule") {
+		t.Error("Codes.SeeTheRules said yes to a rule that does not exist")
+	}
 }
 
 func TestLookups(t *testing.T) {

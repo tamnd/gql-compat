@@ -968,3 +968,47 @@ func TestAnEngineThatRefusesAFixtureIsNotReportedAsATimeout(t *testing.T) {
 		t.Fatal("no case reported the fixture the engine refused")
 	}
 }
+
+// A coverage table with a family at zero of two reads as work nobody has done,
+// and for GH that is wrong: ISO writes the rule GH01 hangs off as "!! See the
+// Syntax Rules.", so there is no syntax to ask two engines the same question
+// in and there never will be. The run carries the register that says so, and
+// carries it without touching a count: the feature is still one of the 228,
+// still untested, and still not supported.
+func TestTheRunCarriesTheFeaturesNoPortableCaseCanReach(t *testing.T) {
+	rep := run(t, engine(t, nil), runner.Config{Repeats: 1})
+	cov := rep.Coverage
+	if len(cov.Unwritable) == 0 {
+		t.Fatal("the report carries no register of the features no case can reach")
+	}
+	found := false
+	for _, u := range cov.Unwritable {
+		if u.Feature == "GH01" {
+			found = true
+			if u.Production != "external object reference" || u.Note == "" {
+				t.Errorf("%+v: the entry does not say where the feature lives or why", u)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("GH01 is not in the register: %+v", cov.Unwritable)
+	}
+	var gh, gq runner.FamilyCoverage
+	for _, f := range cov.Families {
+		switch f.Family {
+		case "GH":
+			gh = f
+		case "GQ":
+			gq = f
+		}
+	}
+	if gh.Total != 2 || gh.Tested != 0 || gh.Unwritable != 1 {
+		t.Errorf("GH reads as %+v, want two features, none tested, one unwritable", gh)
+	}
+	if gq.Unwritable != 0 {
+		t.Errorf("GQ reads as %+v, and nothing in it is unwritable", gq)
+	}
+	if cov.FeaturesTotal != 228 {
+		t.Errorf("features total = %d: the register moved a denominator", cov.FeaturesTotal)
+	}
+}
