@@ -23,7 +23,7 @@ import (
 // nonzero application id, so a fixture database has to claim them too.
 const (
 	sqliteApplicationID = 0x005A_5531 // the ASCII bytes "ZU1"
-	sqliteSchemaVersion = 2           // version 2 records rel endpoints in the catalogue
+	sqliteSchemaVersion = 3           // version 3 records whether a rel table's edges have a direction
 )
 
 // writeFixtureDB writes fx into path as a database laid out the way zu's own
@@ -119,7 +119,8 @@ func writeFixtureDB(ctx context.Context, path string, fx *fixture.Fixture) error
 // layer binds against, and a VACUUM must not renumber it.
 const catalogDDL = `CREATE TABLE IF NOT EXISTS zu_catalog (` +
 	`id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, ` +
-	`sql TEXT NOT NULL, src_table TEXT, dst_table TEXT, UNIQUE (kind, name))`
+	`sql TEXT NOT NULL, src_table TEXT, dst_table TEXT, ` +
+	`undirected INTEGER NOT NULL DEFAULT 0, UNIQUE (kind, name))`
 
 type fixturePlan struct {
 	nodeTables []*nodeTable
@@ -139,7 +140,11 @@ type nodeTable struct {
 type relTable struct {
 	typ      string
 	endpoint string
-	edges    [][2]int64
+	// undirected says the edges here have no direction, which zu records on
+	// the table rather than on the edge. A fixture that gives one type both
+	// kinds of edge has nowhere to put the second, and is refused.
+	undirected bool
+	edges      [][2]int64
 }
 
 // planFixture works out the schema before any of it is written, because a
@@ -193,6 +198,9 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 	// first edge of each type settles; the rest are checked against it by the
 	// cross-label test below.
 	endpointOf := map[string]string{}
+	// Whether a type's edges have a direction, settled by its first edge for
+	// the same reason the endpoints are.
+	undirectedOf := map[string]bool{}
 	types := []string{}
 	for _, e := range fx.Edges {
 		typ := "EDGE"
@@ -219,14 +227,19 @@ func planFixture(fx *fixture.Fixture) (*fixturePlan, error) {
 		if _, seen := byType[typ]; !seen {
 			types = append(types, typ)
 			endpointOf[typ] = fl
+			undirectedOf[typ] = e.Undirected
+		}
+		if undirectedOf[typ] != e.Undirected {
+			return nil, fmt.Errorf("edge type %s has both directed and undirected edges; zu records the direction on the table", typ)
 		}
 		byType[typ] = append(byType[typ], [2]int64{from, to})
 	}
 	for _, typ := range types {
 		plan.relTables = append(plan.relTables, &relTable{
-			typ:      typ,
-			endpoint: endpointOf[typ],
-			edges:    byType[typ],
+			typ:        typ,
+			endpoint:   endpointOf[typ],
+			undirected: undirectedOf[typ],
+			edges:      byType[typ],
 		})
 	}
 
@@ -512,7 +525,7 @@ func (t *nodeTable) create(ctx context.Context, tx *sql.Tx) error {
 		fmt.Fprintf(&b, ", p_%s %s", c, t.types[i])
 	}
 	b.WriteString(");")
-	return createTable(ctx, tx, "node", t.label, b.String(), nil)
+	return createTable(ctx, tx, "node", t.label, b.String(), nil, false)
 }
 
 func (t *nodeTable) fill(ctx context.Context, tx *sql.Tx) error {
@@ -539,7 +552,7 @@ func (t *relTable) create(ctx context.Context, tx *sql.Tx) error {
 		"CREATE TABLE r_%[1]s (zrel INTEGER PRIMARY KEY, src INTEGER NOT NULL, dst INTEGER NOT NULL);\n"+
 			"CREATE INDEX r_%[1]s_fwd ON r_%[1]s (src, dst);\nCREATE INDEX r_%[1]s_bwd ON r_%[1]s (dst, src);",
 		t.typ)
-	return createTable(ctx, tx, "rel", t.typ, ddl, &[2]string{t.endpoint, t.endpoint})
+	return createTable(ctx, tx, "rel", t.typ, ddl, &[2]string{t.endpoint, t.endpoint}, t.undirected)
 }
 
 func (t *relTable) fill(ctx context.Context, tx *sql.Tx) error {
@@ -563,7 +576,7 @@ func (t *relTable) fill(ctx context.Context, tx *sql.Tx) error {
 // where `zu convert` looks to find out what the file holds. The DDL text is
 // stored verbatim beside the entry because that is what zu's own writer
 // stores; the converter reads the kind, the name and the endpoints.
-func createTable(ctx context.Context, tx *sql.Tx, kind, name, ddl string, endpoints *[2]string) error {
+func createTable(ctx context.Context, tx *sql.Tx, kind, name, ddl string, endpoints *[2]string, undirected bool) error {
 	if _, err := tx.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("creating %s table %s: %w", kind, name, err)
 	}
@@ -572,8 +585,8 @@ func createTable(ctx context.Context, tx *sql.Tx, kind, name, ddl string, endpoi
 		src, dst = endpoints[0], endpoints[1]
 	}
 	_, err := tx.ExecContext(ctx,
-		"INSERT INTO zu_catalog (kind, name, sql, src_table, dst_table) VALUES (?, ?, ?, ?, ?)",
-		kind, name, ddl, src, dst)
+		"INSERT INTO zu_catalog (kind, name, sql, src_table, dst_table, undirected) VALUES (?, ?, ?, ?, ?, ?)",
+		kind, name, ddl, src, dst, undirected)
 	return err
 }
 
