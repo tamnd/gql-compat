@@ -16,13 +16,18 @@
 #   harness-limit  the engines are fine, this project cannot measure the thing
 #
 # The queue below is from the run of 2026-08-13: Neo4j 2026.07.1, zu 0.0.1 and
-# Ladybug 0.19.1, 262 cases each, conformance mode. Fifty of the fifty one
-# entries came out shared-gap, which is the expected shape for a corpus that is
-# mostly optional features: nobody implements FOR ... WITH ORDINALITY, and
-# three engines agreeing about that says nothing about the case.
+# Ladybug 0.19.1, 262 cases each, conformance mode. Forty seven of the forty
+# eight entries came out shared-gap, which is the expected shape for a corpus
+# that is mostly optional features: nobody implements FOR ... WITH ORDINALITY,
+# and three engines agreeing about that says nothing about the case.
 #
-# Two things are worth saying about the fifty that are not corpus bugs. The
-# first is that the standard's spelling is the thing being measured, so an
+# Three entries have left the file since that run. The two G044 abbreviated
+# edge cases and the G045 one were shared gaps until zu grew the bracket less
+# edge patterns, and a case one engine passes is no longer a case every engine
+# failed, so the queue dropped them and the file follows.
+#
+# Two things are worth saying about the forty seven that are not corpus bugs.
+# The first is that the standard's spelling is the thing being measured, so an
 # engine that has the capability under another syntax still fails, and the note
 # says so where that is what happened. The second is the known limit of the
 # method: all three engines grew out of Cypher, so agreement between them is
@@ -101,20 +106,6 @@ dispositions:
       because it only supports juxtaposition for quantified path patterns. That
       is a partial implementation of the feature and not a misreading of the
       case.
-    decided: 2026-08-13
-  - case: optional/g044/abbreviated-edge-left
-    verdict: shared-gap
-    note: >-
-      The abbreviated edge patterns need no bracket, and all three parsers
-      demand one. The case is a single MATCH with no room to be wrong.
-    decided: 2026-08-13
-  - case: optional/g044/abbreviated-edge-right
-    verdict: shared-gap
-    note: Same absence as the left form, same shape of parse error in all three.
-    decided: 2026-08-13
-  - case: optional/g045/abbreviated-edge-left-or-right
-    verdict: shared-gap
-    note: Same absence again, this time for the undirected abbreviation.
     decided: 2026-08-13
   - case: optional/g080/simplified-path-pattern
     verdict: shared-gap
