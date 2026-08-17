@@ -64,7 +64,7 @@ jobs:
           --health-retries 30
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -100,7 +100,7 @@ jobs:
             sed -n '1,40p' reports/conformance/neo4j.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: neo4j-reports
           path: reports/
@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -147,7 +147,7 @@ jobs:
             sed -n '1,40p' reports/zu.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: steps.zu_src.outcome == 'success'
         with:
           name: zu-reports
@@ -157,7 +157,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -200,7 +200,7 @@ jobs:
             sed -n '1,40p' reports/ladybug/ladybug.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: ladybug-reports
           path: reports/
@@ -217,11 +217,11 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           path: ./artifacts
 
@@ -254,7 +254,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: hashFiles('reports/consensus.json') != ''
         with:
           name: consensus
