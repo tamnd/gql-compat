@@ -368,7 +368,77 @@ func (s *session) startShellLocked() error {
 		return fmt.Errorf("zu shell: %w", err)
 	}
 	s.cmd, s.in, s.out = cmd, stdin, bufio.NewReaderSize(stdout, 1<<20)
+	if err := s.greetLocked(); err != nil {
+		_ = s.stopLocked()
+		return err
+	}
 	return nil
+}
+
+// wireProtocol is the shell protocol this adapter reads. The number moves in
+// zu when a frame or a reply changes meaning and not when one is added, so a
+// greeting above it is a wire this code would misread and is refused here
+// rather than producing verdicts about an engine nobody was talking to.
+const wireProtocol = 1
+
+// greetLocked reads the line the shell writes before it reads anything.
+//
+// It is the first line of every session and it answers no request, so a client
+// that does not take it off the pipe reads it as the answer to its first
+// statement and every answer after that belongs to the statement before it.
+// The greeting carries no columns, which made a mutating case, the one kind
+// the runner gives no warm-up to burn it on, fail with "column count differs:
+// want 2, got 0" while the engine had answered correctly all along. The
+// caller holds s.mu.
+func (s *session) greetLocked() error {
+	line, err := s.readLine(10 * time.Second)
+	if err != nil {
+		return fmt.Errorf("zu shell: no greeting: %w (stderr: %s)", err, strings.TrimSpace(s.errs.String()))
+	}
+	var hello struct {
+		Protocol int    `json:"protocol"`
+		File     string `json:"file"`
+		Error    string `json:"error"`
+	}
+	if err := json.Unmarshal(line, &hello); err != nil {
+		return fmt.Errorf("zu shell: greeting is not a frame: %q", strings.TrimSpace(string(line)))
+	}
+	if hello.Error != "" {
+		return fmt.Errorf("zu shell: %s", hello.Error)
+	}
+	if hello.Protocol == 0 {
+		return fmt.Errorf("zu shell: first line names no protocol: %q", strings.TrimSpace(string(line)))
+	}
+	if hello.Protocol > wireProtocol {
+		return fmt.Errorf("zu shell: speaks protocol %d and this adapter reads %d: "+
+			"a frame or a reply has changed meaning, so update adapter/zu before measuring this build",
+			hello.Protocol, wireProtocol)
+	}
+	return nil
+}
+
+// readLine takes one line off the shell's output, or gives up after d.
+//
+// The read runs on a goroutine of its own because a pipe read is not
+// interruptible: on the timeout path the goroutine stays blocked until the
+// process it is reading from is killed, which is what every caller of this
+// does with the error.
+func (s *session) readLine(d time.Duration) ([]byte, error) {
+	type read struct {
+		line []byte
+		err  error
+	}
+	ch := make(chan read, 1)
+	go func() {
+		b, err := s.out.ReadBytes('\n')
+		ch <- read{b, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.line, r.err
+	case <-time.After(d):
+		return nil, fmt.Errorf("nothing on the pipe after %s", d)
+	}
 }
 
 func (s *session) stopShell() error {
