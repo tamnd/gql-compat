@@ -395,6 +395,27 @@ cases:
       columns: [total]
       rows: [[5]]
 
+  - id: optional/gq18/correlated-scalar-subquery
+    name: A value query expression reads a variable of the query it stands in
+    features: [GQ18]
+    subclauses: ["20.6"]
+    productions: [value query expression, nested query specification]
+    tags: [composition]
+    # The other half of the feature. The subquery names p, which the query
+    # around it bound, so the value it stands for is the row's rather than the
+    # statement's. Every name in the fixture is its own, so the count is one on
+    # every row and all five survive; an engine that worked the subquery out
+    # once would answer five here or nothing at all, and either is a different
+    # number from this.
+    query: |
+      MATCH (p:Person)
+      WHERE VALUE { MATCH (q:Person) WHERE q.name = p.name RETURN COUNT(*) } = 1
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
   - id: optional/gq19/graph-pattern-yield
     name: A yield clause on a graph pattern narrows which variables it exports
     features: [GQ19]
