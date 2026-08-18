@@ -68,5 +68,5 @@ func ExampleStandard() {
 	fmt.Printf("%d cases; ISO defines %d optional features and %d GQLSTATUS codes\n",
 		std.Suite.Len(), len(std.Catalog.Features), conditions)
 	// Output:
-	// 389 cases; ISO defines 228 optional features and 68 GQLSTATUS codes
+	// 392 cases; ISO defines 228 optional features and 68 GQLSTATUS codes
 }

@@ -158,6 +158,25 @@ cases:
       columns: [v]
       rows: [["a\\nb"]]
 
+  - id: optional/ga01/binary-floating-point-arithmetic
+    name: Arithmetic on 64 bit floats rounds the way IEEE 754 says
+    features: [GA01]
+    requires: [GA05, GV24]
+    subclauses: ["4.16.5.5", "20.21"]
+    productions: [numeric value expression, term, cast specification]
+    # A tenth has no exact binary representation, so the two nearest doubles to
+    # 0.1 and 0.2 add up to something that is not the nearest double to 0.3.
+    # An engine doing IEEE 754 arithmetic says so and an engine doing exact
+    # decimal arithmetic says the two sides are equal, which is the difference
+    # this feature names. The comparison is between values the engine itself
+    # produced, so nothing here depends on how a literal is typed.
+    query: |
+      RETURN CAST(0.1 AS FLOAT64) + CAST(0.2 AS FLOAT64) <> CAST(0.3 AS FLOAT64) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
   - id: optional/ga05/cast-string-to-integer
     name: CAST converts a character string to an integer
     features: [GA05]
