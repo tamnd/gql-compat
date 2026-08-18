@@ -82,6 +82,34 @@ fixtures:
       - {type: LINK, from: n3, to: n4}
       - {type: LINK, from: n4, to: n5}
 
+  - name: routes
+    description: >-
+      Four routes from r0 to r6, of three lengths: one hop straight there, two
+      hops by way of r1 and two more by way of r2, and four hops the long way
+      round through r3, r4 and r5. It is the fixture the counted selectors need.
+      Every other graph here has one path per pair of endpoints, so ALL, ANY,
+      SHORTEST 2 and SHORTEST 2 GROUPS all answer one row over them and an
+      engine that ignored the count would pass; over this one they answer four,
+      one, two and three.
+    nodes:
+      - {key: r0, labels: [Step], props: {step: 0}}
+      - {key: r1, labels: [Step], props: {step: 1}}
+      - {key: r2, labels: [Step], props: {step: 2}}
+      - {key: r3, labels: [Step], props: {step: 3}}
+      - {key: r4, labels: [Step], props: {step: 4}}
+      - {key: r5, labels: [Step], props: {step: 5}}
+      - {key: r6, labels: [Step], props: {step: 6}}
+    edges:
+      - {type: LINK, from: r0, to: r6}
+      - {type: LINK, from: r0, to: r1}
+      - {type: LINK, from: r1, to: r6}
+      - {type: LINK, from: r0, to: r2}
+      - {type: LINK, from: r2, to: r6}
+      - {type: LINK, from: r0, to: r3}
+      - {type: LINK, from: r3, to: r4}
+      - {type: LINK, from: r4, to: r5}
+      - {type: LINK, from: r5, to: r6}
+
   - name: triangle
     description: >-
       Three nodes in a directed cycle. The only fixture where a path may
