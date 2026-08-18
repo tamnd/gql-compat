@@ -34,6 +34,28 @@ cases:
       columns: [n]
       rows: [[5]]
 
+  - id: optional/gq01/use-home-graph
+    name: A use graph clause names the home graph as well as the current one
+    features: [GQ01]
+    subclauses: ["16.2"]
+    productions: [use graph clause, graph reference, home graph]
+    tags: [composition]
+    # The other half of the clause that can be written without knowing what
+    # anything is called. A graph reference also covers a graph passed in as a
+    # parameter, which is not a case here: a graph is not a value YAML can
+    # write, so a portable case cannot hand one to an engine.
+    #
+    # A session that has not moved its working graph is in its home graph, and
+    # nothing in GQL moves it, so this reads the fixture the case above reads.
+    query: |
+      USE HOME_PROPERTY_GRAPH
+      MATCH (p:Person)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
   - id: optional/gq02/otherwise
     name: OTHERWISE evaluates its right operand only when the left yields no records
     features: [GQ02]
