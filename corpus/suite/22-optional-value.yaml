@@ -570,6 +570,30 @@ cases:
       columns: [len]
       rows: [[1]]
 
+  - id: optional/gf04/elements-function
+    name: ELEMENTS answers the nodes and edges of a path as a list
+    features: [GF04]
+    subclauses: ["20.16", "4.11.2"]
+    productions: [elements function, list value function, path value expression]
+    fixture: chain
+    tags: [read, expression, path]
+    # A path is a value of its own and nothing indexes into one, so this is
+    # the way a query reads what one holds. Two nodes and the edge between
+    # them are three elements, where PATH_LENGTH of the same path is one.
+    #
+    # ISO names no feature of its own for the elements function, so the case
+    # claims the one that covers the other function over a path. An engine
+    # that has PATH_LENGTH and not this reads as partial GF04 rather than as
+    # a feature it never declared.
+    query: |
+      MATCH p = (a:Step)-[:LINK]->(b:Step)
+      WHERE a.step = 0
+      RETURN SIZE(ELEMENTS(p)) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[3]]
+
   - id: optional/gf07/byte-string-trim
     name: TRIM removes leading and trailing bytes from a byte string
     features: [GF07]
