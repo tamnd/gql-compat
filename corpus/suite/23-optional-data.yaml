@@ -450,6 +450,38 @@ cases:
     expect:
       kind: accept
 
+  - id: optional/gt03/two-graphs-written-in-one-transaction
+    name: One transaction can write into two graphs and both writes survive the commit
+    features: [GT03]
+    requires: [GT01, GC04, GD01]
+    subclauses: ["8.1", "16.2"]
+    productions: [use graph clause, graph expression, commit command]
+    fixture: blank
+    tags: [write, transaction, catalog]
+    mutating: true
+    # This is the positive side of condition/25g04/two-graphs-in-one-transaction,
+    # which asks an engine without GT03 to refuse the second graph. An engine
+    # with the feature accepts there and skips as within-limit, so nothing in
+    # the suite scored the feature it was demonstrating. Here the two writes go
+    # to different graphs under one transaction and the read after the commit
+    # is of the second one, so an engine that took both statements and then
+    # committed only the first is a failure rather than a pass.
+    setup:
+      - "CREATE PROPERTY GRAPH gqlcompat_gt03_a ANY"
+      - "CREATE PROPERTY GRAPH gqlcompat_gt03_b ANY"
+      - "START TRANSACTION"
+      - "USE gqlcompat_gt03_a INSERT (:Person {name: 'Ana'})"
+      - "USE gqlcompat_gt03_b INSERT (:Person {name: 'Bo'})"
+      - "COMMIT"
+    query: |
+      USE gqlcompat_gt03_b
+      MATCH (p:Person)
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[Bo]]
+
   - id: optional/gs03/session-set-value-parameter
     name: SESSION SET VALUE defines a parameter the session can then read
     features: [GS03]
