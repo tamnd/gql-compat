@@ -450,6 +450,63 @@ cases:
       columns: [n]
       rows: [[3]]
 
+  - id: optional/g006/keep-path-mode-prefix
+    name: A KEEP carrying a path mode says it for the patterns in front of it
+    features: [G006, G013, G061, G036]
+    subclauses: ["16.9", "16.6"]
+    productions: [keep clause, path pattern prefix, path mode prefix]
+    tags: [recursive]
+    fixture: triangle
+    # The same question as the ACYCLIC case above, written the other way
+    # round, so it answers the same two paths. A KEEP that was read as
+    # anything but the mode would answer three, which is what the default
+    # trail keeps over a cycle of three edges.
+    query: |
+      MATCH (a:Step)-[:LINK]->+(b:Step) KEEP ACYCLIC
+      WHERE a.step = 1
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[2]]
+
+  - id: optional/g007/keep-path-search-prefix
+    name: A KEEP carrying a path search says which paths the patterns keep
+    features: [G007, G020, G061, G036]
+    subclauses: ["16.9", "16.6"]
+    productions: [keep clause, path pattern prefix, path search prefix]
+    tags: [recursive]
+    fixture: routes
+    # The counted group case above written behind the pattern instead of in
+    # front of it, so the two shortest lengths are still three paths.
+    query: |
+      MATCH (a:Step)-[:LINK]->+(b:Step) KEEP SHORTEST 2 GROUPS
+      WHERE a.step = 0 AND b.step = 6
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[3]]
+
+  - id: optional/g007/keep-reaches-every-pattern
+    name: A KEEP says its prefix for every pattern of the list and not the last one
+    features: [G007, G018, G061, G036]
+    subclauses: ["16.9", "16.6"]
+    productions: [keep clause, path pattern list, path search prefix]
+    tags: [recursive]
+    fixture: routes
+    # Both patterns run from r0 to r6, which is four paths each and sixteen
+    # rows between them. One shortest path each is one row, where a KEEP
+    # read as belonging to the pattern it stands behind would leave four.
+    query: |
+      MATCH (a:Step)-[:LINK]->+(b:Step), (a)-[:LINK]->+(c:Step) KEEP ANY SHORTEST
+      WHERE b.step = 6 AND c.step = 6 AND a.step = 0
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
   - id: optional/g032/path-pattern-union
     name: A path pattern union matches either alternative and binds the same variables
     features: [G032]
