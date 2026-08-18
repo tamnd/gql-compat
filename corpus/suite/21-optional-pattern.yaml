@@ -579,7 +579,7 @@ cases:
       rows: [[1]]
 
   - id: optional/g003/repeatable-elements-match-mode
-    name: REPEATABLE ELEMENTS states the default match mode explicitly
+    name: REPEATABLE ELEMENTS lifts the edge distinctness a match imposes
     features: [G003]
     subclauses: ["16.4", "4.11.9"]
     productions: [match mode, repeatable elements match mode]
