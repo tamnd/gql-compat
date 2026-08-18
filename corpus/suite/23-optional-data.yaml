@@ -177,6 +177,29 @@ cases:
       columns: [name]
       rows: [[Linus]]
 
+  - id: optional/gd03/delete-item-is-a-subquery
+    name: DELETE removes the element a nested query answers
+    features: [GD01, GD03]
+    subclauses: ["13.5", "20.9"]
+    productions: [delete statement, delete item, value query expression, nested query specification]
+    fixture: pair
+    mutating: true
+    # The other side of the GD04 split. Here the delete item is a value
+    # query expression rather than a variable, which is the whole of what
+    # ISO makes GD03 out of, and the query inside it is what names the
+    # element. An engine that parses the braces but deletes nothing leaves
+    # both people behind and fails on the row count.
+    setup:
+      - "DELETE VALUE { MATCH (p:Person) WHERE p.name = 'Ada' RETURN p }"
+    query: |
+      MATCH (p:Person)
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Linus]]
+
   - id: optional/gd04/detach-delete-node
     name: DETACH DELETE removes a node together with the edges on it
     features: [GD01, GD04]
