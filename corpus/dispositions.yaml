@@ -21,10 +21,21 @@
 # that is mostly optional features: nobody implements FOR ... WITH ORDINALITY,
 # and three engines agreeing about that says nothing about the case.
 #
-# Three entries have left the file since that run. The two G044 abbreviated
-# edge cases and the G045 one were shared gaps until zu grew the bracket less
-# edge patterns, and a case one engine passes is no longer a case every engine
-# failed, so the queue dropped them and the file follows.
+# Twenty six entries have left the file since that run, and one has joined it.
+# A case one engine passes is no longer a case every engine failed, so the
+# queue drops it and this file follows, and twenty six of the shared gaps of
+# August were features zu has grown since: the SIMPLE path mode, the match mode
+# prefix, the bracket less edge patterns, the catalog statements, the set
+# operators, OTHERWISE, the scalar subquery, the match statement block, FOR
+# with ORDINALITY and with OFFSET, the yield after a match, the literal
+# families and the temporal comparisons. The one that joined is the natural
+# logarithm condition, which nobody could reach before because nobody parsed
+# the statement that provokes it.
+#
+# The engine versions above are the ones the notes were written against. A note
+# that names what an engine did is a record of that run, and the run of
+# 2026-08-19 that pruned this file used the same Neo4j and Ladybug reports with
+# zu rebuilt.
 #
 # Two things are worth saying about the forty seven that are not corpus bugs.
 # The first is that the standard's spelling is the thing being measured, so an
@@ -36,6 +47,17 @@
 
 version: 1
 dispositions:
+  - case: condition/2201e/logarithm-of-zero
+    verdict: shared-gap
+    note: >-
+      The condition is a natural logarithm of zero and no engine has a natural
+      logarithm to take one with, so both judging engines fail on the name
+      rather than on the number. zu says unknown function LN and answers 42002,
+      which is a catalogue lookup failing and not the 2201E the case asks for.
+      This is the GF03 gap one condition further in, and the case comes back
+      into play the day any engine grows the function. Two judging engines, so
+      thin.
+    decided: 2026-08-19
   - case: grammar/delimited-identifier-double-quoted
     verdict: shared-gap
     note: >-
@@ -65,20 +87,6 @@ dispositions:
       productions, so the machine readable artifact alone does not settle it,
       but Neo4j's appendix does, listing 21.3 as unsupported and naming the
       differing reserved word list. The case stands.
-    decided: 2026-08-13
-  - case: optional/g002/different-edges-match-mode
-    verdict: shared-gap
-    note: >-
-      No engine parses a match mode prefix at all. Three different parse errors
-      at three different offsets, which is what a genuinely absent feature
-      looks like.
-    decided: 2026-08-13
-  - case: optional/g012/simple-path-mode
-    verdict: shared-gap
-    note: >-
-      zu says the SIMPLE path mode is not supported yet and suggests ACYCLIC,
-      which is an engine declaring the gap in its own words. The other two do
-      not parse the prefix.
     decided: 2026-08-13
   - case: optional/g030/path-multiset-alternation
     verdict: shared-gap
@@ -156,25 +164,6 @@ dispositions:
       each takes the minus as the start of a statement. The case is one line
       and cites GB02 correctly.
     decided: 2026-08-13
-  - case: optional/gc01/create-schema
-    verdict: shared-gap
-    note: >-
-      No engine has a catalog schema at an absolute directory path. There is
-      nothing here to mistake for a spelling problem: none of the three has the
-      object at all.
-    decided: 2026-08-13
-  - case: optional/gc04/create-graph
-    verdict: corpus-bug
-    note: >-
-      The case writes CREATE PROPERTY GRAPH, and PROPERTY is optional in the
-      production: CREATE { [ PROPERTY ] GRAPH [ IF NOT EXISTS ] | OR REPLACE [
-      PROPERTY ] GRAPH }. Ladybug accepts CREATE GRAPH gg ANY and refuses
-      CREATE PROPERTY GRAPH gg ANY, so the case reports an engine that
-      implements GC04 as not implementing it. The case tests the optional
-      keyword and the feature at once and cannot tell which one failed. Fixed
-      by writing the case in the minimal spelling and adding a second case for
-      the PROPERTY keyword, so the two are measured separately.
-    decided: 2026-08-13
   - case: optional/ge03/let-value-expression
     verdict: shared-gap
     note: LET ... IN ... END is absent from all three expression grammars.
@@ -193,32 +182,6 @@ dispositions:
       form as too many parameters and Ladybug's binder wants one DOUBLE, so
       both have a one argument LOG and neither has the general logarithm. zu
       has no LN. The case is right about the signature.
-    decided: 2026-08-13
-  - case: optional/gg03/graph-type-inline
-    verdict: shared-gap
-    note: >-
-      Checked against the PROPERTY keyword problem next door and it is not that
-      one: Ladybug refuses the inline graph type in the short spelling too, at
-      the opening brace. The feature is absent in all three.
-    decided: 2026-08-13
-  - case: optional/gl03/binary-literal
-    verdict: shared-gap
-    note: 0b1010 is not a literal in any of the three lexers.
-    decided: 2026-08-13
-  - case: optional/gl05/exact-number-with-suffix
-    verdict: shared-gap
-    note: >-
-      The M suffix on an exact numeric literal is unlexed everywhere. Neo4j
-      calls it an invalid literal number, which is a lexer that got as far as
-      the digits.
-    decided: 2026-08-13
-  - case: optional/gl06/exact-number-scientific-with-suffix
-    verdict: shared-gap
-    note: Same suffix, same absence, scientific notation instead of common.
-    decided: 2026-08-13
-  - case: optional/gl11/opt-out-character-escaping
-    verdict: shared-gap
-    note: The at sign prefix that opts out of escaping is unlexed in all three.
     decided: 2026-08-13
   - case: optional/gp02/implicit-variable-scope
     verdict: shared-gap
@@ -258,61 +221,6 @@ dispositions:
       Follows from GC04 and GC01 being absent: there is no catalog statement
       here to mix with a data statement.
     decided: 2026-08-13
-  - case: optional/gq01/use-current-graph
-    verdict: shared-gap
-    note: >-
-      Neo4j looks up a graph literally named CURRENT_PROPERTY_GRAPH and does
-      not find one, so it has the syntax and not the meaning. Ladybug does not
-      parse the statement.
-    decided: 2026-08-13
-  - case: optional/gq02/otherwise
-    verdict: shared-gap
-    note: OTHERWISE is in neither judging engine's grammar.
-    decided: 2026-08-13
-  - case: optional/gq04/except-distinct
-    verdict: shared-gap
-    note: >-
-      Neither judging engine has EXCEPT. Neo4j has UNION only, which is the
-      documented state of Cypher's set operators.
-    decided: 2026-08-13
-  - case: optional/gq05/except-all
-    verdict: shared-gap
-    note: Same absence as EXCEPT DISTINCT.
-    decided: 2026-08-13
-  - case: optional/gq06/intersect-distinct
-    verdict: shared-gap
-    note: Same absence, INTERSECT this time.
-    decided: 2026-08-13
-  - case: optional/gq07/intersect-all
-    verdict: shared-gap
-    note: Same absence as INTERSECT DISTINCT.
-    decided: 2026-08-13
-  - case: optional/gq11/for-with-ordinality
-    verdict: shared-gap
-    note: >-
-      Three judging engines and no FOR statement in any of them. zu and Ladybug
-      do not have the keyword at all; Neo4j parses FOR and then fails on the
-      ordinality variable.
-    decided: 2026-08-13
-  - case: optional/gq18/scalar-subquery
-    verdict: shared-gap
-    note: RETURN VALUE { ... } is unparsed in both judging engines.
-    decided: 2026-08-13
-  - case: optional/gq19/graph-pattern-yield
-    verdict: shared-gap
-    note: The YIELD clause after a graph pattern is absent in both judging engines.
-    decided: 2026-08-13
-  - case: optional/gq21/optional-match-block
-    verdict: shared-gap
-    note: >-
-      Neo4j has OPTIONAL MATCH and not the braced OPTIONAL block, and says so
-      by expecting CALL or MATCH after OPTIONAL. The capability is adjacent and
-      the syntax is not the standard's.
-    decided: 2026-08-13
-  - case: optional/gq24/for-with-offset
-    verdict: shared-gap
-    note: Same missing FOR statement as GQ11, offset instead of ordinality.
-    decided: 2026-08-13
   - case: optional/gs06/session-reset-graph
     verdict: shared-gap
     note: >-
@@ -320,25 +228,4 @@ dispositions:
       that this one does contain PROPERTY GRAPH, but unlike GC04 the keyword is
       not optional in <session reset command>, so there is no shorter spelling
       an engine could be passing under.
-    decided: 2026-08-13
-  - case: optional/gv39/date-literal-comparison
-    verdict: shared-gap
-    note: >-
-      Both judging engines have dates and neither has the DATE 'yyyy-mm-dd'
-      literal; Neo4j spells it date('...'). Standard spelling again, and the
-      case is testing the literal rather than the type.
-    decided: 2026-08-13
-  - case: optional/gv41/duration-literal-comparison
-    verdict: shared-gap
-    note: Same as GV39 for DURATION 'P2D', which Neo4j spells duration('P2D').
-    decided: 2026-08-13
-  - case: performance/recursion/shortest-path-across-a-lattice
-    verdict: shared-gap
-    note: >-
-      Two judging engines, and thin for a third reason: Neo4j timed out on this
-      case rather than answering, which is a finding of its own and is in the
-      Neo4j report. Of the two that answered, Ladybug has no SHORTEST prefix,
-      and zu demands ANY SHORTEST or ALL SHORTEST where the standard also
-      admits SHORTEST followed by a count. The case is right and zu's message
-      is the engine describing its own restriction.
     decided: 2026-08-13
