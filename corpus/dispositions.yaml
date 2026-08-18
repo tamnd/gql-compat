@@ -21,19 +21,19 @@
 # that is mostly optional features: nobody implements FOR ... WITH ORDINALITY,
 # and three engines agreeing about that says nothing about the case.
 #
-# Twenty six entries have left the file since that run, and one has joined it.
-# A case one engine passes is no longer a case every engine failed, so the
-# queue drops it and this file follows, and twenty six of the shared gaps of
+# Twenty seven entries have left the file since that run, and one has joined
+# it. A case one engine passes is no longer a case every engine failed, so the
+# queue drops it and this file follows, and twenty seven of the shared gaps of
 # August were features zu has grown since: the SIMPLE path mode, the match mode
-# prefix, the bracket less edge patterns, the catalog statements, the set
-# operators, OTHERWISE, the scalar subquery, the match statement block, FOR
-# with ORDINALITY and with OFFSET, the yield after a match, the literal
-# families and the temporal comparisons. The one that joined is the natural
-# logarithm condition, which nobody could reach before because nobody parsed
-# the statement that provokes it.
+# prefix, the bracket less edge patterns, the parenthesized path pattern, the
+# catalog statements, the set operators, OTHERWISE, the scalar subquery, the
+# match statement block, FOR with ORDINALITY and with OFFSET, the yield after a
+# match, the literal families and the temporal comparisons. The one that joined
+# is the natural logarithm condition, which nobody could reach before because
+# nobody parsed the statement that provokes it.
 #
 # The engine versions above are the ones the notes were written against. A note
-# that names what an engine did is a record of that run, and the run of
+# that names what an engine did is a record of that run, and the runs of
 # 2026-08-19 that pruned this file used the same Neo4j and Ladybug reports with
 # zu rebuilt.
 #
@@ -106,14 +106,6 @@ dispositions:
     note: >-
       The questioned path suffix is unparsed everywhere. zu reports an
       unexpected character, which is a lexer that has never seen the token.
-    decided: 2026-08-13
-  - case: optional/g038/parenthesized-path-pattern
-    verdict: shared-gap
-    note: >-
-      Neo4j gets furthest, parsing the juxtaposition and then refusing it
-      because it only supports juxtaposition for quantified path patterns. That
-      is a partial implementation of the feature and not a misreading of the
-      case.
     decided: 2026-08-13
   - case: optional/g080/simplified-path-pattern
     verdict: shared-gap
