@@ -374,6 +374,82 @@ cases:
       columns: [n]
       rows: [[1]]
 
+  - id: optional/g015/all-path-search-over-several-lengths
+    name: ALL keeps every path however many lengths there are between the endpoints
+    features: [G015, G061, G036]
+    subclauses: ["16.6", "4.11.8"]
+    productions: [all path search, path or paths]
+    tags: [recursive]
+    fixture: routes
+    # The baseline the three counted cases below are read against. Four
+    # paths join these two nodes, of three different lengths, so a count of
+    # anything but four here says the pattern itself was read wrongly and
+    # the selector cases are measuring the wrong thing.
+    query: |
+      MATCH ALL PATHS (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 0 AND b.step = 6
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[4]]
+
+  - id: optional/g016/any-path-search-counted
+    name: ANY n keeps at most n paths per group of endpoints
+    features: [G016, G061, G036]
+    subclauses: ["16.6", "4.11.8"]
+    productions: [any path search, number of paths]
+    tags: [recursive]
+    fixture: routes
+    # Which two is the engine's business and the standard says so, so the
+    # case counts them rather than naming them.
+    query: |
+      MATCH ANY 2 PATHS (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 0 AND b.step = 6
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[2]]
+
+  - id: optional/g019/counted-shortest-path-counts-paths
+    name: SHORTEST n counts paths, so it may keep some of a length and not the rest
+    features: [G019, G061, G036]
+    subclauses: ["16.6", "4.11.8"]
+    productions: [counted shortest path search, number of paths]
+    tags: [recursive]
+    fixture: routes
+    # The one-hop path and one of the two two-hop paths. This is the case
+    # that separates counting paths from counting lengths: the group form
+    # below answers three over the same graph and the same number.
+    query: |
+      MATCH SHORTEST 2 PATHS (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 0 AND b.step = 6
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[2]]
+
+  - id: optional/g020/counted-shortest-group-search
+    name: SHORTEST n GROUPS counts lengths and keeps every path of each
+    features: [G020, G061, G036]
+    subclauses: ["16.6", "4.11.8"]
+    productions: [counted shortest group search, number of groups]
+    tags: [recursive]
+    fixture: routes
+    # The two shortest lengths are one hop and two hops, and there is one
+    # path at the first and two at the second, so the answer is three. A
+    # group is every path of its length or it is not a group.
+    query: |
+      MATCH SHORTEST 2 GROUPS (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 0 AND b.step = 6
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[3]]
+
   - id: optional/g032/path-pattern-union
     name: A path pattern union matches either alternative and binds the same variables
     features: [G032]
