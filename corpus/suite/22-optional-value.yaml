@@ -664,3 +664,48 @@ cases:
       kind: rows
       columns: [n]
       rows: [[1]]
+
+  - id: optional/ge05/binding-table-parameter
+    name: A binding table passed in as a parameter is a binding table
+    features: [GE05]
+    subclauses: ["11.2", "17.7", "19.6"]
+    productions: [binding table expression, reference parameter specification, substituted parameter reference, value type predicate]
+    tags: [read, expression, parameters]
+    # A binding table is a result that has already been read, so the only way
+    # one reaches a statement is from outside it, which is what this feature
+    # is. The type predicate is the evidence, because a table's rows are not
+    # something a statement can project and the type is the one thing about it
+    # every engine that has the type can answer.
+    params:
+      t:
+        $table:
+          columns: [id]
+          rows: [[1], [2]]
+    query: |
+      RETURN $$t IS TYPED BINDING TABLE AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/ge02/binding-table-reference-value-expression
+    name: A binding table reference is a value, and one table equals itself
+    features: [GE02, GE05]
+    subclauses: ["11.2", "17.4", "17.7"]
+    productions: [binding table expression, binding table reference, reference parameter specification]
+    tags: [read, expression, parameters]
+    # Equality on a reference is identity and not contents, so the table
+    # compared with itself is the comparison that says so without saying
+    # anything about the rows in it. The case claims GE05 as well because the
+    # only binding table a portable case can name is one it was handed.
+    params:
+      t:
+        $table:
+          columns: [id]
+          rows: [[1], [2]]
+    query: |
+      RETURN $$t = $$t AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]

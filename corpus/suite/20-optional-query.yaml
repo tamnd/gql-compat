@@ -586,3 +586,68 @@ cases:
       kind: rows
       columns: [v]
       rows: [[6]]
+
+  - id: optional/ge01/graph-reference-value-expression
+    name: A graph reference is a value, and two references to one graph are equal
+    features: [GE01]
+    subclauses: ["11.1", "17.2"]
+    productions: [graph expression, current graph, home graph]
+    fixture: unit
+    tags: [expression]
+    # The two words are the only graph references a case can write without
+    # knowing what anything here is called, and a session that has not moved
+    # its working graph is in the graph it started in, so the two name one
+    # graph. What the case asks is whether a reference is a value at all: an
+    # engine that has graph expressions answers true, and an engine that reads
+    # the words only in a USE clause cannot answer at all.
+    query: |
+      RETURN CURRENT_PROPERTY_GRAPH = HOME_PROPERTY_GRAPH AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/ge04/graph-parameter
+    name: A graph passed in as a parameter says which graph the query runs against
+    features: [GE04]
+    subclauses: ["11.1", "16.2", "17.7"]
+    productions: [graph expression, use graph clause, reference parameter specification, substituted parameter reference]
+    fixture: social
+    tags: [composition]
+    # ISO 17.7 makes a reference parameter a substituted parameter reference,
+    # which is the two dollar sign spelling, and the value is a graph and not
+    # a string. The parameter names the graph the session is already on, so
+    # what the case measures is whether a graph can be handed to a statement
+    # at all rather than which graph was handed over.
+    params:
+      g:
+        $graph: CURRENT_PROPERTY_GRAPH
+    query: |
+      USE $$g
+      MATCH (p:Person)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/ge08/reference-parameter-in-an-expression
+    name: A reference parameter is a value expression as well as a clause's graph
+    features: [GE08]
+    subclauses: ["11.1", "17.7"]
+    productions: [graph expression, reference parameter specification, substituted parameter reference]
+    fixture: unit
+    tags: [expression]
+    # The same parameter the case above puts behind a USE, read where a value
+    # goes. An engine that takes a reference parameter only in the clause and
+    # not in an expression fails this and passes that, which is the difference
+    # GE08 names.
+    params:
+      g:
+        $graph: CURRENT_PROPERTY_GRAPH
+    query: |
+      RETURN $$g = CURRENT_PROPERTY_GRAPH AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]

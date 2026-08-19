@@ -209,7 +209,20 @@ type Case struct {
 	// text. A code nobody can raise from a client is a fact about the code, and
 	// the honest report of it is a skip that says so.
 	Unprovokable string `yaml:"unprovokable" json:"unprovokable,omitempty"`
-	// Params binds named parameters, for the cases about parameters.
+	// Params binds named parameters, for the cases about parameters. A value
+	// is whatever YAML wrote, and the adapter hands it to the engine in the
+	// engine's own encoding.
+	//
+	// Two values have no YAML shape, and the standard has features about both:
+	// a graph parameter is GE04 and a binding table parameter is GE05. So a
+	// value written as a map holding one key that begins with a dollar sign is
+	// a reference rather than a record. "$graph" takes a graph reference the
+	// way a statement writes one, which is a path or one of the words that
+	// name a graph without naming it, and "$table" takes an object with a
+	// columns array and a rows array of arrays. An engine whose wire cannot
+	// carry a reference fails the case, which is the answer those two features
+	// are asking for, and no engine has to be taught the convention to be
+	// measured by it.
 	Params map[string]any `yaml:"params" json:"params,omitempty"`
 
 	Expect Expect `yaml:"expect" json:"expect"`
