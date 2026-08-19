@@ -285,6 +285,33 @@ cases:
       columns: [v, n]
       rows: [[10, 0], [20, 1]]
 
+  - id: optional/gq23/for-over-binding-table
+    name: A for statement over a binding table turns each row into a record
+    features: [GQ23, GQ10, GE05]
+    subclauses: ["14.8", "11.2"]
+    productions: [for statement, for item source, binding table expression, reference parameter specification]
+    fixture: unit
+    tags: [read, parameters]
+    # GQ10 makes a row out of every element of a list and this is the same
+    # statement over the other thing a row can come out of. A binding table is
+    # a result already read, so the only one a portable case can name is one it
+    # was handed, which is why the case claims GE05 as well. Each row arrives
+    # as a record whose fields are the table's columns, so the field read is
+    # the evidence that the row and not the table is what the name stands for.
+    params:
+      t:
+        $table:
+          columns: [id]
+          rows: [[1], [2]]
+    query: |
+      FOR r IN $$t
+      RETURN r.id AS v
+    expect:
+      kind: rows
+      unordered: true
+      columns: [v]
+      rows: [[1], [2]]
+
   - id: optional/gq12/offset
     name: An offset clause discards the first records of an ordered result
     features: [GQ12]
