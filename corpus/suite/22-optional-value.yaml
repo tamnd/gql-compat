@@ -499,6 +499,60 @@ cases:
       columns: [v]
       rows: [[1.5]]
 
+  - id: optional/gl12/sql-interval-year-to-month
+    name: A duration written the SQL way, with a qualifier saying which fields it holds
+    features: [GL12]
+    requires: [GV41]
+    subclauses: ["21.2"]
+    productions: [duration literal, SQL-interval literal]
+    tags: [lexical, temporal]
+    # The qualifier and not the string is what says which fields were written,
+    # so the same three characters are a year and two months here and are not a
+    # duration at all under a qualifier of DAY. The case compares against the
+    # ISO 8601 spelling rather than reading a duration back as text, because how
+    # a duration prints is a separate question and one engine's answer to it
+    # would otherwise decide this case.
+    query: |
+      RETURN INTERVAL '1-2' YEAR TO MONTH = DURATION 'P1Y2M' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gl12/sql-interval-day-to-second
+    name: The day and time half of the same spelling, written as SQL writes it
+    features: [GL12]
+    requires: [GV41]
+    subclauses: ["21.2"]
+    productions: [duration literal, SQL-interval literal]
+    tags: [lexical, temporal]
+    # A space between the day and the clock and colons inside it, which is the
+    # SQL shape and is not the ISO 8601 one. An engine that reads the string
+    # without the qualifier has nothing to tell it where the day ends.
+    query: |
+      RETURN INTERVAL '3 04:05:06' DAY TO SECOND = DURATION 'P3DT4H5M6S' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gl12/sql-datetime-literal
+    name: A datetime written with a space where ISO 8601 writes a T
+    features: [GL12]
+    requires: [GV40]
+    subclauses: ["21.2"]
+    productions: [datetime literal, SQL-datetime literal]
+    tags: [lexical, temporal]
+    # The other half of the same feature. Both spellings name one instant, so
+    # an engine that reads only the T answers this case with a syntax error and
+    # an engine that reads both answers true.
+    query: |
+      RETURN TIMESTAMP '2024-01-15 10:00:00+00:00' = ZONED DATETIME '2024-01-15T10:00:00Z' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
   - id: optional/ga04/comparing-values-of-different-types
     name: Universal comparison orders values that are not of one type
     features: [GA04]
