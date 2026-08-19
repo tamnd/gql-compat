@@ -738,3 +738,171 @@ cases:
       kind: rows
       columns: [n]
       rows: [[5]]
+
+  - id: optional/g005/path-search-prefix-on-a-pattern
+    name: A path search prefix written on the pattern keeps one path per pair of endpoints
+    features: [G005]
+    subclauses: ["16.6"]
+    productions: [path search prefix, path pattern]
+    fixture: routes
+    query: |
+      MATCH ANY SHORTEST (a:Step)-[:LINK]->+(b:Step)
+      WHERE a.step = 0 AND b.step = 6
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g031/multiset-alternation-of-variable-length-operands
+    name: Multiset alternation keeps a path once per operand that matched it
+    features: [G031]
+    subclauses: ["16.7"]
+    productions: [path multiset alternation, quantified path primary]
+    query: |
+      MATCH (a:Step)-[:LINK]->{1,2}(b:Step) |+| (a:Step)-[:LINK]->{2}(b:Step)
+      WHERE a.step = 0
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[3]]
+
+  - id: optional/g033/path-union-of-variable-length-operands
+    name: Path pattern union keeps a path found by both operands once
+    features: [G033]
+    subclauses: ["16.7"]
+    productions: [path pattern union, quantified path primary]
+    query: |
+      MATCH (a:Step)-[:LINK]->{1,2}(b:Step) | (a:Step)-[:LINK]->{2}(b:Step)
+      WHERE a.step = 0
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[2]]
+
+  - id: optional/g039/simplified-pattern-full-defaulting
+    name: A simplified path pattern between two plain bars walks an edge either way round
+    features: [G039]
+    subclauses: ["16.12"]
+    productions: [simplified path pattern expression, simplified defaulting any direction]
+    query: |
+      MATCH (a:Step)-/ LINK /-(b:Step)
+      WHERE a.step = 2
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[2]]
+
+  - id: optional/g082/simplified-pattern-basic-override
+    name: An arrowhead behind a label in a simplified pattern overrides the arrow around it
+    features: [G082]
+    subclauses: ["16.12"]
+    productions: [simplified direction override, simplified override right]
+    query: |
+      MATCH (a:Step)-/ LINK> /-(b:Step)
+      WHERE a.step = 2
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      columns: [step]
+      rows: [[3]]
+
+  - id: optional/g081/simplified-pattern-full-override
+    name: An arrowhead in front of a label in a simplified pattern points the step the other way
+    features: [G081]
+    subclauses: ["16.12"]
+    productions: [simplified direction override, simplified override left]
+    query: |
+      MATCH (a:Step)-/ <LINK /-(b:Step)
+      WHERE a.step = 2
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      columns: [step]
+      rows: [[1]]
+
+  - id: optional/g046/adjacent-vertex-patterns
+    name: Two node patterns written against each other describe one node
+    features: [G046]
+    subclauses: ["16.4"]
+    productions: [path term, node pattern]
+    query: |
+      MATCH (a:Step)(b:Step)
+      WHERE a.step = 3
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      columns: [step]
+      rows: [[3]]
+
+  - id: optional/g047/concise-edge-patterns
+    name: An abbreviated edge pattern may be written where the full one is
+    features: [G047]
+    subclauses: ["16.4"]
+    productions: [abbreviated edge pattern, edge pattern]
+    query: |
+      MATCH (a:Step)->(b:Step)
+      WHERE a.step = 3
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      columns: [step]
+      rows: [[4]]
+
+  - id: optional/g048/subpath-variable-declaration
+    name: A name inside a parenthesized path pattern binds a path over the stretch it holds
+    features: [G048]
+    subclauses: ["16.11"]
+    productions: [parenthesized path pattern expression, subpath variable declaration]
+    query: |
+      MATCH (a:Step)(p = (x:Step)-[:LINK]->(y:Step))(b:Step)
+      WHERE a.step = 0
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g049/parenthesized-path-mode-prefix
+    name: A path mode inside a parenthesized path pattern governs the steps it holds
+    features: [G049]
+    subclauses: ["16.11"]
+    productions: [parenthesized path pattern expression, path mode prefix]
+    query: |
+      MATCH (a:Step)(TRAIL (x:Step)-[:LINK]->(y:Step)-[:LINK]->(z:Step))(b:Step)
+      WHERE a.step = 0
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g050/parenthesized-where-clause
+    name: A WHERE inside a parenthesized path pattern is a condition on the stretch it holds
+    features: [G050]
+    subclauses: ["16.11"]
+    productions: [parenthesized path pattern expression, parenthesized path pattern where clause]
+    query: |
+      MATCH ((x:Step)-[:LINK]->(y:Step) WHERE y.step > 3)
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[2]]
+
+  - id: optional/g051/parenthesized-non-local-predicate
+    name: A WHERE inside a parenthesized path pattern may read a variable bound outside it
+    features: [G051]
+    subclauses: ["16.11"]
+    productions: [parenthesized path pattern where clause, path pattern expression]
+    query: |
+      MATCH (a:Step)-[:LINK]->(m:Step)((x:Step)-[:LINK]->(y:Step) WHERE x.step > a.step)(b:Step)
+      WHERE a.step = 0
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
