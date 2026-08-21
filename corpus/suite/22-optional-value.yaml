@@ -436,6 +436,29 @@ cases:
       columns: [n]
       rows: [[3]]
 
+  - id: optional/gf20/aggregate-in-a-sort-key
+    name: A sort key may be an aggregate the projection does not return
+    features: [GF20]
+    subclauses: ["16.17", "20.9"]
+    productions: [sort key, sort specification, aggregate function, general set function]
+    fixture: social
+    tags: [aggregate, ordered]
+    # The aggregate is in the sort key and nowhere else, which is the whole of
+    # what this feature adds: without it a query that wants the busiest person
+    # first has to return the count it does not want, and then the columns are
+    # decided by the ordering rather than by the question. The counts here are
+    # two for Alice and one for the other three, so the tie is broken by name
+    # and the row order is decided rather than accidental. Erin knows nobody
+    # and so is not a row at all, the pattern requiring an edge.
+    query: |
+      MATCH (p:Person)-[:KNOWS]->(f:Person)
+      RETURN p.name AS name
+      ORDER BY count(f) DESC, name
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[Alice], [Bob], [Carol], [Dave]]
+
   - id: optional/gv39/date-literal-comparison
     name: A date literal compares equal to a stored date
     features: [GV39]

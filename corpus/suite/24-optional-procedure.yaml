@@ -1,18 +1,21 @@
 # Optional procedure features (GP): inline procedures, their variable scope,
 # and the variable definitions a procedure body may open with.
 #
-# Named procedure calls — GP04, and GP14 and GP15, which are about what may be
-# passed to one — have no cases here. ISO defines the syntax of a named call
+# Named procedure calls, GP04, and GP14 and GP15, which are about what may be
+# passed to one, have no cases here. ISO defines the syntax of a named call
 # but not a single procedure to call: every procedure name is supplied by the
 # implementation or the catalog. A portable case would have to invent a name,
 # and every engine would fail it for the same uninteresting reason. An engine
 # that wants credit for GP04 has to demonstrate it in its own dialect, which
 # is what the `dialects` field is for; nothing in this suite can do it.
 #
-# For the same reason there are no cases for the binding-table variable
-# definitions (GP08 through GP10): a binding table variable has to be
-# initialized from a binding table that already exists in the catalog, and
-# nothing in this corpus can put one there portably.
+# The binding table variable definitions, GP08 through GP10, do have cases,
+# which took working out. A binding table variable needs a binding table to
+# be initialized from, and the obvious source is one in the catalog, which
+# nothing here can put there portably. The two that are portable are a nested
+# query, which needs no catalog at all, and a reference to a variable the same
+# body already defined, so those are the two the cases use and the catalog
+# never comes into it.
 
 defaults:
   kind: optional
@@ -165,6 +168,85 @@ cases:
     query: |
       CALL {
         PROPERTY GRAPH g = CURRENT_PROPERTY_GRAPH
+        USE g
+        MATCH (p:Person)
+        RETURN COUNT(*) AS n
+      }
+      RETURN n AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/gp08/binding-table-variable-from-a-subquery
+    name: A procedure body may bind a nested query's table to a variable
+    features: [GP01, GP08, GP10, GP17]
+    subclauses: ["10.2", "11.2"]
+    productions: [binding table variable definition, opt typed binding table initializer, binding table initializer, nested binding table query specification]
+    requires: [GQ23]
+    # The nested query is the only initializer a portable case can write that
+    # does not need something in the catalog first, so this is where GP08 is
+    # demonstrated as well as GP10: the parent feature is the definition and
+    # the child is what the definition was given. Reading the table back is a
+    # FOR over it, which is the one statement that takes a binding table and
+    # makes rows of it, so the field read is the evidence that the variable
+    # holds the table and not a copy of the query.
+    query: |
+      CALL {
+        BINDING TABLE t = { MATCH (q:Person) WHERE q.age > 40 RETURN q.name AS name }
+        FOR r IN t
+        RETURN r.name AS name
+      }
+      RETURN name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Carol], [Erin]]
+
+  - id: optional/gp09/binding-table-variable-from-a-reference
+    name: A binding table variable may be initialized from another one
+    features: [GP01, GP08, GP09, GP17]
+    subclauses: ["10.2", "11.2"]
+    productions: [binding table variable definition, binding table initializer, binding table expression, object name or binding variable]
+    requires: [GQ23]
+    # The other half of GP08. GP10 gives a definition a query and this gives
+    # one a reference, and a reference to a variable the body has already
+    # defined is the reference a portable case can write, nothing here being
+    # able to put a table in the catalog. The second variable has to be the
+    # table and not a value standing for it, which is what the FOR is asking:
+    # a body that binds the name to a value instead answers one row holding
+    # the whole table rather than a row for each of its rows.
+    query: |
+      CALL {
+        BINDING TABLE older = { MATCH (q:Person) WHERE q.age > 40 RETURN q.name AS name }
+        BINDING TABLE again = older
+        FOR r IN again
+        RETURN r.name AS name
+      }
+      RETURN name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Carol], [Erin]]
+
+  - id: optional/gp13/graph-variable-from-a-subquery
+    name: A graph variable may be initialized from a nested query answering a graph
+    features: [GP01, GP11, GP13, GP17]
+    subclauses: ["10.1", "20.6"]
+    productions: [graph variable definition, graph initializer, graph expression, value query expression]
+    requires: [GQ18, GQ01]
+    # A graph expression reaches a nested query through the value query
+    # expression, which is the one route the grammar gives it, so this is what
+    # GP13 looks like written out: a query answering one row of one column
+    # whose value is a graph, and the variable taking that value. The graph is
+    # the working one for the same reason GP11's is, that what the working
+    # graph is called is the harness's business and a case that named one
+    # would be testing the configuration.
+    query: |
+      CALL {
+        PROPERTY GRAPH g = VALUE { RETURN CURRENT_PROPERTY_GRAPH }
         USE g
         MATCH (p:Person)
         RETURN COUNT(*) AS n
