@@ -69,16 +69,22 @@ The denominators are ISO's, never the corpus's. 117 of 228 reads as 117 of 228.
 A tool that divided by its own corpus size would report full coverage for
 testing twelve things.
 
-One of the 228 is a gap nobody can close. A handful of grammar rules are
-written as `!! See the Syntax Rules.` rather than as an expansion, and a
-feature reachable only through one of them has no spelling the standard owns:
-GH01, external object references, is reachable at `<external object reference>`
-and nowhere else, so two engines can both support it and share not one
-character of syntax. Those are listed in
+Four of the 228 are gaps nobody can close, and there are two ways that
+happens. A handful of grammar rules are written as `!! See the Syntax Rules.`
+rather than as an expansion, and a feature reachable only through one of them
+has no spelling the standard owns: GH01, external object references, is
+reachable at `<external object reference>` and nowhere else, so two engines can
+both support it and share not one character of syntax. The other way is a
+feature whose syntax ISO spells out in full and whose last missing piece is the
+name of a catalog object no GQL statement creates. ISO names its create
+statements after what they make, and there is a create schema, a create graph
+and a create graph type statement and no create procedure statement, so GP04,
+GP14 and GP15, which are the named procedure call and what may be passed to
+one, wait on a name the standard never supplies. Both kinds are listed in
 [`corpus/unwritable.yaml`](corpus/unwritable.yaml) with the rule that makes the
 claim checkable, and the report has a column for them, so a family sitting at
-one of two says which kind of gap it is. Nothing about it moves a number: the
-feature is still one of the 228 and still not supported.
+fifteen of eighteen says which kind of gap it is. Nothing about them moves a
+number: they are still four of the 228 and still not supported.
 
 ---
 

@@ -135,11 +135,19 @@ func sample() *runner.Report {
 			Families: []runner.FamilyCoverage{
 				{Family: "GQ", Total: 20, Tested: 1, Supported: 0},
 				{Family: "GH", Total: 2, Tested: 0, Supported: 0, Unwritable: 1},
+				{Family: "GP", Total: 18, Tested: 0, Supported: 0, Unwritable: 1},
 			},
 			Unwritable: []corpus.Unwritable{{
 				Feature:    "GH01",
+				Reason:     corpus.Prose,
 				Production: "external object reference",
 				Note:       "The standard leaves the syntax to the implementer.",
+			}, {
+				Feature:    "GP04",
+				Reason:     corpus.Unnameable,
+				Object:     "procedure",
+				Production: "named procedure call",
+				Note:       "The standard supplies no procedure to call.",
 			}},
 			FeaturesTotal: 228, ConditionsTotal: 68, ProductionsTotal: 814, SubclausesTotal: 317,
 		},
@@ -633,11 +641,19 @@ func TestCoverageSeparatesAGapThatIsWorkFromAGapThatIsTheStandard(t *testing.T) 
 	if !strings.Contains(out, "| GH | 2 | 0 | 0 | 1 |") {
 		t.Error("the GH row does not read as two features, none tested, one unwritable")
 	}
-	if !strings.Contains(out, "GH01, which reaches the grammar only at `<external object reference>`") {
+	if !strings.Contains(out, "GH01, which reaches the grammar at `<external object reference>`") {
 		t.Error("the report does not say which feature has no portable case, or where it lives")
 	}
 	if !strings.Contains(out, "See the Syntax Rules") {
 		t.Error("the report does not say why no case can be written")
+	}
+	// Two reasons, two paragraphs. One sentence over both would be false of
+	// half of them, which is the thing this column exists not to do.
+	if !strings.Contains(out, "in 2 ways") {
+		t.Error("the report rolls both kinds of gap into one explanation")
+	}
+	if !strings.Contains(out, "no GQL statement creates") {
+		t.Error("the report does not say why the second kind of gap is permanent")
 	}
 	// Not a skip, not a failure, and not subtracted from anything.
 	if strings.Contains(out, "227") {

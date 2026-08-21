@@ -2,12 +2,14 @@
 # and the variable definitions a procedure body may open with.
 #
 # Named procedure calls, GP04, and GP14 and GP15, which are about what may be
-# passed to one, have no cases here. ISO defines the syntax of a named call
-# but not a single procedure to call: every procedure name is supplied by the
-# implementation or the catalog. A portable case would have to invent a name,
-# and every engine would fail it for the same uninteresting reason. An engine
-# that wants credit for GP04 has to demonstrate it in its own dialect, which
-# is what the `dialects` field is for; nothing in this suite can do it.
+# passed to one, have no cases here and are in `corpus/unwritable.yaml`
+# instead. ISO defines the syntax of a named call but not a single procedure to
+# call, and names its create statements after what they make, so there being no
+# create procedure statement means no GQL program can put one in the catalog
+# either. A portable case would have to invent a name, and every engine would
+# fail it for the same uninteresting reason. An engine that wants credit for
+# GP04 has to demonstrate it in its own dialect, which is what the `dialects`
+# field is for; nothing in this suite can do it.
 #
 # The binding table variable definitions, GP08 through GP10, do have cases,
 # which took working out. A binding table variable needs a binding table to

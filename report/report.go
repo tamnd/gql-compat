@@ -150,3 +150,55 @@ type kindRow struct {
 	Kind corpus.Kind
 	runner.KindTotals
 }
+
+// unwritableGroup is the entries of a coverage register that share a reason.
+//
+// A report says why a feature has no case, and the why is the same sentence
+// for every entry that shares a reason, so it is written once above the list
+// rather than once per entry. Grouping also keeps the count honest when a
+// second reason arrives: a reader sees two paragraphs and knows there are two
+// kinds of gap, rather than one paragraph asserting something true of half of
+// them.
+type unwritableGroup struct {
+	Reason  corpus.Reason
+	Entries []corpus.Unwritable
+}
+
+// Features is the codes of a group, in the order the register holds them.
+func (g unwritableGroup) Features() []string {
+	out := make([]string, 0, len(g.Entries))
+	for _, u := range g.Entries {
+		out = append(out, u.Feature)
+	}
+	return out
+}
+
+// groupUnwritable splits a register by reason, keeping the reasons in the
+// order they are first met so that a report is the same twice running.
+func groupUnwritable(us []corpus.Unwritable) []unwritableGroup {
+	reasons := corpus.Reasons(us)
+	out := make([]unwritableGroup, 0, len(reasons))
+	for _, reason := range reasons {
+		g := unwritableGroup{Reason: reason}
+		for _, u := range us {
+			if u.Reason == reason {
+				g.Entries = append(g.Entries, u)
+			}
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
+// codeList writes a handful of feature codes the way a sentence would.
+func codeList(codes []string) string {
+	switch len(codes) {
+	case 0:
+		return "none of them"
+	case 1:
+		return codes[0]
+	case 2:
+		return codes[0] + " and " + codes[1]
+	}
+	return strings.Join(codes[:len(codes)-1], ", ") + " and " + codes[len(codes)-1]
+}

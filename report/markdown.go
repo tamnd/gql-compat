@@ -252,12 +252,16 @@ func writeCoverage(b io.Writer, rep *runner.Report) {
 			total-tested, total)
 	}
 	if len(cov.Unwritable) > 0 {
-		p("%d of them will stay that way. The grammar rule each of these hangs off is one ISO writes as \"!! See the Syntax Rules.\", so the standard supplies no words to ask two engines the same question in, and a case for it would test this project's invention rather than the standard:\n\n",
-			len(cov.Unwritable))
-		for _, u := range cov.Unwritable {
-			p("- %s, which reaches the grammar only at `<%s>`. %s\n", u.Feature, u.Production, u.Note)
+		groups := groupUnwritable(cov.Unwritable)
+		p("%d of them will stay that way, in %d way%s:\n\n", len(cov.Unwritable),
+			len(groups), plural(len(groups)))
+		for _, g := range groups {
+			p("No case for %s, because %s:\n\n", codeList(g.Features()), g.Reason.Because())
+			for _, u := range g.Entries {
+				p("- %s, which reaches the grammar at `<%s>`. %s\n", u.Feature, u.Production, u.Note)
+			}
+			p("\n")
 		}
-		p("\n")
 	}
 
 	writeStatusTable(b, "### Optional features tested", "Feature", cov.Features)

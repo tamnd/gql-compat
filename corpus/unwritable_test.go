@@ -43,11 +43,25 @@ func TestShippedRegisterHoldsUp(t *testing.T) {
 			t.Errorf("%s cites <%s>, which is not a rule in the grammar", u.Feature, u.Production)
 			continue
 		}
-		if !p.SeeTheRules {
-			t.Errorf("%s cites <%s>, which the grammar does expand, so a case for it is writable",
-				u.Feature, u.Production)
+		switch u.Reason {
+		case corpus.Prose:
+			if !p.SeeTheRules {
+				t.Errorf("%s cites <%s>, which the grammar does expand, so a case for it is writable",
+					u.Feature, u.Production)
+			}
+		case corpus.Unnameable:
+			if !known.Names(u.Production, u.Object) {
+				t.Errorf("%s cites <%s>, which names no %s, so its syntax waits on no name",
+					u.Feature, u.Production, u.Object)
+			}
+			if known.Creates(u.Object) {
+				t.Errorf("%s says a %s cannot be named, and the grammar spells a create %s statement",
+					u.Feature, u.Object, u.Object)
+			}
+		default:
+			t.Errorf("%s claims reason %q, which no check in this test covers", u.Feature, u.Reason)
 		}
-		t.Logf("%s %s, at <%s>", u.Feature, f.Description, u.Production)
+		t.Logf("%s %s, %s, at <%s>", u.Feature, f.Description, u.Reason, u.Production)
 	}
 }
 
@@ -108,6 +122,31 @@ func TestTheRegisterRefusesAnEntryItCannotCheck(t *testing.T) {
 			doc: entry("  - feature: GH01\n    production: external object reference\n    note: one\n" +
 				"  - feature: GH01\n    production: external object reference\n    note: two\n"),
 			want: "listed twice",
+		},
+		{
+			name: "an unnameable entry with no object",
+			doc:  entry("  - feature: GP04\n    reason: unnameable\n    production: named procedure call\n    note: really\n"),
+			want: "no object",
+		},
+		{
+			name: "an unnameable entry whose syntax names no such thing",
+			doc:  entry("  - feature: GP04\n    reason: unnameable\n    object: procedure\n    production: match statement\n    note: really\n"),
+			want: "does not name a procedure",
+		},
+		{
+			name: "an unnameable entry for a thing the grammar can create",
+			doc:  entry("  - feature: GP04\n    reason: unnameable\n    object: graph\n    production: graph expression\n    note: really\n"),
+			want: "spells a create graph statement",
+		},
+		{
+			name: "a prose entry that names an object",
+			doc:  entry("  - feature: GH01\n    reason: prose\n    object: procedure\n    production: external object reference\n    note: really\n"),
+			want: "names no object",
+		},
+		{
+			name: "a reason nobody defined",
+			doc:  entry("  - feature: GH01\n    reason: too hard\n    production: external object reference\n    note: really\n"),
+			want: "is not a reason this build knows",
 		},
 		{
 			name: "a schema this build does not read",
