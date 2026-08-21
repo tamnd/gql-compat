@@ -3,24 +3,34 @@
 # Coverage has two kinds of gap and only one of them is work. The usual kind is
 # a feature nobody has written a case for yet, and the list of those is what
 # `gql-compat validate -missing` prints. The other kind is a feature the
-# standard describes but does not spell: the grammar rule the feature hangs off
-# is one ISO writes as "!! See the Syntax Rules.", so there is no syntax two
-# engines could be asked the same question in, and a case citing the feature
-# would be a case testing this project's invention rather than the standard.
-# Those go here, once, with the rule that makes the claim checkable.
+# standard describes and this corpus still cannot ask two engines the same
+# question about. Those go here, once, with the rule that makes the claim
+# checkable.
+#
+# There are two ways that happens and each entry says which. A `prose` entry is
+# a feature whose grammar rule ISO writes as "!! See the Syntax Rules.", so the
+# standard describes the feature and leaves its spelling to the implementer,
+# and there are no words the question could be asked in. An `unnameable` entry
+# is a feature whose syntax the standard spells out in full and whose last
+# missing piece is the name of a catalog object no GQL statement creates: ISO
+# names its create statements after what they make, there is a create schema, a
+# create graph and a create graph type statement and no create procedure
+# statement, so a case would have to invent a name and every engine would fail
+# it for the same uninteresting reason.
 #
 # The bar is deliberately high. An entry is not "hard to test", "needs a
 # fixture we do not have", or "no engine implements it": those are all cases
-# somebody has not written. An entry is a feature whose syntax the standard
-# leaves to the implementer, which is a different sentence and a permanent one.
-# The loader enforces the checkable half: the feature code has to be one of
-# ISO's 228, the production has to be a rule in the grammar artifact, and that
-# rule's right-hand side has to be the see-the-rules marker. What the loader
-# cannot check is whether the feature really has no other syntactic home, so
-# each note says where the feature is reachable from and why that is the end of
-# it. A note is printed into markdown as well as into a terminal, so name a
-# grammar rule in words rather than in angle brackets, which a markdown reader
-# eats.
+# somebody has not written. The loader enforces the checkable half of whichever
+# reason the entry claims. Every entry names a feature that is one of ISO's
+# 228 and carries a note. A prose entry names a production the grammar leaves
+# unexpanded and no object, its whole claim being that there is nothing to name
+# one with. An unnameable entry names a production that is a rule in the
+# grammar, an object whose name rule that production reaches, and no create
+# statement for that object anywhere in the grammar. What no loader can check
+# is whether the cited rule really is the feature's only way in, so each note
+# says where the feature is reachable from and why that is the end of it. A
+# note is printed into markdown as well as into a terminal, so name a grammar
+# rule in words rather than in angle brackets, which a markdown reader eats.
 #
 # Nothing here changes a denominator. GH01 is still one of the 228 and the GH
 # family is still two features wide; the report gains a column saying one of
@@ -30,6 +40,7 @@
 version: 1
 unwritable:
   - feature: GH01
+    reason: prose
     production: external object reference
     note: >-
       An external object reference is reachable from exactly one place in the
@@ -40,3 +51,42 @@ unwritable:
       outside the catalogue is the implementer's to choose. Two engines can
       both support GH01 and share not one character of spelling, which is the
       condition under which a portable case cannot exist.
+
+  - feature: GP04
+    reason: unnameable
+    object: procedure
+    production: named procedure call
+    note: >-
+      A named procedure call is a procedure reference, a parenthesized argument
+      list and an optional yield clause, and the reference bottoms out in a
+      procedure name, which is an identifier. The standard says how to call a
+      procedure and never says what any procedure is called, and there is no
+      create procedure statement to make one with, so every name a case could
+      write is a name the engine or the catalog supplied. An engine that
+      implements GP04 exactly as written would fail a case for it unless the
+      case happened to guess a name that engine ships, which is a test of the
+      guess. This is what the dialects field is for: an engine claims GP04 in
+      its own words, and the standard's share of the claim ends here.
+
+  - feature: GP14
+    reason: unnameable
+    object: procedure
+    production: named procedure call
+    note: >-
+      A binding table passed to a procedure is a procedure argument, and a
+      procedure argument list is written in exactly one place, the parentheses
+      of a named procedure call, so the feature inherits GP04's problem whole:
+      there is no procedure to pass a binding table to. An inline procedure
+      takes no arguments, which is the other half of why this has no home. What
+      a case could do is pass a table to a procedure it named, and naming one
+      is the thing the standard does not let it do.
+
+  - feature: GP15
+    reason: unnameable
+    object: procedure
+    production: named procedure call
+    note: >-
+      The same as GP14 and for the same reason, with a graph in the argument
+      rather than a binding table. Both are statements about what may be
+      written in the argument list of a call the standard supplies no callee
+      for, so both wait on a procedure name and neither can have one.

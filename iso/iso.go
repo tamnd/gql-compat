@@ -12,6 +12,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -332,6 +333,43 @@ func (c Codes) Production(name string) bool {
 func (c Codes) SeeTheRules(name string) bool {
 	p, ok := c.Catalog.Production(name)
 	return ok && p.SeeTheRules
+}
+
+// Names reports whether this rule's right-hand side names a thing of this kind
+// directly, either the rule for its name or the rule for a reference to one.
+//
+// Directly is the point. Almost every rule in the grammar reaches almost every
+// other one, a value expression being able to hold a nested query and a nested
+// query being able to hold anything, so reachability says nothing about what a
+// rule is for. What a rule spells in its own right-hand side does.
+//
+// The kind is written the way the grammar writes the thing rather than the
+// rule, "graph type" and not "graph type name".
+func (c Codes) Names(production, kind string) bool {
+	p, ok := c.Catalog.Production(production)
+	if !ok {
+		return false
+	}
+	kind = strings.Trim(kind, "<>")
+	return slices.Contains(p.References, kind+" name") ||
+		slices.Contains(p.References, kind+" reference")
+}
+
+// Creates reports whether the grammar spells a statement that puts a thing of
+// this kind into the catalog.
+//
+// ISO names its catalog-modifying statements after what they make, <create
+// schema statement>, <create graph statement>, <create graph type statement>,
+// so the question is answerable by name. A kind with no create statement is a
+// kind no GQL program can bring into existence: something outside the language
+// has to have put it there, and a portable case cannot count on it being
+// there or on what it is called.
+//
+// The kind is written the way the grammar writes the thing rather than the
+// rule, "graph type" and not "graph type name".
+func (c Codes) Creates(kind string) bool {
+	_, ok := c.Catalog.Production("create " + strings.Trim(kind, "<>") + " statement")
+	return ok
 }
 
 // Status reports whether the code is a GQLSTATUS ISO defines.

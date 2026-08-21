@@ -373,14 +373,18 @@ func (h *htmlWriter) coverage(rep *runner.Report) {
 			total-tested, total)
 	}
 	if len(cov.Unwritable) > 0 {
-		h.p(`<p class="note">%d of them will stay that way. The grammar rule each of these hangs off is one ISO writes as "!! See the Syntax Rules.", so the standard supplies no words to ask two engines the same question in, and a case for it would test this project's invention rather than the standard.</p>`,
-			len(cov.Unwritable))
-		h.p(`<ul class="note">`)
-		for _, u := range cov.Unwritable {
-			h.p(`<li><code>%s</code>, which reaches the grammar only at <code>&lt;%s&gt;</code>. %s</li>`,
-				e(u.Feature), e(u.Production), e(u.Note))
+		groups := groupUnwritable(cov.Unwritable)
+		h.p(`<p class="note">%d of them will stay that way, in %d way%s.</p>`,
+			len(cov.Unwritable), len(groups), plural(len(groups)))
+		for _, g := range groups {
+			h.p(`<p class="note">No case for %s, because %s.</p>`, e(codeList(g.Features())), e(g.Reason.Because()))
+			h.p(`<ul class="note">`)
+			for _, u := range g.Entries {
+				h.p(`<li><code>%s</code>, which reaches the grammar at <code>&lt;%s&gt;</code>. %s</li>`,
+					e(u.Feature), e(u.Production), e(u.Note))
+			}
+			h.p(`</ul>`)
 		}
-		h.p(`</ul>`)
 	}
 
 	h.statusTable("Optional features tested", "Feature", cov.Features)

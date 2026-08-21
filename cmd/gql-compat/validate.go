@@ -127,13 +127,17 @@ against the standard's own denominators.
 	}
 
 	if len(unwritable) > 0 {
-		fmt.Printf("\nno portable case can be written for %d of the %d, because the grammar\n"+
-			"rule the feature hangs off is one ISO writes as \"!! See the Syntax\n"+
-			"Rules.\" and the syntax is the implementer's to choose:\n",
+		fmt.Printf("\nno portable case can be written for %d of the %d:\n",
 			len(unwritable), len(std.Catalog.Features))
-		for _, u := range unwritable {
-			f, _ := std.Catalog.Feature(u.Feature)
-			fmt.Printf("  %-6s %s, at <%s>\n", u.Feature, f.Description, u.Production)
+		for _, reason := range corpus.Reasons(unwritable) {
+			fmt.Printf("\n  because %s:\n", reason.Because())
+			for _, u := range unwritable {
+				if u.Reason != reason {
+					continue
+				}
+				f, _ := std.Catalog.Feature(u.Feature)
+				fmt.Printf("    %-6s %s, at <%s>\n", u.Feature, f.Description, u.Production)
+			}
 		}
 	}
 
