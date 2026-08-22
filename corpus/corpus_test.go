@@ -383,3 +383,63 @@ cases:
 func oneFile(body string) fs.FS {
 	return fstest.MapFS{"suite.yaml": &fstest.MapFile{Data: []byte(body)}}
 }
+
+// A scaled case builds its statement from what the engine declares rather than
+// from a number the corpus picked, so the only thing to check in the suite is
+// that the pieces fit together: a placeholder to fill, a fragment to repeat,
+// and an item to look the maximum up under. The runner tests cover what the
+// expansion comes out as.
+func TestScaledCasesCarryEverythingTheRunnerNeeds(t *testing.T) {
+	suite, _ := load(t)
+	scaled := 0
+	for _, c := range suite.Cases {
+		if c.Scale == nil {
+			continue
+		}
+		scaled++
+		if c.Limit == "" {
+			t.Errorf("%s scales without naming an implementation-defined item", c.ID)
+		}
+		if !strings.Contains(c.Query, corpus.Placeholder) {
+			t.Errorf("%s scales but its query has nowhere to put the expansion", c.ID)
+		}
+		if !strings.Contains(c.Scale.Each, "<<n>>") {
+			t.Errorf("%s repeats %q, which is the same text every time", c.ID, c.Scale.Each)
+		}
+		// An engine declaring a maximum of one is sent two units, and the two
+		// have to be separated or the statement is one long identifier.
+		if two := c.Scale.Expand(1); !strings.Contains(two, c.Scale.Between) {
+			t.Errorf("%s expands to %q, which never puts %q between two units", c.ID, two, c.Scale.Between)
+		}
+	}
+	if scaled == 0 {
+		t.Error("no case scales, and the sixteen limit conditions cannot be reached without it")
+	}
+	t.Logf("%d scaled cases", scaled)
+}
+
+// Every maximum the corpus scales for is an item some engine has to declare a
+// number for, and an item nothing in the corpus asks about is a number nobody
+// will ever be asked to publish.
+func TestScaledCasesAgreeOnHowAnItemIsKeyed(t *testing.T) {
+	suite, _ := load(t)
+	kinds := map[string]map[string]bool{}
+	for _, c := range suite.Cases {
+		if c.Scale == nil {
+			continue
+		}
+		if k := c.Scale.Kind; k != "node" && k != "edge" {
+			t.Errorf("%s scales for kind %q, and ISO writes these items for each kind of graph element", c.ID, k)
+			continue
+		}
+		if kinds[c.Limit] == nil {
+			kinds[c.Limit] = map[string]bool{}
+		}
+		kinds[c.Limit][c.Scale.Kind] = true
+	}
+	for item, seen := range kinds {
+		if !seen["node"] || !seen["edge"] {
+			t.Errorf("%s is asked about for %v only, and an engine may draw the line differently on the other", item, seen)
+		}
+	}
+}

@@ -112,6 +112,17 @@ temporal values skips the temporal cases, and the report says so by name. Skips
 are excluded from the denominator, so a pass rate can never be improved by
 skipping more.
 
+**A limit case is sized by the engine, not by the corpus.** Sixteen GQLSTATUS
+codes exist only because an implementation declared a maximum, and ISO names
+the code and leaves the number to the implementer, so a case that writes
+sixty-four properties into the query reaches the condition on the engines that
+happen to draw the line lower and measures nothing on the rest. An adapter
+reports the engine's declared maxima per ISO 24.5.2 item and kind of graph
+element, `IL002/node` and the like, and the runner expands the case's `<<scale>>`
+to one unit past whichever one the case names. An engine that declares no
+maximum for the item is skipped, because there is no size a statement can ask
+for that reaches the condition.
+
 **A declaration can be put to the test.** `-challenge` ignores the engine's own
 declaration and runs the cases it would have excluded. Most of them fail, which
 is the point of believing the declaration by default; what the run is looking

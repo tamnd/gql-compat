@@ -38,9 +38,14 @@ func TestStagingALargeFixtureIsLinearInIt(t *testing.T) {
 	// figure tight enough to catch a small regression would be a figure that
 	// fails on a loaded CI runner. What it catches is the change in complexity,
 	// which is the failure that actually happened.
+	// The race build of this has been observed between 17 and 31 seconds on
+	// one machine with the same code, because the detector's own bookkeeping
+	// is what dominates and it competes with whatever else the run is doing.
+	// A budget inside that spread fails on the code it was meant to pass, so
+	// the race figure is set above the spread rather than near it.
 	budget := 5 * time.Second
 	if raceDetector {
-		budget = 30 * time.Second
+		budget = 90 * time.Second
 	}
 	path := filepath.Join(t.TempDir(), "stage.db")
 	start := time.Now()

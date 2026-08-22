@@ -4,16 +4,24 @@
 # more properties or more key labels than the implementation supports, and then
 # leaves every one of those numbers to the implementation. Subclause 24.5.2
 # obliges an implementer to write the numbers down; it does not oblige them to
-# be small. So a case here asks for sixty-four of something and has two correct
+# be small. A case that picks a number of its own therefore has two correct
 # answers waiting for it: an engine whose maximum is thirty-two must raise the
-# code, and an engine with no maximum at all must accept the statement.
+# code, and an engine that holds four thousand must accept the statement.
 #
-# Every case therefore carries `limit`, which names the implementation-defined
-# item the answer measures. An engine that accepts is not failed; it is skipped
-# with the reason recorded, and the reason is the measurement: this engine puts
-# at least sixty-four labels on a node. That is a smaller claim than the case
-# would have liked to make and it is the only one available, which is the same
-# trade the whole corpus makes about skips.
+# Every case here carries `limit`, which names the implementation-defined item
+# the answer measures, and a maximum case also carries `scale`, which says how
+# to build the statement rather than what to put in it. The runner reads the
+# engine's declared maximum for the item and expands `<<scale>>` to one unit
+# past it, so each engine is asked the question its own limit makes answerable
+# instead of a question about sixty-four that only some engines can reach.
+#
+# An engine that declares no maximum for the item is skipped, with the reason
+# recorded, because there is no size a statement can ask for that reaches the
+# condition. A minimum case cannot be scaled at all, since the smallest thing
+# to ask for is nothing, so those are written out and skipped where the engine
+# has no minimum. Neither skip is a failure: ISO names the code and leaves the
+# number to the implementation, so there is no answer here the standard calls
+# wrong.
 #
 # The codes come in pairs. ISO gives the same violation one code in class 22,
 # raised when the engine builds the element, and another in class 42, raised
@@ -27,7 +35,7 @@ defaults:
   fixture: blank
 
 cases:
-  - id: condition/22g0p/node-with-sixty-four-labels
+  - id: condition/22g0p/node-past-the-label-maximum
     name: A node with more labels than the engine holds raises the node label maximum
     conditions: ["22G0P", "42010"]
     subclauses: ["13.2", "18.4"]
@@ -35,11 +43,12 @@ cases:
     requires: [GD01]
     mutating: true
     limit: IL001
+    scale:
+      kind: node
+      each: "L<<n>>"
+      between: "&"
     query: |
-      INSERT (:L01&L02&L03&L04&L05&L06&L07&L08&L09&L10&L11&L12&L13&L14&L15&L16&
-      L17&L18&L19&L20&L21&L22&L23&L24&L25&L26&L27&L28&L29&L30&L31&L32&
-      L33&L34&L35&L36&L37&L38&L39&L40&L41&L42&L43&L44&L45&L46&L47&L48&
-      L49&L50&L51&L52&L53&L54&L55&L56&L57&L58&L59&L60&L61&L62&L63&L64)
+      INSERT (:<<scale>>)
     expect:
       kind: error
       gqlstatus: "22G0P"
@@ -65,7 +74,7 @@ cases:
       gqlstatus: "22G0N"
       also_gqlstatus: ["42009"]
 
-  - id: condition/22g0s/node-with-sixty-four-properties
+  - id: condition/22g0s/node-past-the-property-maximum
     name: A node with more properties than the engine holds raises the node property maximum
     conditions: ["22G0S", "42011"]
     subclauses: ["13.2", "18.5"]
@@ -73,22 +82,22 @@ cases:
     requires: [GD01]
     mutating: true
     limit: IL002
+    # Property maxima are where a fixed number in the corpus hurt most. Labels
+    # are cheap to bound and most engines bound them tightly, but an engine
+    # that stores properties in a table column can hold thousands, so a case
+    # asking for sixty-four measured nothing on it.
+    scale:
+      kind: node
+      each: "p<<n>>: <<n>>"
+      between: ", "
     query: |
-      INSERT (:Wide {p01: 1, p02: 2, p03: 3, p04: 4, p05: 5, p06: 6, p07: 7,
-      p08: 8, p09: 9, p10: 10, p11: 11, p12: 12, p13: 13, p14: 14, p15: 15,
-      p16: 16, p17: 17, p18: 18, p19: 19, p20: 20, p21: 21, p22: 22, p23: 23,
-      p24: 24, p25: 25, p26: 26, p27: 27, p28: 28, p29: 29, p30: 30, p31: 31,
-      p32: 32, p33: 33, p34: 34, p35: 35, p36: 36, p37: 37, p38: 38, p39: 39,
-      p40: 40, p41: 41, p42: 42, p43: 43, p44: 44, p45: 45, p46: 46, p47: 47,
-      p48: 48, p49: 49, p50: 50, p51: 51, p52: 52, p53: 53, p54: 54, p55: 55,
-      p56: 56, p57: 57, p58: 58, p59: 59, p60: 60, p61: 61, p62: 62, p63: 63,
-      p64: 64})
+      INSERT (:Wide {<<scale>>})
     expect:
       kind: error
       gqlstatus: "22G0S"
       also_gqlstatus: ["42011"]
 
-  - id: condition/22g0r/edge-with-sixty-four-labels
+  - id: condition/22g0r/edge-past-the-label-maximum
     name: An edge with more labels than the engine holds raises the edge label maximum
     conditions: ["22G0R", "42007"]
     subclauses: ["13.2", "18.4"]
@@ -97,16 +106,17 @@ cases:
     mutating: true
     limit: IL001
     fixture: pair
-    # ISO keeps separate limits for nodes and edges, so an engine may hold
-    # sixty-four labels on one and refuse them on the other. The pair fixture
-    # supplies the two endpoints; the case is about what goes between them.
+    # ISO keeps separate limits for nodes and edges, so an engine may hold many
+    # labels on one and one label on the other, and the scale block is keyed by
+    # kind for exactly that reason. The pair fixture supplies the two endpoints;
+    # the case is about what goes between them.
+    scale:
+      kind: edge
+      each: "L<<n>>"
+      between: "&"
     query: |
       MATCH (a:Person {name: 'Ada'}), (b:Person {name: 'Linus'})
-      INSERT (a)-[:L01&L02&L03&L04&L05&L06&L07&L08&L09&L10&L11&L12&L13&L14&
-      L15&L16&L17&L18&L19&L20&L21&L22&L23&L24&L25&L26&L27&L28&L29&L30&
-      L31&L32&L33&L34&L35&L36&L37&L38&L39&L40&L41&L42&L43&L44&L45&L46&
-      L47&L48&L49&L50&L51&L52&L53&L54&L55&L56&L57&L58&L59&L60&L61&L62&
-      L63&L64]->(b)
+      INSERT (a)-[:<<scale>>]->(b)
     expect:
       kind: error
       gqlstatus: "22G0R"
@@ -129,7 +139,7 @@ cases:
       gqlstatus: "22G0Q"
       also_gqlstatus: ["42006"]
 
-  - id: condition/22g0t/edge-with-sixty-four-properties
+  - id: condition/22g0t/edge-past-the-property-maximum
     name: An edge with more properties than the engine holds raises the edge property maximum
     conditions: ["22G0T", "42008"]
     subclauses: ["13.2", "18.5"]
@@ -138,17 +148,13 @@ cases:
     mutating: true
     limit: IL002
     fixture: pair
+    scale:
+      kind: edge
+      each: "p<<n>>: <<n>>"
+      between: ", "
     query: |
       MATCH (a:Person {name: 'Ada'}), (b:Person {name: 'Linus'})
-      INSERT (a)-[:WIDE {p01: 1, p02: 2, p03: 3, p04: 4, p05: 5, p06: 6,
-      p07: 7, p08: 8, p09: 9, p10: 10, p11: 11, p12: 12, p13: 13, p14: 14,
-      p15: 15, p16: 16, p17: 17, p18: 18, p19: 19, p20: 20, p21: 21, p22: 22,
-      p23: 23, p24: 24, p25: 25, p26: 26, p27: 27, p28: 28, p29: 29, p30: 30,
-      p31: 31, p32: 32, p33: 33, p34: 34, p35: 35, p36: 36, p37: 37, p38: 38,
-      p39: 39, p40: 40, p41: 41, p42: 42, p43: 43, p44: 44, p45: 45, p46: 46,
-      p47: 47, p48: 48, p49: 49, p50: 50, p51: 51, p52: 52, p53: 53, p54: 54,
-      p55: 55, p56: 56, p57: 57, p58: 58, p59: 59, p60: 60, p61: 61, p62: 62,
-      p63: 63, p64: 64}]->(b)
+      INSERT (a)-[:WIDE {<<scale>>}]->(b)
     expect:
       kind: error
       gqlstatus: "22G0T"
@@ -162,7 +168,7 @@ cases:
   # class 42: a graph type is read, never built, so there is no second moment
   # for the engine to catch the violation in.
 
-  - id: condition/42013/node-type-with-sixty-four-key-labels
+  - id: condition/42013/node-type-past-the-key-label-maximum
     name: A node type with more key labels than the engine holds raises the key label maximum
     conditions: ["42013"]
     subclauses: ["12.6", "18.2"]
@@ -171,13 +177,13 @@ cases:
     mutating: true
     limit: IL003
     tags: [error, write, limit, catalog]
+    scale:
+      kind: node
+      each: "K<<n>>"
+      between: "&"
     query: |
       CREATE PROPERTY GRAPH TYPE gqlcompat_keylabels_max {
-        (:K01&K02&K03&K04&K05&K06&K07&K08&K09&K10&K11&K12&K13&K14&K15&K16&
-        K17&K18&K19&K20&K21&K22&K23&K24&K25&K26&K27&K28&K29&K30&K31&K32&
-        K33&K34&K35&K36&K37&K38&K39&K40&K41&K42&K43&K44&K45&K46&K47&K48&
-        K49&K50&K51&K52&K53&K54&K55&K56&K57&K58&K59&K60&K61&K62&K63&K64
-        => :Wide)
+        (:<<scale>> => :Wide)
       }
     expect:
       kind: error
@@ -203,7 +209,7 @@ cases:
       kind: error
       gqlstatus: "42012"
 
-  - id: condition/42015/edge-type-with-sixty-four-key-labels
+  - id: condition/42015/edge-type-past-the-key-label-maximum
     name: An edge type with more key labels than the engine holds raises the key label maximum
     conditions: ["42015"]
     subclauses: ["12.6", "18.3"]
@@ -212,13 +218,13 @@ cases:
     mutating: true
     limit: IL003
     tags: [error, write, limit, catalog]
+    scale:
+      kind: edge
+      each: "K<<n>>"
+      between: "&"
     query: |
       CREATE PROPERTY GRAPH TYPE gqlcompat_edgekeys_max {
-        (:Node)-[:K01&K02&K03&K04&K05&K06&K07&K08&K09&K10&K11&K12&K13&K14&
-        K15&K16&K17&K18&K19&K20&K21&K22&K23&K24&K25&K26&K27&K28&K29&K30&
-        K31&K32&K33&K34&K35&K36&K37&K38&K39&K40&K41&K42&K43&K44&K45&K46&
-        K47&K48&K49&K50&K51&K52&K53&K54&K55&K56&K57&K58&K59&K60&K61&K62&
-        K63&K64 => :Wide]->(:Node)
+        (:Node)-[:<<scale>> => :Wide]->(:Node)
       }
     expect:
       kind: error

@@ -540,6 +540,14 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 	}
 	r.Statement = stmt
 
+	// A limit case is sized here, from the engine's own declared maximum, and
+	// the sized text is what gets sent. r.Statement stays the template.
+	sent, ok := e.scaled(c, stmt, &r)
+	if !ok {
+		return r
+	}
+	stmt = sent
+
 	if e.generatedSkip(c, stmt, &r) {
 		return r
 	}
@@ -849,6 +857,35 @@ func (e *executor) statement(c *corpus.Case) (string, bool) {
 		return s, true
 	}
 	return "", false
+}
+
+// scaled builds a limit case's statement one unit past the maximum the engine
+// declares for the item. The corpus cannot carry that number itself: ISO names
+// the condition and leaves the threshold to the implementation, so a corpus
+// that writes sixty-four properties into the query is asking every engine the
+// same question and only reaching the condition on the engines that happen to
+// draw the line lower. Sizing from the declaration asks each engine the
+// question its own limit makes answerable.
+//
+// An engine that declares no maximum for the item is skipped rather than sent
+// a guess, which is the same verdict the corpus reached before any of this
+// existed and for the same reason.
+func (e *executor) scaled(c *corpus.Case, stmt string, r *CaseResult) (string, bool) {
+	if c.Scale == nil {
+		return stmt, true
+	}
+	key := c.Scale.Key(c.Limit)
+	max, ok := e.caps.Limits[key]
+	if !ok {
+		r.Outcome, r.Skip = Skip, SkipWithinLimit
+		r.WantStatus = c.Expect.GQLStatus
+		r.Reason = fmt.Sprintf(
+			"the engine declares no maximum for %s, so there is no size a statement can ask for that reaches the condition; ISO leaves the value to the implementation",
+			key)
+		return "", false
+	}
+	r.ScaledTo = c.Scale.Units(max)
+	return strings.Replace(stmt, corpus.Placeholder, c.Scale.Expand(max), 1), true
 }
 
 // ensureLoaded gets the right fixture into the engine, reloading only when it

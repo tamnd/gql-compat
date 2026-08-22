@@ -155,6 +155,14 @@ type CaseResult struct {
 	// not the text the case was written with. Recording it is what lets a
 	// reader check that no rewriting happened.
 	Statement string `json:"statement"`
+	// ScaledTo is how many units a scaled case was built at, and zero for
+	// every other case. A limit case is sized from what the engine declares
+	// its maximum to be, so the text that ran can be tens of thousands of
+	// characters wide and repeats one fragment. Statement keeps the template
+	// rather than the expansion, because a report where one row is longer
+	// than all the others put together is a report nobody reads, and the
+	// template with this count reproduces the text exactly.
+	ScaledTo int `json:"scaled_to,omitempty"`
 
 	Outcome  Outcome  `json:"outcome"`
 	Evidence Evidence `json:"evidence,omitempty"`

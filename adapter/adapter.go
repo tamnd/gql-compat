@@ -50,6 +50,23 @@ type Capabilities struct {
 	// working directory, which is slower and is measured as such.
 	Isolated bool
 
+	// Limits is what the engine declares for the implementation-defined items
+	// of ISO 24.5.2 it sets a finite value on, keyed by the item's code and,
+	// where the item has a value per kind of graph element, that kind after a
+	// slash: "IL002/node" is the maximum number of properties on a node.
+	//
+	// Sixteen of the sixty-eight conditions exist only because an
+	// implementation declares a limit, and a corpus that guesses the number
+	// tests nothing: too low and every engine accepts the statement, too high
+	// and the statement is unusable. An engine that publishes its own maximum
+	// turns the guess into an answer, and a case with a scale block is built
+	// one unit past whatever is here.
+	//
+	// An item an engine sets no maximum on is absent rather than zero. The two
+	// mean opposite things: absent is a limit the engine does not have, and a
+	// zero would be a limit nothing can satisfy.
+	Limits map[string]int
+
 	// Unsupported lists ISO optional feature codes the engine's own
 	// documentation says it does not implement. It is never used to excuse a
 	// feature case: those still run, so that a claim of absence is verified
