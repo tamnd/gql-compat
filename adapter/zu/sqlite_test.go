@@ -434,6 +434,64 @@ func TestAShapeIsStagedWithEveryTableAndNoRows(t *testing.T) {
 	}
 }
 
+// TestTheEdgeIndexesAreBuiltAndHoldEveryEdge is the guard on building them
+// after the rows rather than with them.
+//
+// Deferring the build is worth several times the staging cost of a graph whose
+// endpoints are in no order, and the way it goes wrong is silent: an index that
+// was never built leaves a file that still answers every query, just by reading
+// the table. So the two indexes are read directly, with INDEXED BY, which
+// SQLite refuses outright if the index is not there, and the count that comes
+// back through each one has to be the whole edge count.
+func TestTheEdgeIndexesAreBuiltAndHoldEveryEdge(t *testing.T) {
+	fx := &fixture.Fixture{
+		Name: "indexed",
+		Nodes: []fixture.Node{
+			{Key: "a", Labels: []string{"N"}},
+			{Key: "b", Labels: []string{"N"}},
+			{Key: "c", Labels: []string{"N"}},
+		},
+		Edges: []fixture.Edge{
+			{Type: "E", From: "a", To: "b"},
+			{Type: "E", From: "b", To: "c"},
+			{Type: "E", From: "c", To: "a"},
+		},
+	}
+	path := filepath.Join(t.TempDir(), "indexed.db")
+	if err := writeFixtureDB(context.Background(), path, fx); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	for _, index := range []string{"r_E_fwd", "r_E_bwd"} {
+		var n int
+		q := "SELECT COUNT(*) FROM r_E INDEXED BY " + index
+		if err := db.QueryRowContext(context.Background(), q).Scan(&n); err != nil {
+			t.Fatalf("reading r_E through %s: %v", index, err)
+		}
+		if n != len(fx.Edges) {
+			t.Errorf("%s covers %d edges, want %d", index, n, len(fx.Edges))
+		}
+	}
+
+	// And the catalogue still carries the whole definition, which is what zu's
+	// own writer puts there. Only the running of the two statements moved.
+	var recorded string
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT sql FROM zu_catalog WHERE kind = 'rel' AND name = 'E'").Scan(&recorded); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"CREATE TABLE r_E", "CREATE INDEX r_E_fwd", "CREATE INDEX r_E_bwd"} {
+		if !strings.Contains(recorded, want) {
+			t.Errorf("the catalogue records %q, which does not mention %q", recorded, want)
+		}
+	}
+}
+
 // ddl is every table and index statement in a staged database, in a fixed
 // order, which is the whole of what a shape is.
 func ddl(t *testing.T, path string) []string {

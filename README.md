@@ -225,6 +225,14 @@ Every case, not just the performance ones, carries a full measurement:
   engine says about its own store, and then to one load of an empty graph, and
   every density says in a **floor from** column which of the three it was
   divided against.
+- **A graph that does not fold** — a floor is half of it and the fixture is the
+  other half. A path of a million consecutive ids joined to their successors
+  compresses to about two bytes a node on a columnar store, so a density taken
+  there measures how well an arithmetic sequence folds. The density figures are
+  taken on `perf-random-200k` instead, whose 1.6 million edges run between
+  endpoints in no order at all, and the run states the widest figure it
+  published and whether any of them is past the point of describing an
+  encoding.
 
 > **Unavailable is never zero.** Page-fault counters are Linux-only, a server
 > engine's data directory is not on this machine, and a sampler that got no
