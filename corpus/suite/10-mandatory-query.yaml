@@ -70,6 +70,28 @@ cases:
       columns: [city]
       rows: [[Berlin], [Paris], [Lisbon]]
 
+  - id: mandatory/query/distinct-folds-two-nulls-into-one
+    name: DISTINCT folds two nulls together, which equality would not have done
+    subclauses: ["14.11", "22.11", "22.12"]
+    productions: [set quantifier, return statement body]
+    fixture: ranked
+    tags: ["null"]
+    # Two records survive DISTINCT when they are not identical, and identical is
+    # not equal. Comparing null to null answers unknown, so an engine that
+    # reached for the comparison operator here keeps both of the items that have
+    # no rank and answers five rows. Subclause 22.11 is the rule that says a
+    # null is identical to a null, which is what makes the answer four. The
+    # fixture has values on both sides of the two nulls so that a wrong answer
+    # cannot pass by arriving in an order that looks right.
+    query: |
+      MATCH (i:Item)
+      RETURN DISTINCT i.rank AS rank
+    expect:
+      kind: rows
+      unordered: true
+      columns: [rank]
+      rows: [[1], [2], [3], [null]]
+
   - id: mandatory/query/where-comparison
     name: A where clause keeps only the bindings its search condition holds for
     subclauses: ["16.13", "19.3"]
@@ -286,7 +308,7 @@ cases:
 
   - id: mandatory/query/the-shape-of-a-program
     name: The smallest useful GQL program is a query statement and the standard names every rule between the two
-    subclauses: ["6", "9", "9.1", "14", "14.1", "16.3"]
+    subclauses: ["6", "9", "9.1", "14", "14.1", "16.3", "22.8"]
     productions:
       - GQL-program
       - program activity

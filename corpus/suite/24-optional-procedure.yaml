@@ -28,7 +28,7 @@ cases:
   - id: optional/gp01/inline-procedure
     name: An inline procedure runs a nested query and yields its table
     features: [GP01]
-    subclauses: ["15.1", "15.2", "9.2"]
+    subclauses: ["15.1", "15.2", "14.5", "9.2"]
     productions:
       [
         call query statement,
@@ -194,7 +194,7 @@ cases:
   - id: optional/gp11/graph-variable-named-as-a-variable
     name: VARIABLE in front of a name says it is a variable and not a catalog object
     features: [GP01, GP11, GP12, GP17]
-    subclauses: ["11.1", "10.1"]
+    subclauses: ["11.1", "11.3", "10.1"]
     productions: [object expression primary]
     requires: [GQ01]
     # A graph expression is a catalog reference, a name that could be either,

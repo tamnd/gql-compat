@@ -152,7 +152,7 @@ cases:
   - id: optional/gd01/insert-two-path-patterns
     name: One INSERT writes two path patterns separated by a comma
     features: [GD01]
-    subclauses: ["13.2"]
+    subclauses: ["13.2", "16.5"]
     productions: [insert path pattern list, label and property set specification]
     fixture: blank
     mutating: true
@@ -221,8 +221,14 @@ cases:
   - id: optional/gd01/set-property
     name: SET assigns a property on a bound element
     features: [GD01]
-    subclauses: ["13.3"]
+    subclauses: ["13.3", "22.10"]
     productions: [set statement, set item, set property item]
+    # 22.10 is store assignment, which is the rule that says what happens when
+    # a value goes into a property rather than into a record: the value has to
+    # be one the property's type admits, and the assignment is where a store
+    # that types its properties would refuse. Reading the property back in the
+    # same statement is what makes the case measure the assignment and not the
+    # parse.
     fixture: pair
     mutating: true
     query: |
@@ -481,7 +487,7 @@ cases:
   - id: optional/gc01/create-schema-under-another-schema
     name: A schema may be created at a path with a directory in it
     features: [GC01]
-    subclauses: ["12.2", "17.1"]
+    subclauses: ["12.2", "17.1", "22.9"]
     productions:
       [
         create schema statement,
@@ -496,7 +502,12 @@ cases:
     # The case above writes the shortest absolute path there is, a solidus and
     # a name, and in that path the simple directory path between them is empty.
     # This one has a directory in it, which is what a simple directory path is
-    # and is the difference between a flat catalog and a tree.
+    # and is the difference between a flat catalog and a tree. Writing the path
+    # is one thing and resolving it is another: subclause 22.9 says the engine
+    # walks the names from a start directory, which for an absolute path is the
+    # root, and fails if a name on the way is not a directory that is there. So
+    # the setup statement is not scaffolding, it is the half of the case that
+    # makes the resolution have somewhere to arrive.
     setup:
       - "CREATE SCHEMA /gqlcompat_parent"
     query: |
