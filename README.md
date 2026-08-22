@@ -62,7 +62,7 @@ COVERAGE              CLAIMED  REGISTERED  BENEATH  OPEN  ISO TOTAL
 optional features     224      4           -        0     228
 GQLSTATUS codes       68       0           -        0     68
 grammar productions   799      14          -        1     814
-normative subclauses  231      3           40       43    317
+normative subclauses  249      3           40       25    317
 ```
 
 The denominators are ISO's, never the corpus's. 224 of 228 reads as 224 of 228.

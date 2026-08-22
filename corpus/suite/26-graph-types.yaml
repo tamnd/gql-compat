@@ -29,7 +29,7 @@ cases:
   - id: optional/gg20/named-element-types
     name: An element type in a graph type may carry its own name
     features: [GG20]
-    subclauses: ["12.6", "18.1", "18.2", "18.5", "18.6", "4.13.2.2", "4.13.2.3"]
+    subclauses: ["12.6", "18.1", "18.2", "18.5", "18.6", "4.13.1", "4.13.2.1", "4.13.2.2", "4.13.2.3"]
     productions:
       [
         nested graph type specification,
@@ -50,6 +50,12 @@ cases:
     # Without GG20 the node type is anonymous and can only be referred to by
     # its labels. With it the type has a name of its own, which is what lets a
     # later element type point at it instead of repeating the pattern.
+    #
+    # This is the first case in the file and it carries the two subclauses the
+    # whole file rests on. Subclause 4.13.1 is the GQL-object type, which is the
+    # kind of thing a graph type is, and 4.13.2.1 is graph types and graph
+    # element types together, which is the pair this statement writes in one
+    # breath: a graph type that is nothing but the element types inside it.
     query: |
       CREATE PROPERTY GRAPH TYPE gqlcompat_gg20 {
         NODE TYPE PersonType (:Person {name :: STRING})

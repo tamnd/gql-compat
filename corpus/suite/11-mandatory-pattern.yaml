@@ -17,7 +17,7 @@ defaults:
 cases:
   - id: mandatory/pattern/node-pattern-unlabelled
     name: A node pattern with only a variable binds every node in the graph
-    subclauses: ["16.4", "22.2", "4.2.6", "4.11.4"]
+    subclauses: ["16.4", "22.2", "4.2.6", "4.11.1", "4.11.4"]
     productions: [node pattern, element variable declaration]
     # The simplest match there is, which is why 22.2 is cited here rather than
     # anywhere else. That subclause is the machinery the standard defines
@@ -30,7 +30,9 @@ cases:
     # there is; an engine that keeps nodes somewhere the catalog cannot see has
     # a different number here. Subclause 4.11.4 is graph pattern variables, and
     # x is one declared with nothing else attached, which is the smallest a
-    # declaration gets.
+    # declaration gets. Subclause 4.11.1 is the summary of graph pattern
+    # matching, the whole of what Clause 4.11 goes on to break into parts, and
+    # a pattern with no parts is the one place a case can point at it whole.
     query: |
       MATCH (x)
       RETURN COUNT(*) AS n

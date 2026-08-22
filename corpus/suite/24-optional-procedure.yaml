@@ -28,7 +28,7 @@ cases:
   - id: optional/gp01/inline-procedure
     name: An inline procedure runs a nested query and yields its table
     features: [GP01]
-    subclauses: ["15.1", "15.2", "14.5", "9.2", "4.7.6", "4.10.2.3"]
+    subclauses: ["15.1", "15.2", "14.5", "9.2", "4.7.6", "4.10.2.1", "4.10.2.3"]
     productions:
       [
         call query statement,
@@ -46,7 +46,9 @@ cases:
     # so it carries the two concepts a call brings with it. Subclause 4.10.2.3
     # is procedure execution, and 4.7.6 is the execution stack, which is where
     # the called body goes and the reason the outer statement still has its own
-    # variables when the body is finished.
+    # variables when the body is finished. Subclause 4.10.2.1 is the procedure
+    # being called, which the corpus can only point at from a case that calls
+    # one, and this is the first of those.
     query: |
       CALL { MATCH (p:Person) RETURN p.name AS name }
       RETURN name AS name
@@ -142,12 +144,14 @@ cases:
   - id: optional/gp05/typed-value-variable-definition
     name: A value variable may declare its type
     features: [GP01, GP05, GP06, GP17]
-    subclauses: ["10.3", "4.12.3"]
+    subclauses: ["10.3", "4.12.1", "4.12.3"]
     productions: [value variable definition, opt typed value initializer, typed, double colon]
     # Subclause 4.12.3 is data type descriptors, and this is where the corpus
     # can point at one: writing the type beside the name is how a program asks
     # for a descriptor rather than leaving the engine to infer one from the
-    # value. The case above is the same definition without it.
+    # value. The case above is the same definition without it. Subclause 4.12.1
+    # is the data type the descriptor describes, which INT names and which the
+    # comparison in the body then has to be checked against.
     query: |
       CALL {
         VALUE threshold :: INT = 40
