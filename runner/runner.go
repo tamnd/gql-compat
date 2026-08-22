@@ -749,9 +749,12 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 	// can be repeated depends on what putting its fixture back costs, and this
 	// is the first moment the run knows.
 	e.plan(c, &r)
-	if c.Fault != "" {
+	switch {
+	case c.Fault != "":
 		e.executeFault(ctx, sess, c, stmt, &r)
-	} else {
+	case c.EndsSession:
+		e.executeClosing(ctx, sess, c, stmt, &r)
+	default:
 		e.execute(ctx, sess, c, fx, stmt, &r)
 	}
 	if c.Mutating {
@@ -1298,6 +1301,72 @@ func (e *executor) executeFault(ctx context.Context, sess adapter.Session, c *co
 	} else {
 		r.Reason = strings.TrimSuffix(r.Reason, ".") + "; " + note
 	}
+}
+
+// executeClosing runs a case whose statement is the last thing its session
+// does, and then throws the session away whichever way the statement went.
+//
+// The discard is unconditional and that is the whole design. An engine that
+// implements SESSION CLOSE has already ended the session and the handle is a
+// dead one; an engine that does not has left it open, and keeping it would put
+// the next case on a session this one had been sending session commands to. The
+// same cost either way, one connection, paid where a reader can see it rather
+// than smeared over whichever case ran next.
+//
+// There is one execution because the second would be sent to whatever the first
+// left behind, which is the thing under test. There are no warm-ups for the same
+// reason: a warm-up here is the case, run once and thrown away unrecorded. And
+// nothing is asked of the session afterwards, so there is no plan and no control
+// statement, which is why the corpus refuses a case that asks for either.
+func (e *executor) executeClosing(ctx context.Context, sess adapter.Session, c *corpus.Case, stmt string, r *CaseResult) {
+	timeout := e.cfg.Timeout
+	if c.TimeoutMS > 0 {
+		timeout = time.Duration(c.TimeoutMS) * time.Millisecond
+	}
+	r.Repeats, r.Warmups, r.Timing = 1, 0, TimingSeries
+	r.TimingNote = "one execution: the statement ends the session, so there is no second one to compare it with"
+
+	if !e.setup(ctx, sess, c, timeout, r) {
+		return
+	}
+
+	dir := sess.DataDir()
+	disk := metrics.Before(dir)
+	sampler := e.sampler()
+	sampler.Start()
+
+	qctx, cancel := context.WithTimeout(ctx, timeout)
+	start := time.Now()
+	res, err := sess.Exec(qctx, stmt, c.Params)
+	wall := time.Since(start)
+	cancel()
+
+	s := metrics.Sample{Wall: wall, Err: err}
+	if res != nil && res.Table != nil {
+		s.Rows, s.Cells, s.Bytes = res.Table.Len(), res.Table.Cells(), res.Bytes
+	}
+	series := &metrics.Series{Samples: []metrics.Sample{s}}
+	series.Process = sampler.Stop()
+	series.Disk = metrics.After(dir, disk)
+
+	e.discard()
+
+	r.Stats = series.Summarize()
+	r.Process = series.Process
+	r.Disk = series.Disk
+	judge(c, res, err, e.caps, r)
+	if note := closingNote(); r.Reason == "" {
+		r.Reason = note
+	} else {
+		r.Reason = strings.TrimSuffix(r.Reason, ".") + "; " + note
+	}
+}
+
+// closingNote is the sentence a session-ending case's verdict is qualified by,
+// so that a reader who wonders why the case after it opened a new connection
+// does not have to go looking in the runner for the answer.
+func closingNote() string {
+	return "the statement under test is what ends the session, so the run threw the session away afterwards and the next case opened a new one"
 }
 
 // faultNote is the sentence a fault case's verdict is qualified by.

@@ -120,7 +120,11 @@ func TestAGeneratedStatementIsInNoTotalAndNoDenominator(t *testing.T) {
 
 func TestASyntaxErrorOnAWalkedStatementIsALeadAndNotAFailure(t *testing.T) {
 	word := strings.Fields(walked(t, 1)[0].Text)[0]
-	base := run(t, engine(t, nil), runner.Config{Repeats: 1})
+	// Both runs are the same engine and the walk is the only difference between
+	// them. Comparing against a healthy engine instead would count the scored
+	// cases this one refuses for the same word, which is the engine being bad at
+	// its job rather than a lead leaking into the scoreboard.
+	base := run(t, syntaxErrorOn(t, word), runner.Config{Repeats: 1})
 	rep := run(t, syntaxErrorOn(t, word), runner.Config{Repeats: 1, Explore: explore(12)})
 
 	x := rep.Exploration

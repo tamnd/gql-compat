@@ -373,6 +373,22 @@ type Case struct {
 	// account of a channel that is gone, and the report says whose account it
 	// was reading.
 	Fault string `yaml:"fault" json:"fault,omitempty"`
+	// EndsSession marks a case whose statement is the last thing its session
+	// does, because the statement is what ends it.
+	//
+	// There is one clause of the standard like this, SESSION CLOSE, and it was
+	// the only clause of Clause 7 with no case for a year. The reason was the
+	// harness rather than the grammar: a run keeps one session and hands it to
+	// every case in turn, so an engine that implements the clause correctly
+	// leaves the next case with no connection, and an engine that does not
+	// implement it passes the case on to that next one intact. Judging both by
+	// what happens afterwards is judging the engine on the harness's bookkeeping.
+	//
+	// A case with this set gets one execution, no warm-up and no plan, and the
+	// runner throws the session away whichever way the statement went. That
+	// costs one connection, it is the same cost either way, and it is what makes
+	// the clause testable at all.
+	EndsSession bool `yaml:"ends_session" json:"ends_session,omitempty"`
 	// Params binds named parameters, for the cases about parameters. A value
 	// is whatever YAML wrote, and the adapter hands it to the engine in the
 	// engine's own encoding.
@@ -612,6 +628,26 @@ func (c *Case) Validate(known KnownCodes) error {
 		// is nothing left to put a control statement to.
 		if c.Parses != "" {
 			return fmt.Errorf("%s: a fault case ends with no session, and the control statement would be sent to a channel this case destroyed", where)
+		}
+	}
+	if c.EndsSession {
+		// Both end the session and each says a different thing about how. A case
+		// carrying the two would be asking the runner to destroy a channel it was
+		// also asking the engine to close.
+		if c.Fault != "" {
+			return fmt.Errorf("%s: the case asks for the %s fault and also says its statement ends the session, and only one of those can be what happened",
+				where, c.Fault)
+		}
+		// The control statement runs after the statement under test, and after
+		// this one there is no session to run it on.
+		if c.Parses != "" {
+			return fmt.Errorf("%s: the statement ends the session, and the control statement would be sent to a session this case closed", where)
+		}
+		// One execution is all there is. A second would be sent to whatever the
+		// first left behind, which is the thing the case is about.
+		if c.Repeat > 1 {
+			return fmt.Errorf("%s: the statement ends the session, so it runs once, and asking for %d executions asks for %d of them against a closed one",
+				where, c.Repeat, c.Repeat-1)
 		}
 	}
 	if d := c.Expect.Diagnostic; d != nil {

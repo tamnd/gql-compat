@@ -608,3 +608,43 @@ func TestAFaultIsRefusedOnACaseThatCannotCarryOne(t *testing.T) {
 		}
 	}
 }
+
+// The one clause whose success costs the run a connection. What has to hold is
+// that a case saying so is not also saying something the runner cannot do
+// afterwards, because everything after the statement happens on a session the
+// statement ended.
+func TestASessionEndingCaseIsRefusedWhereNothingCanFollowIt(t *testing.T) {
+	_, cat := load(t)
+	known := iso.Codes{Catalog: cat}
+	sound := func() corpus.Case {
+		return corpus.Case{
+			ID: "mandatory/session/close", Name: "The end of a session", Kind: corpus.KindMandatory,
+			Subclauses: []string{"7.3"}, Productions: []string{"session close command"},
+			Query: "SESSION CLOSE", Mutating: true, EndsSession: true,
+			Expect: corpus.Expect{Kind: corpus.ExpectAccept},
+		}
+	}
+	base := sound()
+	if err := base.Validate(known); err != nil {
+		t.Fatalf("a well-formed session-ending case was refused: %v", err)
+	}
+	for what, spoil := range map[string]func(*corpus.Case){
+		"a fault as well, so two things ended the same session": func(c *corpus.Case) {
+			c.Kind, c.Conditions = corpus.KindCondition, []string{"40003"}
+			c.Expect = corpus.Expect{Kind: corpus.ExpectError, GQLStatus: "40003"}
+			c.Fault = corpus.FaultCutAfterSend
+		},
+		"a control statement with no session left to run it": func(c *corpus.Case) {
+			c.Kind, c.Conditions = corpus.KindCondition, []string{"42001"}
+			c.Expect = corpus.Expect{Kind: corpus.ExpectError, GQLStatus: "42001"}
+			c.Parses = "SESSION CLOSE"
+		},
+		"repetitions against a session the first one closed": func(c *corpus.Case) { c.Repeat = 4 },
+	} {
+		c := sound()
+		spoil(&c)
+		if err := c.Validate(known); err == nil {
+			t.Errorf("%s was accepted", what)
+		}
+	}
+}

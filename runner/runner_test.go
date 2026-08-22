@@ -143,6 +143,16 @@ cases:
         subject: nothing
         subject_kind: variable
 
+  - id: mandatory/session/close
+    name: A statement that ends the session it was sent on
+    kind: mandatory
+    subclauses: ["7.3"]
+    mutating: true
+    ends_session: true
+    query: SESSION CLOSE
+    expect:
+      kind: accept
+
   - id: mandatory/test/write
     name: A mutating case is never warmed up
     kind: mandatory
@@ -514,6 +524,91 @@ func TestAFaultCaseSkipsWhereTheAdapterCannotBreakItsOwnChannel(t *testing.T) {
 	if r.Fault != nil {
 		t.Error("no fault was injected, so no fault should be recorded")
 	}
+}
+
+// SESSION CLOSE is the one clause whose success takes the connection with it,
+// and the harness has to survive that without the survival being what decides
+// the verdict. What this checks is the arrangement that makes the clause
+// testable: the case runs once, and the statement after it is on a different
+// session whether or not the engine did anything.
+func TestASessionEndingCaseLeavesTheNextCaseANewSession(t *testing.T) {
+	var seen []sent
+	d := &recordingDriver{Driver: engine(t, nil), seen: &seen}
+	rep := run(t, d, runner.Config{Warmups: 3, Repeats: 4})
+
+	r := result(t, rep, "mandatory/session/close")
+	if r.Outcome != runner.Pass {
+		t.Fatalf("outcome %s reason %q, want a pass", r.Outcome, r.Reason)
+	}
+	// A warm-up of this statement is the case, run once and thrown away
+	// unrecorded, and a second timed execution is sent to whatever the first
+	// left behind.
+	if r.Repeats != 1 || r.Warmups != 0 {
+		t.Errorf("%d repeats and %d warmups, want 1 and 0", r.Repeats, r.Warmups)
+	}
+	if !strings.Contains(r.Reason, "ends the session") {
+		t.Errorf("the reason should say the statement is what ended the session, got %q", r.Reason)
+	}
+
+	i, n := -1, 0
+	for k, s := range seen {
+		if strings.Contains(s.stmt, "SESSION CLOSE") {
+			n++
+			if i < 0 {
+				i = k
+			}
+		}
+	}
+	if i < 0 {
+		t.Fatal("the statement never reached the engine")
+	}
+	if n != 1 {
+		t.Errorf("SESSION CLOSE was sent %d times, want 1", n)
+	}
+	if i == len(seen)-1 {
+		t.Fatal("nothing ran after it, so there is nothing to check the discard against")
+	}
+	// The fake engine answers SESSION CLOSE and keeps its session, which is the
+	// harder half of the guarantee: the discard is unconditional, so an engine
+	// that does not implement the clause cannot hand the next case a session it
+	// has been sending session commands to.
+	if seen[i].session == seen[i+1].session {
+		t.Errorf("the next statement ran on session %d, the same one this case closed", seen[i].session)
+	}
+}
+
+// sent is one statement and the session it went out on. Which session a
+// statement ran on is the only way to see a discard from outside, and no field
+// of a result carries it.
+type sent struct {
+	session int
+	stmt    string
+}
+
+type recordingDriver struct {
+	adapter.Driver
+	opens int
+	seen  *[]sent
+}
+
+func (d *recordingDriver) Open(ctx context.Context, workdir string) (adapter.Session, error) {
+	s, err := d.Driver.Open(ctx, workdir)
+	if err != nil {
+		return nil, err
+	}
+	d.opens++
+	return recordingSession{Session: s, id: d.opens, seen: d.seen}, nil
+}
+
+type recordingSession struct {
+	adapter.Session
+	id   int
+	seen *[]sent
+}
+
+func (s recordingSession) Exec(ctx context.Context, stmt string, params map[string]any) (*adapter.Result, error) {
+	*s.seen = append(*s.seen, sent{session: s.id, stmt: stmt})
+	return s.Session.Exec(ctx, stmt, params)
 }
 
 func TestSkippingCannotImproveTheRate(t *testing.T) {
