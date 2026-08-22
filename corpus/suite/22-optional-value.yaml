@@ -17,8 +17,22 @@ cases:
     name: A line starting with two minus signs is a comment
     features: [GB02]
     subclauses: ["21.3"]
-    productions: [comment, simple comment, simple comment introducer, double minus sign]
+    productions:
+      [
+        comment,
+        simple comment,
+        simple comment introducer,
+        double minus sign,
+        simple comment character,
+        newline,
+      ]
     tags: [lexical]
+    # <simple comment> ::= <simple comment introducer> [ <simple comment
+    # character>... ] <newline>, so a comment on a line of its own derives all
+    # three parts of the rule and not only its introducer. The text of the
+    # comment is the run of simple comment characters and the line break after
+    # it is the newline, which is the part that ends the comment: an engine
+    # that reads to the end of the input instead swallows the RETURN.
     query: |
       -- this line is a comment
       RETURN 1 AS v
@@ -31,7 +45,14 @@ cases:
     name: A line starting with two solidi is a comment
     features: [GB03]
     subclauses: ["21.3"]
-    productions: [simple comment, simple comment introducer, double solidus]
+    productions:
+      [
+        simple comment,
+        simple comment introducer,
+        double solidus,
+        simple comment character,
+        newline,
+      ]
     tags: [lexical]
     query: |
       // this line is a comment
