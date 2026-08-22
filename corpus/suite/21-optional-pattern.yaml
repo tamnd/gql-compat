@@ -1167,7 +1167,7 @@ cases:
     name: A name inside a parenthesized path pattern binds a path over the stretch it holds
     features: [G048]
     subclauses: ["16.11"]
-    productions: [parenthesized path pattern expression, subpath variable declaration]
+    productions: [parenthesized path pattern expression, subpath variable declaration, subpath variable]
     query: |
       MATCH (a:Step)(p = (x:Step)-[:LINK]->(y:Step))(b:Step)
       WHERE a.step = 0

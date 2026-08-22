@@ -339,11 +339,37 @@ cases:
     name: CREATE SCHEMA adds a schema at an absolute directory path
     features: [GC01]
     subclauses: ["12.2"]
-    productions: [create schema statement, catalog schema parent and name, absolute directory path]
+    productions: [create schema statement, catalog schema parent and name, absolute directory path, schema name]
     tags: [write, catalog]
     mutating: true
     query: |
       CREATE SCHEMA /gqlcompat_schema
+    expect:
+      kind: accept
+
+  - id: optional/gc01/create-schema-under-another-schema
+    name: A schema may be created at a path with a directory in it
+    features: [GC01]
+    subclauses: ["12.2", "17.1"]
+    productions:
+      [
+        create schema statement,
+        catalog schema parent and name,
+        absolute directory path,
+        simple directory path,
+        directory name,
+        schema name,
+      ]
+    tags: [write, catalog]
+    mutating: true
+    # The case above writes the shortest absolute path there is, a solidus and
+    # a name, and in that path the simple directory path between them is empty.
+    # This one has a directory in it, which is what a simple directory path is
+    # and is the difference between a flat catalog and a tree.
+    setup:
+      - "CREATE SCHEMA /gqlcompat_parent"
+    query: |
+      CREATE SCHEMA /gqlcompat_parent/gqlcompat_child
     expect:
       kind: accept
 
@@ -384,6 +410,103 @@ cases:
     mutating: true
     query: |
       CREATE PROPERTY GRAPH gqlcompat_typed { (:Person {name :: STRING}) }
+    expect:
+      kind: accept
+
+  - id: optional/gc04/create-graph-in-a-named-schema
+    name: A graph may be created inside a schema rather than beside the session's own
+    features: [GC01, GC04, GG01]
+    subclauses: ["12.4", "17.1", "17.6"]
+    productions:
+      [
+        catalog graph parent and name,
+        catalog object parent reference,
+        schema reference,
+        absolute catalog schema reference,
+        absolute directory path,
+        graph name,
+      ]
+    tags: [write, catalog]
+    mutating: true
+    # Every other catalog case in this file writes a bare name, which the
+    # engine resolves against whatever schema the session is on. This one
+    # writes the parent out, which is the only way to reach a catalog object
+    # parent reference, and is what a program does when it does not want to
+    # depend on where the session happens to be pointing.
+    setup:
+      - "CREATE SCHEMA /gqlcompat_graph_home"
+    query: |
+      CREATE PROPERTY GRAPH /gqlcompat_graph_home/gqlcompat_nested ANY
+    expect:
+      kind: accept
+
+  - id: optional/gc04/create-graph-with-a-delimited-name
+    name: A graph name may be written in backticks and hold a space
+    features: [GC04, GG01]
+    subclauses: ["12.4", "17.2", "21.3"]
+    productions:
+      [
+        catalog graph parent and name,
+        graph name,
+        delimited graph name,
+        delimited identifier,
+        accent quoted character sequence,
+      ]
+    tags: [write, catalog]
+    mutating: true
+    # A graph name is a regular identifier or a delimited one, and the two are
+    # separate rules rather than one rule with an option because a delimited
+    # graph name is also a graph reference all by itself. The space is what
+    # makes the quoting necessary rather than decorative.
+    query: |
+      CREATE PROPERTY GRAPH `gqlcompat delimited` ANY
+    expect:
+      kind: accept
+
+  - id: optional/gg03/graph-typed-by-a-reference
+    name: A graph may take its type from a graph type already in the catalog
+    features: [GC01, GC04, GG02, GG03]
+    subclauses: ["12.4", "12.6", "17.3"]
+    productions:
+      [
+        of graph type,
+        graph type reference,
+        catalog graph type parent and name,
+        graph type name,
+        typed,
+        double colon,
+      ]
+    tags: [write, catalog]
+    mutating: true
+    # The inline case above writes the type into the CREATE. This one names a
+    # type the catalog already holds, which is the whole reason a graph type is
+    # a catalog object and not just a clause. The double colon is the shorter
+    # spelling of TYPED and is written here because nothing else in this file
+    # spells it outside a property type.
+    setup:
+      - "CREATE PROPERTY GRAPH TYPE gqlcompat_named_type { (:Person {name :: STRING}) }"
+    query: |
+      CREATE PROPERTY GRAPH gqlcompat_by_reference :: gqlcompat_named_type
+    expect:
+      kind: accept
+
+  - id: optional/gg03/graph-type-copied-from-another
+    name: A graph type may be created as a copy of a graph type
+    features: [GC01, GG03]
+    subclauses: ["12.6"]
+    productions: [graph type source, copy of graph type, graph type reference]
+    tags: [write, catalog]
+    mutating: true
+    # COPY OF appears twice in the catalog statements. For a graph it copies
+    # the contents and is GG05, which optional/gg05/graph-as-copy-of covers.
+    # For a graph type there is nothing to copy but the declaration, and ISO
+    # still gives it a rule of its own. zu takes neither spelling here and
+    # reports "expected '{', found 'COPY'", so a graph type in zu is always
+    # written out.
+    setup:
+      - "CREATE PROPERTY GRAPH TYPE gqlcompat_copy_type_src { (:Person) }"
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_copy_type COPY OF gqlcompat_copy_type_src
     expect:
       kind: accept
 
