@@ -30,7 +30,16 @@ cases:
   - id: mandatory/pattern/edge-pattern-directed
     name: A right-pointing full edge pattern binds edges of a type in their direction
     subclauses: ["16.7"]
-    productions: [element pattern, edge pattern, full edge pattern, full edge pointing right, path pattern expression]
+    productions:
+      [
+        element pattern,
+        edge pattern,
+        full edge pattern,
+        full edge pointing right,
+        path pattern expression,
+        minus left bracket,
+        bracket right arrow,
+      ]
     query: |
       MATCH (p:Person)-[k:KNOWS]->(q:Person)
       RETURN p.name AS knower, q.name AS known
@@ -48,7 +57,7 @@ cases:
   - id: mandatory/pattern/edge-property-predicate
     name: A property of an edge variable is readable in a where clause
     subclauses: ["16.7", "16.13", "20.11"]
-    productions: [property reference, element variable reference]
+    productions: [property reference, element variable reference, period]
     query: |
       MATCH (p:Person)-[k:KNOWS]->(q:Person)
       WHERE k.since > 2018
@@ -122,7 +131,7 @@ cases:
   - id: mandatory/pattern/path-pattern-list-joins
     name: Two path patterns in one graph pattern join on their shared variable
     subclauses: ["16.4"]
-    productions: [path pattern list, path pattern, graph pattern]
+    productions: [path pattern list, path pattern, graph pattern, comma]
     query: |
       MATCH (p:Person)-[:KNOWS]->(q:Person), (q)-[:KNOWS]->(r:Person)
       RETURN p.name AS origin, r.name AS target
@@ -139,7 +148,15 @@ cases:
   - id: mandatory/pattern/property-specification
     name: A property key-value pair in a pattern filters as an equality would
     subclauses: ["16.4"]
-    productions: [element property specification, property key value pair list, property key value pair]
+    productions:
+      [
+        element property specification,
+        property key value pair list,
+        property key value pair,
+        left brace,
+        right brace,
+        colon,
+      ]
     query: |
       MATCH (p:Person {name: 'Alice'})
       RETURN p.age AS age
@@ -164,7 +181,7 @@ cases:
   - id: mandatory/pattern/label-disjunction
     name: A label disjunction matches an element carrying either label
     subclauses: ["16.8", "22.5"]
-    productions: [label disjunction, label expression]
+    productions: [label disjunction, label expression, vertical bar]
     query: |
       MATCH (x:Person|Company)
       RETURN COUNT(*) AS n
@@ -176,7 +193,7 @@ cases:
   - id: mandatory/pattern/label-negation
     name: A label negation matches an element that does not carry the label
     subclauses: ["16.8", "22.5"]
-    productions: [label negation, label factor]
+    productions: [label negation, label factor, exclamation mark]
     query: |
       MATCH (x:!Company)
       RETURN COUNT(*) AS n
@@ -188,7 +205,7 @@ cases:
   - id: mandatory/pattern/label-conjunction
     name: A label conjunction matches only an element carrying both labels
     subclauses: ["16.8", "22.5"]
-    productions: [label conjunction, label term]
+    productions: [label conjunction, label term, ampersand]
     fixture: multilabel
     query: |
       MATCH (x:Person&Employee)
@@ -202,7 +219,7 @@ cases:
   - id: mandatory/pattern/label-parenthesized
     name: Parentheses group a label expression against the default precedence
     subclauses: ["16.8"]
-    productions: [parenthesized label expression]
+    productions: [parenthesized label expression, left paren, right paren]
     fixture: multilabel
     query: |
       MATCH (x:(Person&Employee)|Employee)

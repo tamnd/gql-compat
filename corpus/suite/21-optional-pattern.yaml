@@ -17,7 +17,13 @@ cases:
     name: A left-pointing full edge pattern traverses an edge against its direction
     features: [G043]
     subclauses: ["16.7"]
-    productions: [full edge pattern, full edge pointing left]
+    productions:
+      [
+        full edge pattern,
+        full edge pointing left,
+        left arrow bracket,
+        right bracket minus,
+      ]
     query: |
       MATCH (a:Step)<-[:LINK]-(b:Step)
       WHERE a.step = 1
@@ -32,7 +38,13 @@ cases:
     name: An any-direction full edge pattern traverses an edge either way
     features: [G043]
     subclauses: ["16.7"]
-    productions: [full edge pattern, full edge any direction]
+    productions:
+      [
+        full edge pattern,
+        full edge any direction,
+        minus left bracket,
+        right bracket minus,
+      ]
     query: |
       MATCH (a:Step)-[:LINK]-(b:Step)
       WHERE a.step = 2
@@ -47,7 +59,7 @@ cases:
     name: The arrow abbreviation stands for an edge pattern with no filler
     features: [G044]
     subclauses: ["16.7"]
-    productions: [abbreviated edge pattern]
+    productions: [abbreviated edge pattern, right arrow]
     query: |
       MATCH (a:Step)->(b:Step)
       WHERE a.step = 0
@@ -62,7 +74,7 @@ cases:
     name: The reversed arrow abbreviation traverses against the direction
     features: [G044]
     subclauses: ["16.7"]
-    productions: [abbreviated edge pattern]
+    productions: [abbreviated edge pattern, left arrow]
     query: |
       MATCH (a:Step)<-(b:Step)
       WHERE a.step = 1
@@ -77,7 +89,7 @@ cases:
     name: The double-headed abbreviation matches an edge in either direction
     features: [G045]
     subclauses: ["16.7"]
-    productions: [abbreviated edge pattern]
+    productions: [abbreviated edge pattern, left minus right]
     # ISO splits the abbreviations into a basic set (G044) and the complete
     # set (G045) without listing which spelling falls where in a form this
     # corpus can read. The plain arrows are claimed as basic and the
@@ -97,7 +109,13 @@ cases:
     name: An undirected edge pattern matches an edge stored without a direction
     features: [GH02]
     subclauses: ["16.7"]
-    productions: [full edge undirected, edge pattern]
+    productions:
+      [
+        full edge undirected,
+        edge pattern,
+        tilde left bracket,
+        right bracket tilde,
+      ]
     fixture: undirected
     query: |
       MATCH (a:Peer)~[:FRIEND]~(b:Peer)
@@ -109,11 +127,256 @@ cases:
       columns: [name]
       rows: [[south]]
 
+  - id: optional/g043/full-edge-left-or-right
+    name: A full edge pattern with an arrowhead at each end walks either way
+    features: [G043]
+    subclauses: ["16.7"]
+    productions:
+      [
+        full edge pattern,
+        full edge left or right,
+        left arrow bracket,
+        bracket right arrow,
+      ]
+    # The one full spelling that is not the sum of its arrowheads. It reads as
+    # a pattern that points both ways and means a pattern that accepts either,
+    # which is the same edge set the plain `-[ ]-` gives on a graph with no
+    # undirected edges, and a different one on a graph that has them.
+    query: |
+      MATCH (a:Step)<-[:LINK]->(b:Step)
+      WHERE a.step = 2
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[1], [3]]
+
+  - id: optional/gh02/full-edge-left-or-undirected
+    name: A tilde at the far end of a left-pointing edge admits an undirected one
+    features: [G043, GH02]
+    subclauses: ["16.7"]
+    productions:
+      [
+        full edge pattern,
+        full edge left or undirected,
+        left arrow tilde bracket,
+        right bracket tilde,
+      ]
+    # Two features, because the spelling is one of the complete set and what it
+    # admits is an undirected edge. The fixture holds none, so what this
+    # measures over it is the other half: an engine that read the tilde as
+    # "any direction" answers with the node ahead as well as the node behind.
+    query: |
+      MATCH (a:Step)<~[:LINK]~(b:Step)
+      WHERE a.step = 1
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[0]]
+
+  - id: optional/gh02/full-edge-undirected-or-right
+    name: A tilde at the near end of a right-pointing edge admits an undirected one
+    features: [G043, GH02]
+    subclauses: ["16.7"]
+    productions:
+      [
+        full edge pattern,
+        full edge undirected or right,
+        tilde left bracket,
+        bracket tilde right arrow,
+      ]
+    query: |
+      MATCH (a:Step)~[:LINK]~>(b:Step)
+      WHERE a.step = 1
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[2]]
+
+  - id: optional/g045/abbreviated-edge-left-or-undirected
+    name: The reversed tilde arrow is the abbreviation of the left or undirected edge
+    features: [G045, GH02]
+    subclauses: ["16.7"]
+    productions: [abbreviated edge pattern, left arrow tilde]
+    query: |
+      MATCH (a:Step)<~(b:Step)
+      WHERE a.step = 1
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[0]]
+
+  - id: optional/g045/abbreviated-edge-undirected-or-right
+    name: The tilde arrow is the abbreviation of the undirected or right edge
+    features: [G045, GH02]
+    subclauses: ["16.7"]
+    productions: [abbreviated edge pattern, tilde right arrow]
+    query: |
+      MATCH (a:Step)~>(b:Step)
+      WHERE a.step = 1
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[2]]
+
+  - id: optional/g045/abbreviated-edge-undirected
+    name: A lone tilde is the abbreviation of the undirected edge
+    features: [G045, GH02]
+    subclauses: ["16.7"]
+    productions: [abbreviated edge pattern, tilde]
+    fixture: undirected
+    # The one abbreviation that means less than the ones around it rather than
+    # more: a tilde takes undirected edges and nothing else, so on a graph of
+    # directed edges it matches nothing at all. That is why it is written over
+    # the fixture that has one.
+    query: |
+      MATCH (a:Peer)~(b:Peer)
+      WHERE a.name = 'north'
+      RETURN b.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[south]]
+
+  - id: optional/g045/abbreviated-edge-any-direction
+    name: A lone minus sign is the abbreviation of the any-direction edge
+    features: [G045]
+    subclauses: ["16.7"]
+    productions: [abbreviated edge pattern, minus sign]
+    # The shortest edge pattern the language has, and the one an engine is
+    # likeliest to have parsed as something else, since a minus sign between
+    # two parenthesized things is subtraction everywhere but here.
+    query: |
+      MATCH (a:Step)-(b:Step)
+      WHERE a.step = 2
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[1], [3]]
+
+  - id: optional/g080/simplified-defaulting-left
+    name: A simplified path pattern may point left
+    features: [G080]
+    subclauses: ["16.12"]
+    productions:
+      [
+        simplified path pattern expression,
+        simplified defaulting left,
+        left minus slash,
+        slash minus,
+      ]
+    query: |
+      MATCH (a:Step)<-/ LINK /-(b:Step)
+      WHERE a.step = 1
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[0]]
+
+  - id: optional/g039/simplified-defaulting-left-or-right
+    name: A simplified path pattern with an arrowhead at each end walks either way
+    features: [G039]
+    subclauses: ["16.12"]
+    productions:
+      [
+        simplified path pattern expression,
+        simplified defaulting left or right,
+        left minus slash,
+        slash minus right,
+      ]
+    query: |
+      MATCH (a:Step)<-/ LINK /->(b:Step)
+      WHERE a.step = 1
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[0], [2]]
+
+  - id: optional/g039/simplified-defaulting-undirected
+    name: A simplified path pattern written in tildes walks undirected edges
+    features: [G039, GH02]
+    subclauses: ["16.12"]
+    productions:
+      [
+        simplified path pattern expression,
+        simplified defaulting undirected,
+        tilde slash,
+        slash tilde,
+      ]
+    fixture: undirected
+    query: |
+      MATCH (a:Peer)~/ FRIEND /~(b:Peer)
+      WHERE a.name = 'north'
+      RETURN b.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[south]]
+
+  - id: optional/g039/simplified-defaulting-undirected-or-right
+    name: A simplified path pattern may open with a tilde and close with an arrow
+    features: [G039, GH02]
+    subclauses: ["16.12"]
+    productions:
+      [
+        simplified path pattern expression,
+        simplified defaulting undirected or right,
+        tilde slash,
+        slash tilde right,
+      ]
+    query: |
+      MATCH (a:Step)~/ LINK /~>(b:Step)
+      WHERE a.step = 1
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[2]]
+
+  - id: optional/g039/simplified-defaulting-left-or-undirected
+    name: A simplified path pattern may open with an arrow and close with a tilde
+    features: [G039, GH02]
+    subclauses: ["16.12"]
+    productions:
+      [
+        simplified path pattern expression,
+        simplified defaulting left or undirected,
+        left tilde slash,
+        slash tilde,
+      ]
+    query: |
+      MATCH (a:Step)<~/ LINK /~(b:Step)
+      WHERE a.step = 1
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[0]]
+
   - id: optional/g074/wildcard-label
     name: The wildcard label matches an element whatever its labels
     features: [G074]
     subclauses: ["16.8"]
-    productions: [wildcard label, label primary]
+    productions: [wildcard label, label primary, percent]
     fixture: social
     query: |
       MATCH (x:%)
@@ -552,7 +815,13 @@ cases:
     name: A simplified path pattern spells a labelled traversal without brackets
     features: [G080]
     subclauses: ["16.12"]
-    productions: [simplified path pattern expression, simplified defaulting right]
+    productions:
+      [
+        simplified path pattern expression,
+        simplified defaulting right,
+        minus slash,
+        slash minus right,
+      ]
     query: |
       MATCH (a:Step)-/ LINK /->(b:Step)
       WHERE a.step = 0
@@ -631,11 +900,47 @@ cases:
     name: IS LABELED tests a label expression against a bound element
     features: [G111]
     subclauses: ["19.9"]
-    productions: [labeled predicate, labeled predicate part 2]
+    productions:
+      [
+        labeled predicate,
+        labeled predicate part 2,
+        is labeled or colon,
+      ]
     fixture: social
     query: |
       MATCH (x)
       WHERE x IS LABELED Person
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/g111/labeled-predicate-written-with-a-colon
+    name: A colon is the other spelling of the IS LABELED predicate
+    features: [G111]
+    subclauses: ["19.9"]
+    productions:
+      [
+        labeled predicate,
+        labeled predicate part 2,
+        is labeled or colon,
+        colon,
+      ]
+    fixture: social
+    # <is labeled or colon> ::= IS [ NOT ] LABELED | <colon>, so the two are one
+    # predicate with two spellings and an engine that has the words has the
+    # punctuation. The colon is the harder half to parse, because a colon after
+    # an element variable in a WHERE clause is a colon in a place the pattern
+    # syntax also uses one, and an engine that resolves that by looking for a
+    # node pattern refuses this.
+    #
+    # zu refuses it: "expected MATCH, OPTIONAL MATCH, CALL, UNWIND". Engine
+    # finding, and the corpus had no case that would have caught it because the
+    # only G111 case wrote the words.
+    query: |
+      MATCH (x)
+      WHERE x:Person
       RETURN COUNT(*) AS n
     expect:
       kind: rows
@@ -786,7 +1091,13 @@ cases:
     name: A simplified path pattern between two plain bars walks an edge either way round
     features: [G039]
     subclauses: ["16.12"]
-    productions: [simplified path pattern expression, simplified defaulting any direction]
+    productions:
+      [
+        simplified path pattern expression,
+        simplified defaulting any direction,
+        minus slash,
+        slash minus,
+      ]
     query: |
       MATCH (a:Step)-/ LINK /-(b:Step)
       WHERE a.step = 2
