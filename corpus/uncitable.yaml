@@ -1,0 +1,128 @@
+# The grammar productions no case can cite.
+#
+# A citation is a claim that the case exercises the rule. That is the whole
+# reason the grammar denominator is worth reading, and it is why the uncited
+# productions have to be split into the ones nobody has written a case for and
+# the ones no case can reach. The first list is work and `gql-compat validate
+# -missing` prints it. The second is this file.
+#
+# The bar is the one `unwritable.yaml` sets for features. An entry is not "hard
+# to exercise", "no engine implements it" or "the fixture has none of those":
+# every one of those is a case somebody has not written. It is a claim about the
+# shape of the grammar, and the loader checks whichever of the three reasons the
+# entry gives.
+#
+# One thing worth writing down, because it is the obvious idea and it is wrong.
+# A rule the grammar declines to expand, written "!! See the Syntax Rules.", is
+# not by itself uncitable. There are 23 of those and the corpus already cites 5
+# of them honestly: a query with a space in it exercises whitespace, a query
+# with 1e6 in it exercises unsigned decimal in scientific notation, and an
+# unquoted name exercises identifier extend. The grammar refusing to expand a
+# rule says the spelling is somebody else's to write down, and for most of the
+# 23 that somebody is the lexer, whose answer everyone already agrees on. So
+# unexpanded is not the test. The test is unexpanded and named in ISO's own list
+# of implementation-defined items, which is the standard saying in two documents
+# that the answer is the implementer's.
+#
+# The three reasons, and what the loader checks for each:
+#
+#   implementers        The grammar declines to expand the rule and one of the
+#                       two lists of implementation-defined and
+#                       implementation-dependent items names it in guillemets.
+#   unwritable-feature  The named feature is in `unwritable.yaml` with this rule
+#                       as the production it hangs off, so the only way to this
+#                       rule is the case that cannot be written.
+#   orphaned            The rule has at least one referrer and every rule that
+#                       names it is registered here. This is the reason that
+#                       keeps the register from growing: an orphan can only be
+#                       added behind an entry that earned its place some other
+#                       way, and it cannot creep outward into rules that are in
+#                       fact reachable.
+#
+# Nothing here changes a denominator. There are still 814 productions and a
+# corpus citing 429 of them still reads as 429 of 814. What changes is that
+# these nine stop appearing in the list of work nobody has done.
+
+version: 1
+uncitable:
+  - production: implementation-defined access mode
+    why: implementers
+    note: >-
+      A transaction mode is a list of access modes and transaction
+      characteristics, and an access mode is READ ONLY, READ WRITE, or this. The
+      first two are spelled by cases already. This one the grammar leaves
+      unexpanded, and the implementation-defined item about transaction
+      isolation names it outright when it says the levels of isolation and the
+      rules for the implementation-defined access mode used to select them are
+      the implementer's. So there is a third access mode, every engine may have
+      one, and no two engines need agree on a single character of it.
+
+  - production: bidirectional control character
+    why: implementers
+    note: >-
+      No rule in the grammar names this one, which is unusual enough to say out
+      loud: it exists so the implementation-defined list can point at it when it
+      says what an implementation does about text that changes direction
+      mid-string. A case cannot cite what no query can contain a use of, and
+      what an engine does with one is not a thing the standard fixes.
+
+  - production: external object reference
+    why: unwritable-feature
+    feature: GH01
+    note: >-
+      The copy of graph type rule takes either a graph type reference or one of
+      these, and subclause 17.8 defines this one as see the Syntax Rules with
+      nothing beneath it. The feature register already says GH01 has no portable
+      case for exactly that reason. This is the same fact seen from the grammar
+      rather than from the feature list, and it is here so that the rule stops
+      reading as a gap somebody could close.
+
+  - production: named procedure call
+    why: unwritable-feature
+    feature: GP04
+    note: >-
+      A named procedure call is a procedure reference, an argument list in
+      parentheses and an optional yield clause, and the reference bottoms out in
+      a name the standard never says how to bring into existence. GP04, GP14 and
+      GP15 are all registered as unwritable against this rule, and the reason is
+      the rule's rather than any one feature's: there is no create procedure
+      statement, so every name a case could write is one the engine happened to
+      ship.
+
+  - production: procedure reference
+    why: orphaned
+    note: >-
+      Named procedure call is the only rule that names this one, and that rule is
+      registered. A case reaching a procedure reference has already written a
+      call to a procedure it could not name.
+
+  - production: catalog procedure parent and name
+    why: orphaned
+    note: >-
+      Procedure reference is the only rule that names this one, and the other
+      half of procedure reference is a reference parameter specification, which
+      moves the naming problem into a parameter rather than solving it. Either
+      way the path here runs through the call that cannot be written.
+
+  - production: procedure name
+    why: orphaned
+    note: >-
+      Catalog procedure parent and name is the only rule that names this one. It
+      expands to an identifier, so there is nothing about the rule that is hard;
+      what is impossible is arriving at it, since the only statement that asks
+      for a procedure name is the call the standard supplies no callee for.
+
+  - production: procedure argument list
+    why: orphaned
+    note: >-
+      Named procedure call is the only rule that names this one. The argument
+      list is where GP14 and GP15 live, a binding table and a graph passed to a
+      procedure, and both features are registered as unwritable for the same
+      reason the call is: there is no procedure to pass anything to.
+
+  - production: procedure argument
+    why: orphaned
+    note: >-
+      Procedure argument list is the only rule that names this one, and it
+      expands to a value expression, so a case could write the argument a
+      hundred ways. It still cannot write the call around it.

@@ -63,6 +63,19 @@ against the standard's own denominators.
 			return fmt.Errorf("%s is claimed by a case and listed as unwritable; one of the two is wrong", code)
 		}
 	}
+	// The same register, for the grammar. It is loaded against the catalogue and
+	// against the feature register above, so a wrong entry fails here too.
+	uncitable, err := corpus.Uncitables(iso.Codes{Catalog: std.Catalog})
+	if err != nil {
+		return err
+	}
+	unreachable := corpus.UncitableProductions(uncitable)
+	citedProduction := set(std.Suite.CoveredProductions())
+	for name := range unreachable {
+		if citedProduction[name] {
+			return fmt.Errorf("<%s> is cited by a case and listed as uncitable; one of the two is wrong", name)
+		}
+	}
 	byKind := map[corpus.Kind]int{}
 	for _, c := range std.Suite.Cases {
 		byKind[c.Kind]++
@@ -92,6 +105,8 @@ against the standard's own denominators.
 			SubclausesTotal  int                 `json:"normative_subclauses_total"`
 			Unclaimed        []string            `json:"unclaimed_features,omitempty"`
 			Unwritable       []corpus.Unwritable `json:"unwritable_features,omitempty"`
+			Uncited          []string            `json:"uncited_productions,omitempty"`
+			Uncitable        []corpus.Uncitable  `json:"uncitable_productions,omitempty"`
 		}
 		o := out{
 			Cases: std.Suite.Len(), ByKind: byKind, Fixtures: std.Fixtures.Len(),
@@ -99,10 +114,11 @@ against the standard's own denominators.
 			Conditions: conditions, ConditionsTotal: totalConditions,
 			Productions: productions, ProductionsTotal: len(std.Catalog.Productions),
 			Subclauses: subclauses, SubclausesTotal: normative,
-			Unwritable: unwritable,
+			Unwritable: unwritable, Uncitable: uncitable,
 		}
 		if *missing {
 			o.Unclaimed = unclaimed(std.Catalog, claimed, cannot)
+			o.Uncited = uncited(std.Catalog, citedProduction, unreachable)
 		}
 		return writeJSON(o)
 	}
@@ -141,6 +157,19 @@ against the standard's own denominators.
 		}
 	}
 
+	if len(uncitable) > 0 {
+		fmt.Printf("\nno case can cite %d of the %d grammar rules:\n",
+			len(uncitable), len(std.Catalog.Productions))
+		for _, why := range corpus.Whys(uncitable) {
+			fmt.Printf("\n  because %s:\n", why.Because())
+			for _, u := range uncitable {
+				if u.Why == why {
+					fmt.Printf("    <%s>\n", u.Production)
+				}
+			}
+		}
+	}
+
 	if *missing {
 		fmt.Println("\nfeature codes no case claims:")
 		for _, code := range unclaimed(std.Catalog, claimed, cannot) {
@@ -169,21 +198,19 @@ against the standard's own denominators.
 		}
 		// The grammar is the largest denominator and was the one this list
 		// did not print, which made it the one nobody could work through.
-		// A rule the grammar declines to expand is marked, because it is
-		// uncited for a reason no case can fix: the standard writes "!! See
-		// the Syntax Rules." where the alternatives would go, and a case
-		// spelling one would be spelling this project's invention.
-		haveProduction := set(std.Suite.CoveredProductions())
+		// The rules the register above accounts for are left out, because
+		// the point of this list is the work left and those are not work.
+		// A rule the grammar declines to expand is still marked, since it
+		// is usually reachable and usually worth citing but is worth a
+		// second look before somebody writes a case around it.
 		fmt.Println("\ngrammar productions no case cites:")
-		for _, p := range std.Catalog.Productions {
-			if haveProduction[p.Name] {
-				continue
-			}
+		for _, name := range uncited(std.Catalog, citedProduction, unreachable) {
+			p, _ := std.Catalog.Production(name)
 			note := ""
 			if p.SeeTheRules {
 				note = "   (the grammar declines to expand this one)"
 			}
-			fmt.Printf("  <%s>%s\n", p.Name, note)
+			fmt.Printf("  <%s>%s\n", name, note)
 		}
 	}
 	return nil
@@ -208,5 +235,22 @@ func unclaimed(cat *iso.Catalog, claimed, unwritable map[string]bool) []string {
 		}
 	}
 	sort.Strings(out)
+	return out
+}
+
+// uncited is the grammar rules no case cites and somebody could still write one
+// for. It is unclaimed's counterpart for the largest of the four denominators
+// and subtracts its register for the same reason.
+//
+// The order is the grammar's rather than alphabetical. A reader working through
+// this list is reading down the BNF, and rules that sit next to each other in
+// the standard are usually one case's worth of work rather than several.
+func uncited(cat *iso.Catalog, cited, uncitable map[string]bool) []string {
+	var out []string
+	for _, p := range cat.Productions {
+		if !cited[p.Name] && !uncitable[p.Name] {
+			out = append(out, p.Name)
+		}
+	}
 	return out
 }
