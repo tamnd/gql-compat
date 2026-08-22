@@ -86,10 +86,19 @@ cases:
   - id: mandatory/value/bracketed-comment
     name: Text between a solidus-asterisk pair is a comment
     subclauses: ["21.3"]
-    productions: [comment, bracketed comment, bracketed comment introducer, bracketed comment terminator]
+    productions:
+      [
+        comment,
+        bracketed comment,
+        bracketed comment introducer,
+        bracketed comment contents,
+        bracketed comment terminator,
+      ]
     tags: [lexical]
     # The two other comment forms are features GB02 and GB03; this one is not,
-    # so it is the only comment an engine must accept.
+    # so it is the only comment an engine must accept. The text between the two
+    # markers is <bracketed comment contents>, which the grammar declines to
+    # expand because what it excludes is the terminator itself.
     query: |
       RETURN /* a comment */ 1 AS v
     expect:

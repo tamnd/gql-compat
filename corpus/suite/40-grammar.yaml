@@ -109,8 +109,10 @@ cases:
     # <delimited identifier> ::= <double quoted character sequence> | <accent
     # quoted character sequence>, so the two forms are interchangeable and an
     # engine that takes one and refuses the other is reading double quotes as a
-    # string literal. Both zu and Neo4j refuse it. For Neo4j that is a declared
-    # gap rather than a defect found here: the appendix quoted above says
+    # string literal. Both engines refused it when this file was written; zu
+    # takes it as of the run of 2026-08-23, so what is left is Neo4j. For Neo4j
+    # that is a declared gap rather than a defect found here: the appendix
+    # quoted above says
     # Cypher allows only backticks, and gives MATCH (n) RETURN n."a prop" as an
     # example of GQL that Cypher will not take. Engine finding, vendor
     # acknowledged.
@@ -159,10 +161,33 @@ cases:
     # it, but Neo4j's appendix does: subclause 21.3 is on its list of mandatory
     # features Cypher does not support, with the note that GQL reserves words
     # that cannot be used as unquoted variable names, labels and property
-    # names, and that Cypher's list differs. Both engines accept this. Engine
-    # finding, vendor acknowledged.
+    # names, and that Cypher's list differs. Both engines accepted this when
+    # the case was written; zu refuses it as of the run of 2026-08-23, and its
+    # message names the accent-quoted spelling that would work. Engine finding,
+    # vendor acknowledged, one of the two closed.
     query: |
       RETURN 1 AS MATCH
+    expect:
+      kind: reject
+
+  - id: grammar/reject-pre-reserved-word-as-identifier
+    name: A word held back for a later edition is reserved now
+    subclauses: ["21.3"]
+    productions: [pre-reserved word, reserved word, regular identifier]
+    # <reserved word> ::= <pre-reserved word> | ABS | ... , so the forty words
+    # ISO has set aside for editions it has not written are reserved words in
+    # this one, and whatever keeps a reserved word out of <regular identifier>
+    # keeps these out too. ABSTRACT means nothing in GQL today, which is the
+    # whole point of asserting it: a word an engine has no use for is exactly
+    # the word an engine will let through, and every one it lets through is a
+    # name the next edition cannot have back. The case sits beside
+    # grammar/reject-keyword-as-bare-identifier and rests on the same Syntax
+    # Rules prose, and the two do not answer alike: zu refuses MATCH there and
+    # takes ABSTRACT here, which is a reserved word list that stopped at the
+    # words the engine has a use for. That is the divergence being reported and
+    # it is tamnd/zu#644.
+    query: |
+      RETURN 1 AS ABSTRACT
     expect:
       kind: reject
 

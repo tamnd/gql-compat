@@ -278,6 +278,56 @@ cases:
       columns: [v]
       rows: [[true]]
 
+  # ------------------------------------------------------- delimited names
+
+  - id: mandatory/lexical/doubled-double-quote-in-a-name
+    name: A double quote inside a double-quoted name is written twice
+    subclauses: ["21.3"]
+    productions:
+      [
+        return item alias,
+        identifier,
+        delimited identifier,
+        double quoted character representation,
+        double double quote,
+      ]
+    # The same escape as the doubled quote in a string literal, one layer up.
+    # <double quoted character representation> ::= <character representation> |
+    # <double double quote>, and there is no other way to spell a name with a
+    # double quote in it, so an engine that admits the delimited form at all
+    # has to admit this. The case asserts the column name rather than
+    # acceptance, because whether the two quotes were read as one is only
+    # visible in the name that comes back. Engines that refuse double-quoted
+    # identifiers outright fail this the way they fail
+    # grammar/delimited-identifier-double-quoted, and for the same reason.
+    query: |
+      RETURN 1 AS "a""b"
+    expect:
+      kind: rows
+      columns: ['a"b']
+      rows: [[1]]
+
+  - id: mandatory/lexical/doubled-grave-accent-in-a-name
+    name: A grave accent inside an accent-quoted name is written twice
+    subclauses: ["21.3"]
+    productions:
+      [
+        return item alias,
+        delimited identifier,
+        accent quoted character representation,
+        double grave accent,
+      ]
+    # The other delimited form and its own escape. This is the half of the
+    # pair an engine grown out of Cypher is likely to have, which is what makes
+    # running both worth the two cases: the answer separates an engine missing
+    # one spelling from an engine missing the escape.
+    query: |
+      RETURN 1 AS `a``b`
+    expect:
+      kind: rows
+      columns: ["a`b"]
+      rows: [[1]]
+
   # ------------------------------------------------------- tokens and letters
 
   - id: mandatory/lexical/the-punctuation-of-an-expression
@@ -340,10 +390,53 @@ cases:
       columns: [v]
       rows: [[1]]
 
+  - id: mandatory/lexical/characters-outside-the-latin-alphabet
+    name: A string may hold letters and digits from any script
+    subclauses: ["21.3", "21.2"]
+    productions:
+      [
+        GQL terminal character,
+        other language character,
+        other digit,
+      ]
+    # <GQL terminal character> ::= <GQL language character> | <other language
+    # character>, and <digit> ::= <standard digit> | <other digit>, which is
+    # the standard saying that a GQL source text is Unicode and not ASCII. The
+    # two rules are the only places in the grammar where a character outside
+    # the Latin alphabet and the ten Western digits is admitted at all, so a
+    # query containing one is the only way to cite them. Both are written "!!
+    # See the Syntax Rules.", and both are cited here on the reading the file
+    # header sets out.
+    #
+    # The value is returned rather than counted because the count is the weaker
+    # question. An engine holding text as bytes and calling them characters
+    # answers a length of seven for these five and would still be handing back
+    # the right string; an engine that mangles the encoding on the way out
+    # fails this and passes a count.
+    query: |
+      RETURN 'café٣' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["café٣"]]
+
   - id: mandatory/lexical/an-unquoted-name-is-a-non-delimited-identifier
     name: An identifier written without delimiters is a non-delimited identifier
     subclauses: ["21.1", "21.3"]
-    productions: [non-delimited identifier, regular identifier, identifier]
+    productions:
+      [
+        non-delimited identifier,
+        regular identifier,
+        identifier,
+        identifier start,
+      ]
+    # <regular identifier> ::= <identifier start> [ <identifier extend>... ],
+    # so the first character of every unquoted name in the corpus is an
+    # identifier start. The rule is written "!! See the Syntax Rules." and is
+    # cited here on the reading the file header sets out, the same one the
+    # corpus already uses for <identifier extend>: what may begin a name is
+    # spelled elsewhere, and the query still contains one.
+    #
     # <non-delimited identifier> is one of the grammar's roots: no rule names
     # it, because it exists for the rest of the standard to refer to rather
     # than for a derivation to pass through. Citing it claims the query
