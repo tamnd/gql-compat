@@ -65,8 +65,16 @@ func ExampleStandard() {
 	for _, c := range std.Catalog.Classes {
 		conditions += len(c.Subclasses)
 	}
-	fmt.Printf("%d cases; ISO defines %d optional features and %d GQLSTATUS codes\n",
-		std.Suite.Len(), len(std.Catalog.Features), conditions)
+	// The corpus's own size is deliberately not printed. It goes up whenever
+	// somebody writes a case, and an example that had to be edited for that
+	// would be teaching the wrong lesson: the numerator is this project's and
+	// the denominators are ISO's, and only one of the two is worth asserting.
+	if std.Suite.Len() == 0 {
+		log.Fatal("the embedded corpus is empty")
+	}
+	fmt.Printf("scored against ISO: %d optional features, %d GQLSTATUS codes, %d grammar productions, %d normative subclauses\n",
+		len(std.Catalog.Features), conditions,
+		len(std.Catalog.Productions), len(std.Catalog.NormativeSubclauses()))
 	// Output:
-	// 432 cases; ISO defines 228 optional features and 68 GQLSTATUS codes
+	// scored against ISO: 228 optional features, 68 GQLSTATUS codes, 814 grammar productions, 317 normative subclauses
 }
