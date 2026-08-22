@@ -17,14 +17,19 @@
 # convenience for putting the value back without knowing what it was, which is
 # a different and smaller thing, and ISO charges a feature code for it.
 #
-# The one clause of Clause 7 that is not here is SESSION CLOSE. A case for it
-# would end the session the harness is measuring in, so an engine that
-# implements it correctly leaves the run with no connection for the next case
-# and an engine that does not implement it fails. That is a harness gap rather
-# than a grammar one, and it wants a way to mark a case as the last thing a
-# session does. It is not in the uncitable register, because the register is
-# for claims about the shape of the grammar and this is a claim about this
-# project's runner.
+# The clause of Clause 7 that was missing for a year is SESSION CLOSE, and the
+# reason it was missing was the harness rather than the grammar. A run keeps one
+# session and hands it to every case in turn, so an engine that implements the
+# clause correctly leaves the next case with no connection and an engine that
+# does not leaves it with the session intact, and judging either by what happens
+# afterwards is judging the engine on this project's bookkeeping. It was never
+# in the uncitable register for that reason: the register is for claims about
+# the shape of the standard and this was a claim about a runner. The case at the
+# bottom of this file is what closed it. `ends_session` tells the runner the
+# statement is the last thing this session does, and the runner throws the
+# session away whichever way the statement went, so the cost is one connection
+# and it is the same cost for an engine that has the clause and one that does
+# not.
 
 defaults:
   kind: mandatory
@@ -143,5 +148,29 @@ cases:
     # cases.
     query: |
       SESSION SET GRAPH HOME_PROPERTY_GRAPH
+    expect:
+      kind: accept
+
+  - id: mandatory/session/close
+    name: A session may be closed by the program running in it
+    subclauses: ["7", "7.3", "4.5.1"]
+    productions: [session close command]
+    mutating: true
+    ends_session: true
+    # The other end of a GQL-session. Subclause 4.5.1 says a session begins at a
+    # session start and ends at a session close, and every other case in this
+    # corpus exercises the first half and the middle. This is the only one that
+    # asks for the end, and it is two words with nothing under them: there is no
+    # variant to spell, no argument to get wrong and no way for an engine to
+    # half implement it.
+    #
+    # Nothing is asserted about the session afterwards, and that is deliberate
+    # rather than an omission. What the standard requires is that the statement
+    # be accepted; what a client sees on a connection whose session has ended is
+    # the driver's business and not the language's, and an assertion about it
+    # would be measuring the adapter. The harness discards the session either
+    # way, so a wrong answer here costs the run a reconnection and nothing else.
+    query: |
+      SESSION CLOSE
     expect:
       kind: accept
