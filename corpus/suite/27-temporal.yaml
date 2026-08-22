@@ -1,0 +1,457 @@
+# Temporal values: the functions that make them, the arithmetic that combines
+# them, and the ISO 8601 spelling a duration string is written in.
+#
+# Three of ISO's optional features carry the whole of this. GV39 is date, local
+# datetime and local time, GV40 is the two zoned types, and GV41 is duration.
+# The corpus had a literal for a date and a literal for a duration and nothing
+# else, so an engine could pass both and still have no way to ask what time it
+# is or to add an hour to a timestamp. These cases cover the rest of Clause
+# 20.26 through 20.29.
+#
+# Nothing here returns a temporal value. Every case compares one against a
+# literal of the same type and returns the boolean, for the reason the CAST
+# cases already give: a returned date crosses the driver boundary as whatever
+# that driver calls a date, and a case that returned one would be measuring the
+# driver. The clock cases compare against a fixed instant in the past, which is
+# the strongest thing that can be asserted about a value that is different
+# every time it is read.
+#
+# The iso8601 rules want a word of their own. <iso8601 years and months> and
+# <iso8601 days and time> and the eight rules under them are in the grammar and
+# no other rule in the grammar refers to them. They are reached from the Syntax
+# Rules of <duration string>, which require the character string literal to
+# conform to one of the two, so a case that writes a conforming string is
+# exercising them exactly as much as a case that writes MATCH exercises <match
+# statement>. That is why they are cited from the duration string cases and are
+# not in the uncitable register. What the citation claims is the contents of
+# the string and not a token the engine lexed, which is a distinction worth
+# keeping in mind for the fields inside <iso8601 seconds>: the period there is
+# a character in a literal rather than the <period> delimiter, so <period> is
+# not cited.
+
+defaults:
+  kind: optional
+  fixture: unit
+  tags: [read, temporal]
+
+cases:
+  - id: optional/gv40/zoned-datetime-function-from-a-string
+    name: ZONED_DATETIME reads a string as a zoned datetime
+    features: [GV40]
+    subclauses: ["20.27", "4.16.6.2"]
+    productions:
+      [
+        datetime primary,
+        datetime value function,
+        datetime function,
+        datetime function parameters,
+        datetime string,
+      ]
+    # The parameterised half of the datetime function. A datetime function
+    # parameter is either a string or a record and this is the string, which
+    # makes the case a statement that the function and the literal of the same
+    # type agree about what the string means.
+    query: |
+      RETURN ZONED_DATETIME('2024-01-15T10:00:00Z') = ZONED DATETIME '2024-01-15T10:00:00Z' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv39/local-datetime-function-from-a-string
+    name: LOCAL_DATETIME reads a string as a local datetime
+    features: [GV39]
+    subclauses: ["20.27", "4.16.6.2"]
+    productions: [localdatetime function, datetime function parameters, datetime string]
+    # LOCAL_DATETIME and LOCAL_TIMESTAMP are the two spellings of the same
+    # rule, and the second is written in the clock case below, so between them
+    # both alternatives are asked for.
+    query: |
+      RETURN LOCAL_DATETIME('2024-01-15T10:00:00') = LOCAL DATETIME '2024-01-15T10:00:00' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv40/zoned-time-function-from-a-string
+    name: ZONED_TIME reads a string as a zoned time
+    features: [GV40]
+    subclauses: ["20.27", "4.16.6.2"]
+    productions: [time function, time function parameters, time string]
+    query: |
+      RETURN ZONED_TIME('10:00:00Z') = ZONED TIME '10:00:00Z' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv39/local-time-function-from-a-record
+    name: LOCAL_TIME reads a record of fields as a local time
+    features: [GV39]
+    subclauses: ["20.27", "20.18", "20.19", "4.16.6.2"]
+    productions:
+      [
+        localtime function,
+        time function parameters,
+        record constructor,
+        fields specification,
+        field list,
+        field,
+        field name,
+      ]
+    # The record half of a time function parameter, which is the other
+    # alternative and the one that lets a query build a time out of numbers
+    # rather than out of text. Which field names are accepted is settled by the
+    # Syntax Rules rather than by the grammar, and the ones written here are
+    # the singular ISO spellings. An engine that wants HOURS and MINUTES fails
+    # this case, which is the point of writing it.
+    query: |
+      RETURN LOCAL_TIME({hour: 10, minute: 30}) = LOCAL TIME '10:30:00' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv40/current-timestamp-reads-the-clock
+    name: CURRENT_TIMESTAMP is the session clock as a zoned datetime
+    features: [GV40]
+    subclauses: ["20.27", "4.16.6.2"]
+    productions: [datetime primary, datetime value function, datetime function]
+    # The unparameterised alternative, which takes no argument and so has no
+    # value a case can predict. What can be asserted is that the clock is later
+    # than an instant already past, which is true of any engine whose clock is
+    # a clock and false of one that returns a constant or a zero.
+    query: |
+      RETURN CURRENT_TIMESTAMP > ZONED DATETIME '2024-01-01T00:00:00Z' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv40/current-time-reads-the-clock
+    name: CURRENT_TIME is the session clock as a zoned time
+    features: [GV40]
+    subclauses: ["20.27", "4.16.6.2"]
+    productions: [datetime primary, datetime value function, time function]
+    # A time of day carries no date, so the only bound that holds every time
+    # this runs is the start of the day. That is weaker than the timestamp case
+    # above and it is the strongest thing true of a value with no date in it.
+    query: |
+      RETURN CURRENT_TIME >= ZONED TIME '00:00:00Z' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv39/local-timestamp-reads-the-clock
+    name: LOCAL_TIMESTAMP is the session clock with no time zone
+    features: [GV39]
+    subclauses: ["20.27", "4.16.6.2"]
+    productions: [datetime value function, localdatetime function]
+    query: |
+      RETURN LOCAL_TIMESTAMP > LOCAL DATETIME '2024-01-01T00:00:00' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv39/local-time-reads-the-clock
+    name: LOCAL_TIME may be written with no parentheses at all
+    features: [GV39]
+    subclauses: ["20.27", "4.16.6.2"]
+    productions: [datetime value function, localtime function]
+    # The parentheses are optional in this one rule and in no other temporal
+    # function, so an engine that requires them everywhere fails here and
+    # passes the record case above. That is a difference a report can only show
+    # if the two spellings are separate cases.
+    query: |
+      RETURN LOCAL_TIME >= LOCAL TIME '00:00:00' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv40/time-literal
+    name: TIME and a string is a literal of the zoned time type
+    features: [GV40]
+    subclauses: ["21.2", "4.16.6.2"]
+    productions: [temporal literal, time literal, time string]
+    # The fourth temporal literal and the last one the corpus had not written.
+    # It is compared against the longer spelling of the same value, which is
+    # the only way to establish that TIME means the zoned type rather than the
+    # local one.
+    query: |
+      RETURN TIME '10:00:00Z' = ZONED TIME '10:00:00Z' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/duration-added-to-a-duration
+    name: Two durations add
+    features: [GV41]
+    subclauses: ["20.28", "4.16.6.4"]
+    productions:
+      [
+        duration value expression,
+        duration addition and subtraction,
+        duration value expression 1,
+        duration term 1,
+        duration term,
+        duration factor,
+        duration primary,
+        plus sign,
+      ]
+    # A day and an hour, which lands in both halves of a duration at once and
+    # so cannot be answered by an engine that keeps only nanoseconds or only
+    # months.
+    query: |
+      RETURN DURATION 'P1D' + DURATION 'PT1H' = DURATION 'P1DT1H' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/duration-subtracted-from-a-duration
+    name: One duration subtracts from another
+    features: [GV41]
+    subclauses: ["20.28", "4.16.6.4"]
+    productions:
+      [duration addition and subtraction, duration value expression 1, duration term 1, minus sign]
+    query: |
+      RETURN DURATION 'P3D' - DURATION 'P1D' = DURATION 'P2D' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/duration-multiplied-by-a-number
+    name: A duration times a number is a longer duration
+    features: [GV41]
+    subclauses: ["20.28", "4.16.6.4"]
+    productions: [duration term, duration term 2, factor, asterisk]
+    query: |
+      RETURN DURATION 'P1D' * 3 = DURATION 'P3D' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/number-multiplied-by-a-duration
+    name: The number may be written on the left of the multiplication
+    features: [GV41]
+    subclauses: ["20.28", "4.16.6.4"]
+    productions: [duration term, term, duration factor, asterisk]
+    # ISO gives multiplication two rules rather than one because the operands
+    # are of different types and the grammar has to say which side the duration
+    # is on. Division has only the one, since dividing a number by a duration
+    # is not a duration.
+    query: |
+      RETURN 3 * DURATION 'P1D' = DURATION 'P3D' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/duration-divided-by-a-number
+    name: A duration divided by a number is a shorter duration
+    features: [GV41]
+    subclauses: ["20.28", "4.16.6.4"]
+    productions: [duration term, duration term 2, factor, solidus]
+    query: |
+      RETURN DURATION 'P3D' / 3 = DURATION 'P1D' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/negated-duration
+    name: A minus sign in front of a duration negates it
+    features: [GV41]
+    subclauses: ["20.28", "4.16.6.4"]
+    productions: [duration factor, duration primary, sign, minus sign]
+    # The sign is the optional first half of a duration factor and it is the
+    # only place ISO lets a duration be negated without arithmetic. The right
+    # hand side reaches the same value the long way, so the case is a statement
+    # that the two agree rather than a statement about how a negative duration
+    # prints.
+    #
+    # zu declines the left hand side with "invalid argument: cannot negate
+    # Temporal(Duration(DayTime, 86400000000000))", and takes the right hand
+    # side, so it has the value and not the spelling.
+    query: |
+      RETURN -DURATION 'P1D' = DURATION 'P1D' * -1 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/duration-between-two-dates
+    name: DURATION_BETWEEN is the difference of two datetimes
+    features: [GV41]
+    subclauses: ["20.28", "4.16.6.4"]
+    productions:
+      [
+        duration value expression,
+        datetime subtraction,
+        datetime subtraction parameters,
+        datetime value expression 1,
+        datetime value expression 2,
+      ]
+    # Subtracting one datetime from another is not written with a minus sign in
+    # GQL. It has a function of its own, because the answer depends on which
+    # fields the caller wants it in and a minus sign has nowhere to say that.
+    query: |
+      RETURN DURATION_BETWEEN(DATE '2024-01-15', DATE '2024-01-20') = DURATION 'P5D' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/duration-between-under-a-qualifier
+    name: A qualifier says which fields DURATION_BETWEEN answers in
+    features: [GV41]
+    subclauses: ["20.28", "4.16.6.3", "4.16.6.4"]
+    productions: [datetime subtraction, temporal duration qualifier]
+    # This is where the qualifier earns its place in the grammar. The two dates
+    # are sixty five days apart and that is two months and five days, so an
+    # engine asked for years and months answers two months and drops the rest.
+    # Without the qualifier the same call answers in days, which the case above
+    # shows, and the pair of them is the evidence that the qualifier is read
+    # rather than accepted and ignored.
+    query: |
+      RETURN DURATION_BETWEEN(DATE '2024-01-15', DATE '2024-03-20') YEAR TO MONTH = DURATION 'P2M' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/absolute-value-of-a-duration
+    name: ABS of a negative duration is the positive one
+    features: [GV41]
+    subclauses: ["20.29", "4.16.6.4"]
+    productions: [duration value function, duration absolute value function, duration primary]
+    # ABS is one of the two duration value functions and the only one that
+    # takes a duration rather than making one. The argument is built by
+    # multiplication rather than written as a negative literal, because ISO's
+    # spelling for a negative duration puts the minus inside the string on each
+    # field and the case below is the one that asks for that.
+    query: |
+      RETURN ABS(DURATION 'P1D' * -1) = DURATION 'P1D' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/duration-function-from-a-record
+    name: DURATION reads a record of fields as a duration
+    features: [GV41]
+    subclauses: ["20.29", "20.18", "4.16.6.3"]
+    productions: [duration value function, duration function, duration function parameters, record constructor]
+    # The other duration value function, and the record half of its parameter.
+    # The seconds field carries a fraction, which is where an engine that keeps
+    # a duration in whole seconds disagrees.
+    query: |
+      RETURN DURATION({day: 3, hour: 4, minute: 5, second: 6.5}) = DURATION 'P3DT4H5M6.5S' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv39/datetime-plus-a-duration
+    name: A duration added to a datetime is a later datetime
+    features: [GV39]
+    requires: [GV41]
+    subclauses: ["20.26", "4.16.6.4"]
+    productions: [datetime value expression, datetime primary, duration term, plus sign]
+    query: |
+      RETURN LOCAL DATETIME '2024-01-15T10:00:00' + DURATION 'PT1H' = LOCAL DATETIME '2024-01-15T11:00:00' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv39/duration-plus-a-datetime
+    name: The duration may be written on the left of the addition
+    features: [GV39]
+    requires: [GV41]
+    subclauses: ["20.26", "4.16.6.4"]
+    productions: [datetime value expression, duration value expression, datetime primary]
+    # Addition is commutative here and ISO writes both orders into the grammar,
+    # the same way it writes both orders of a duration and a number. Subtraction
+    # has only the one order, because a datetime taken from a duration is not a
+    # datetime.
+    query: |
+      RETURN DURATION 'P1D' + DATE '2024-01-15' = DATE '2024-01-16' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/duration-string-with-years-and-months
+    name: A duration string may hold years and months
+    features: [GV41]
+    subclauses: ["21.2", "4.16.6.3"]
+    productions:
+      [
+        duration literal,
+        duration string,
+        iso8601 years and months,
+        iso8601 years,
+        iso8601 months,
+        iso8601 sint,
+      ]
+    # One of the two shapes a duration string may take. It has no T in it and
+    # so holds no time of day at all, which is what makes a year and a month
+    # comparable with each other and not with a day.
+    query: |
+      RETURN DURATION 'P1Y2M' = DURATION({year: 1, month: 2}) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/duration-string-with-days-and-time
+    name: A duration string may hold days and a time of day
+    features: [GV41]
+    subclauses: ["21.2", "4.16.6.3"]
+    productions:
+      [
+        duration string,
+        iso8601 days and time,
+        iso8601 days,
+        iso8601 hours,
+        iso8601 minutes,
+        iso8601 seconds,
+        iso8601 uint,
+      ]
+    # The other shape, and every field it has. The seconds field is the one
+    # that carries a fraction, and the digits after the period are an
+    # unsigned integer rather than a signed one, which is the only place the
+    # two iso8601 integer rules differ.
+    query: |
+      RETURN DURATION 'P3DT4H5M6.5S' = DURATION({day: 3, hour: 4, minute: 5, second: 6.5}) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv41/duration-string-with-a-negative-field
+    name: A field of a duration string may carry its own minus sign
+    features: [GV41]
+    subclauses: ["21.2", "4.16.6.3"]
+    productions: [duration string, iso8601 days and time, iso8601 days, iso8601 sint]
+    # ISO puts the sign on the field rather than on the string. <iso8601 sint>
+    # is an optional minus and then digits, and it is what every field of both
+    # duration shapes is written with, so a duration of minus one day is P-1D
+    # and there is no form with the minus in front of the P.
+    #
+    # zu declines it with "'P-1D' is not a DAY TIME DURATION anyone can read"
+    # and reads -P1D instead, which is the spelling it prints. The value is
+    # there and the ISO spelling of it is not.
+    query: |
+      RETURN DURATION 'P-1D' = DURATION 'P1D' * -1 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
