@@ -287,7 +287,7 @@ cases:
 
   - id: mandatory/value/session-user
     name: SESSION_USER is a value specification every session can write
-    subclauses: ["20.3"]
+    subclauses: ["20.3", "4.2.4.1", "4.2.4.2"]
     productions: [general value specification]
     # The other half of <general value specification> is a dynamic parameter,
     # which is optional GE features, so SESSION_USER is the only spelling of
@@ -296,6 +296,13 @@ cases:
     # so the case asks only that it is a value the engine can project. An
     # engine that has no notion of a user has an answer available, the null
     # value, and the case accepts that too.
+    #
+    # Subclause 4.2.4.2 is authorization identifiers and privileges, and this is
+    # the one place in the mandatory grammar where an authorization identifier
+    # is a value a program can look at rather than something the engine keeps to
+    # itself. Subclause 4.2.4.1 is the principal that identifier stands for,
+    # which is the whole of what this keyword says about the security model: a
+    # session is opened for somebody, and this is how a program asks who.
     query: |
       RETURN SESSION_USER AS u
     expect:

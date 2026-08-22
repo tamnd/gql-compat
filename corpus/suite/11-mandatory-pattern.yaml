@@ -17,13 +17,20 @@ defaults:
 cases:
   - id: mandatory/pattern/node-pattern-unlabelled
     name: A node pattern with only a variable binds every node in the graph
-    subclauses: ["16.4", "22.2"]
+    subclauses: ["16.4", "22.2", "4.2.6", "4.11.4"]
     productions: [node pattern, element variable declaration]
     # The simplest match there is, which is why 22.2 is cited here rather than
     # anywhere else. That subclause is the machinery the standard defines
     # matching in terms of, and a pattern with no label and no predicate is the
     # one case where the answer is the machinery and nothing else: every node
     # in the graph, once each.
+    #
+    # It is also where the two concepts underneath that answer belong. Subclause
+    # 4.2.6 is GQL-data, and a count of seven is a claim about how much of it
+    # there is; an engine that keeps nodes somewhere the catalog cannot see has
+    # a different number here. Subclause 4.11.4 is graph pattern variables, and
+    # x is one declared with nothing else attached, which is the smallest a
+    # declaration gets.
     query: |
       MATCH (x)
       RETURN COUNT(*) AS n
@@ -61,7 +68,7 @@ cases:
 
   - id: mandatory/pattern/edge-property-predicate
     name: A property of an edge variable is readable in a where clause
-    subclauses: ["16.7", "16.13", "16.10", "20.11", "22.6"]
+    subclauses: ["16.7", "16.13", "16.10", "20.11", "22.6", "4.11.5"]
     productions: [property reference, element variable reference, period, edge reference value expression]
     # The source of a property reference is a node, an edge or a record, and
     # the grammar has a rule for each. This is the corpus case where the source
@@ -70,7 +77,9 @@ cases:
     # 16.10 is the reference itself and 22.6 is what the engine has to do with
     # it: apply the bindings the pattern produced before the expression can be
     # evaluated at all. Every case in the corpus that names a variable in an
-    # expression does that, and this is the one that says so.
+    # expression does that, and this is the one that says so. Subclause 4.11.5
+    # is the same point in prose, references to graph pattern variables, which
+    # is what k is in a clause the pattern has already finished with.
     query: |
       MATCH (p:Person)-[k:KNOWS]->(q:Person)
       WHERE k.since > 2018
@@ -126,8 +135,12 @@ cases:
 
   - id: mandatory/pattern/path-concatenation
     name: Concatenated element patterns match a two-edge path
-    subclauses: ["16.7"]
+    subclauses: ["16.7", "4.11.3"]
     productions: [path concatenation, path term, path factor]
+    # Subclause 4.11.3 is path patterns, and this is the first case in the file
+    # where the pattern is a path rather than a single element: two edges laid
+    # end to end are a path pattern doing the one thing only a path pattern
+    # does, which is say that the end of one element is the start of the next.
     query: |
       MATCH (p:Person)-[:KNOWS]->(q:Person)-[:KNOWS]->(r:Person)
       RETURN p.name AS origin, r.name AS target

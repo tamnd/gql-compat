@@ -33,7 +33,7 @@ defaults:
 cases:
   - id: mandatory/session/set-schema-at-the-root
     name: A session may be pointed at the root of the catalog
-    subclauses: ["7", "7.1", "4.5.2.3"]
+    subclauses: ["7", "7.1", "4.5.2.3", "4.7.4", "4.10.3"]
     productions:
       [
         session set command,
@@ -49,6 +49,13 @@ cases:
     # only one that needs no schema to have been created first. That is what
     # makes this the mandatory case: it asks for the clause and asks for
     # nothing else.
+    #
+    # The two Clause 4 citations beside the session context are what the clause
+    # is for and what it is. Subclause 4.7.4 is the working schema reference,
+    # which is where a request looks when a name in it is not qualified, and the
+    # session schema is what that starts out as. Subclause 4.10.3 is commands as
+    # against procedures: this is a whole program with no query in it, which is
+    # the distinction that subclause draws.
     query: |
       SESSION SET SCHEMA /
     expect:
@@ -79,7 +86,7 @@ cases:
 
   - id: mandatory/session/set-schema-at-a-relative-path
     name: A schema reference may climb out of the current schema with two periods
-    subclauses: ["7", "7.1", "17.1"]
+    subclauses: ["7", "7.1", "17.1", "4.3.2"]
     productions:
       [
         relative catalog schema reference,
@@ -91,6 +98,9 @@ cases:
     # The other relative form is a path. Two periods is the parent, and what
     # follows the solidus is a schema name read from there, which is the same
     # convention a filesystem uses and the reason ISO borrowed the spelling.
+    # Subclause 4.3.2 is references to schemas and objects, and a relative one
+    # is where that subclause has anything to say: an absolute reference means
+    # the same thing wherever it is written and this one does not.
     # zu takes only the absolute form and reports "expected an absolute
     # directory path, found '..'", so it has the predefined half of a relative
     # schema reference and not the path half.
@@ -101,7 +111,7 @@ cases:
 
   - id: mandatory/session/set-graph
     name: A session may be pointed at a graph
-    subclauses: ["7", "7.1", "4.5.2.3"]
+    subclauses: ["7", "7.1", "4.5.2.3", "4.7.5"]
     productions: [session set command, session set graph clause, graph expression]
     mutating: true
     # PROPERTY is optional in this clause the way it is optional in CREATE
@@ -109,7 +119,9 @@ cases:
     # shorter one is spelled in the case below. The graph named is the one the
     # session is already on, for the reason the CURRENT_SCHEMA case gives:
     # what the working graph is called is the adapter's business, and a case
-    # that spelled a name would be measuring the fixture.
+    # that spelled a name would be measuring the fixture. Subclause 4.7.5 is
+    # that working graph site, the graph a statement reads and writes when no
+    # statement in it says otherwise, and this clause is how a session names it.
     query: |
       SESSION SET PROPERTY GRAPH CURRENT_PROPERTY_GRAPH
     expect:
