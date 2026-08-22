@@ -116,6 +116,21 @@ const (
 	// the code and leaves the number to the implementation, so there is no
 	// answer here the standard calls wrong.
 	SkipWithinLimit SkipReason = "within-limit"
+	// SkipFeaturePresent is a condition case the engine did not refuse, where
+	// ISO requires the condition only of an engine lacking some optional
+	// feature and requires acceptance of an engine that has it. 25G04 is the
+	// clearest of them: it says accessing multiple graphs is not supported, so
+	// an engine supporting GT03 can never raise it and an engine raising it is
+	// announcing an absence.
+	//
+	// It is kept apart from SkipWithinLimit because the two say different
+	// things about what is left to do. A limit skip leaves the code reachable
+	// in principle, by an engine that draws its line lower or by a statement
+	// that asks for more. This one does not: the code is unreachable on the
+	// engine as built, and it becomes reachable only by removing a feature,
+	// which is not an improvement anyone should make to close a gap in a
+	// coverage table.
+	SkipFeaturePresent SkipReason = "feature-present"
 	// SkipSemantic is a generated statement the engine refused with a
 	// GQLSTATUS that is not a syntax error. The walk knows the statement is
 	// well formed and nothing at all about what it means, so a refusal on
@@ -412,6 +427,16 @@ type Status struct {
 	Fail  int `json:"fail"`
 	Skip  int `json:"skip"`
 	Error int `json:"error"`
+	// Unreachable is how many of the skipped cases were skipped because
+	// nothing a client can send raises the code on this engine, rather than
+	// because the case was never put to it. A condition ISO names only for
+	// engines lacking a feature, and a condition that needs the connection to
+	// die at a particular instant, are both in this state, and both read as an
+	// ordinary gap in coverage without it. The distinction matters because the
+	// work implied is different: an untested code wants a case, and an
+	// unreachable one wants a sentence in the report saying why, which it now
+	// has.
+	Unreachable int `json:"unreachable,omitempty"`
 	// Description is the standard's own words for the item, where the
 	// catalogue has them.
 	Description string `json:"description,omitempty"`
@@ -580,10 +605,10 @@ func summarize(cat *iso.Catalog, unwritable []corpus.Unwritable, results []CaseR
 		}
 		t.ByKind[r.Kind] = k
 
-		record(cov.Features, r.Features, r.Outcome)
-		record(cov.Subclauses, r.Subclauses, r.Outcome)
-		record(cov.Conditions, r.Conditions, r.Outcome)
-		record(cov.Productions, r.Productions, r.Outcome)
+		record(cov.Features, r.Features, r)
+		record(cov.Subclauses, r.Subclauses, r)
+		record(cov.Conditions, r.Conditions, r)
+		record(cov.Productions, r.Productions, r)
 	}
 
 	for code, st := range cov.Features {
@@ -656,22 +681,35 @@ func declarations(results []CaseResult) []DeclarationCheck {
 	return out
 }
 
-func record(into map[string]Status, keys []string, outcome Outcome) {
+func record(into map[string]Status, keys []string, r *CaseResult) {
 	for _, key := range keys {
 		st := into[key]
 		st.Cases++
-		switch outcome {
+		switch r.Outcome {
 		case Pass:
 			st.Pass++
 		case Fail:
 			st.Fail++
 		case Skip:
 			st.Skip++
+			if unreachable(r.Skip) {
+				st.Unreachable++
+			}
 		case Error:
 			st.Error++
 		}
 		into[key] = st
 	}
+}
+
+// unreachable says whether a skip means the engine cannot be made to produce
+// this outcome at all, as against not having been asked. Both of these are
+// arrived at by argument rather than by an engine's declaration of absence,
+// which is why neither is in the same class as a fixture the engine cannot
+// hold: that one becomes reachable the day the engine grows the capability,
+// and these two do not.
+func unreachable(s SkipReason) bool {
+	return s == SkipFeaturePresent || s == SkipNotProvokable
 }
 
 func families(cat *iso.Catalog, unwritable []corpus.Unwritable, tested map[string]Status) []FamilyCoverage {

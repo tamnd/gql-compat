@@ -298,6 +298,12 @@ func verdict(s runner.Status) string {
 	switch {
 	case s.Supported():
 		return "supported"
+	case s.Pass+s.Fail == 0 && s.Unreachable == s.Skip:
+		// Not the same sentence as the one below it. Untested is a gap the
+		// corpus or the run can close; this is one nothing a client sends can
+		// close, and saying so is the answer rather than an excuse for not
+		// having one.
+		return "unreachable — nothing a client can send raises it here"
 	case s.Pass+s.Fail == 0:
 		return "untested — every case was skipped"
 	case s.Fail > 0:

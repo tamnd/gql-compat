@@ -269,8 +269,8 @@ type Case struct {
 	// the condition was never reachable; if it is accepted, the shape is fine
 	// and the wrong code is exactly what it looks like.
 	Parses string `yaml:"parses" json:"parses,omitempty"`
-	// Limit names the implementation-defined item, or the optional feature,
-	// whose value decides whether this case's condition can be raised at all.
+	// Limit names the ISO 24.5.2 implementation-defined item whose value
+	// decides whether this case's condition can be raised at all.
 	//
 	// Sixteen of ISO's sixty-eight GQLSTATUS codes are limit conditions: a node
 	// carrying more labels than the implementation supports, a record with more
@@ -281,17 +281,30 @@ type Case struct {
 	// must accept the statement, and failing it for that would be scoring it
 	// against a number the standard never set.
 	//
-	// A handful more are not thresholds but absences: ISO says an engine that
-	// does not support two graphs in one transaction shall raise 25G04, which
-	// is a requirement on engines without feature GT03 and says nothing at all
-	// about engines with it. Naming the feature here has the same effect as
-	// naming a threshold, for the same reason.
-	//
 	// So a case with a limit set is not failed for a statement the engine took.
 	// It is skipped, and the skip records that the engine's limit is at least
 	// what the case asked for, which is a measurement of the item and the only
 	// one available. The code is still asserted when the engine does refuse.
+	// Where the item is a number, Scale sizes the statement from it instead of
+	// guessing, and the skip is reached only by an engine that declares none.
 	Limit string `yaml:"limit" json:"limit,omitempty"`
+	// Unless names an optional feature whose presence makes this case's
+	// condition unreachable.
+	//
+	// Some conditions are not thresholds but absences. ISO says an engine that
+	// does not support two graphs in one transaction shall raise 25G04, which
+	// is a requirement on engines without feature GT03 and says nothing at all
+	// about engines with it. The same shape covers 22G04 against GA04, 22G13
+	// against GQ17, and 25G02 against GP18: in each of them the engine can only
+	// raise the code by not having the feature.
+	//
+	// It is written apart from Limit because the two are skipped for different
+	// reasons and a reader who cannot tell them apart draws the wrong
+	// conclusion. A limit skip says nothing was learned about the code and the
+	// number is the engine's to choose. An unless skip says the code is not
+	// merely untested but unreachable on this engine as built, and the report
+	// should not go on suggesting that a threshold somewhere would reach it.
+	Unless string `yaml:"unless" json:"unless,omitempty"`
 	// Scale builds the statement at the size the engine's own declared limit
 	// makes it, instead of at a size the corpus guessed.
 	//
@@ -488,11 +501,30 @@ func (c *Case) Validate(known KnownCodes) error {
 		// than the wider behaviour catalogue, because an excuse is only owed
 		// where 24.5.2 obliges the implementer to have written the threshold
 		// down. A threshold the standard left implementation-dependent is one
-		// nobody has to state, and a case cannot be waived on it. A feature
-		// code is the other admissible answer, for the conditions ISO raises
-		// only on engines that lack the feature.
-		if !known.Defined(c.Limit) && !known.Feature(c.Limit) {
-			return fmt.Errorf("%s: %q is neither an implementation-defined item nor a feature of ISO/IEC 39075", where, c.Limit)
+		// nobody has to state, and a case cannot be waived on it.
+		if !known.Defined(c.Limit) {
+			return fmt.Errorf("%s: %q is not an implementation-defined item of ISO/IEC 39075 24.5.2", where, c.Limit)
+		}
+	}
+	if c.Unless != "" {
+		if c.Expect.Kind != ExpectError {
+			return fmt.Errorf("%s: unless excuses an engine that accepted the statement, and this case expects %s",
+				where, c.Expect.Kind)
+		}
+		if !known.Feature(c.Unless) {
+			return fmt.Errorf("%s: %q is not a feature of ISO/IEC 39075, and only a feature can make a condition unreachable by being present",
+				where, c.Unless)
+		}
+		// Requiring a feature and being excused by it are opposite claims, and
+		// a case making both would be skipped whichever way the engine
+		// answered.
+		if slices.Contains(c.Requires, c.Unless) {
+			return fmt.Errorf("%s: %q is both required and excusing, so no engine could ever be judged on this case",
+				where, c.Unless)
+		}
+		if c.Limit != "" {
+			return fmt.Errorf("%s: the case names both a limit and an excusing feature, and a reader cannot be told which one the skip measured",
+				where)
 		}
 	}
 	if s := c.Scale; s != nil {
