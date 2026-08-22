@@ -126,6 +126,19 @@ rejecting it with prose, which is stronger than merely rejecting it. The three
 are recorded as `gqlstatus`, `message`, and `rejected`, and message-only passes
 are counted beside the score rather than folded into it.
 
+**The record is graded apart from the code.** GQLSTATUS says which condition
+was raised and the diagnostic record ISO subclause 23.2 attaches to it says
+what the condition was about, and an engine can be perfect at the first and
+useless at the second: `42002 invalid reference` with no name in it leaves a
+client underlining tokens by parsing an English sentence, which is the work the
+status mechanism exists to remove. A case may assert the record with
+`expect.diagnostic`, naming the subject and its kind, the schema, or only that
+the record points at some place in the statement. The record is judged after
+the code, so an engine that raised the wrong condition is told which one rather
+than told that the record of a status it never reported is short a field, and
+every failure carries whatever record the engine did send into the report,
+whether the case asked for one or not.
+
 **Two modes, never mixed.** `-mode conformance` runs the standard's own
 spelling on every engine and is the only mode whose results may be called
 conformance. `-mode compat` runs the engine's documented spelling of the same

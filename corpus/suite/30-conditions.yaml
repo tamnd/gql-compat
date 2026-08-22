@@ -351,3 +351,50 @@ cases:
       kind: rows
       columns: [n]
       rows: [[1]]
+
+  # GA08 is the record beside the status rather than the status itself. The
+  # code says which condition was raised and the record says what it was
+  # about, and an engine can be perfect at the first and useless at the
+  # second: "42002 invalid reference" with no name in it leaves a client
+  # underlining tokens by parsing an English sentence, which is the work the
+  # whole status mechanism exists to remove. These two cases are ordinary
+  # condition cases first, so an engine that names the wrong code is told
+  # that and not told its record is short a field.
+
+  - id: condition/42002/diagnostic-record-names-the-subject
+    name: The record beside the status says which name the condition is about
+    features: [GA08]
+    conditions: ["42002"]
+    subclauses: ["23.2", "20.12"]
+    productions: [binding variable reference]
+    fixture: social
+    query: |
+      MATCH (p:Person)
+      RETURN q.name AS name
+    expect:
+      kind: error
+      gqlstatus: "42002"
+      diagnostic:
+        subject: q
+        subject_kind: variable
+
+  - id: condition/42001/diagnostic-record-points-at-the-place
+    name: The record beside a syntax error says where in the statement and in which schema
+    features: [GA08]
+    conditions: ["42001"]
+    subclauses: ["23.2"]
+    productions: [node pattern]
+    fixture: unit
+    # The line and the column are not asserted, only that there is a place.
+    # Two engines that both point at the right word disagree about which
+    # character it starts at as soon as one of them counts a keyword the
+    # other folded, and scoring that would be scoring the tokenizer.
+    query: |
+      MATCH (u:Solo
+      RETURN 1 AS v
+    expect:
+      kind: error
+      gqlstatus: "42001"
+      diagnostic:
+        position: true
+        schema: "/"

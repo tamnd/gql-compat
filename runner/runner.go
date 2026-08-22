@@ -1228,6 +1228,7 @@ func judge(c *corpus.Case, res *adapter.Result, err error, caps adapter.Capabili
 		f := adapter.AsFailure(err)
 		r.Message = f.Message
 		r.GotStatus = f.GQLStatus
+		r.Diagnostic = f.Diagnostic
 		switch {
 		case errors.Is(err, adapter.ErrUnsupported):
 			r.Outcome, r.Skip = Skip, SkipCapability
@@ -1343,6 +1344,11 @@ func judgeError(c *corpus.Case, caps adapter.Capabilities, r *CaseResult) {
 
 	if c.Expect.GQLStatus != "" && caps.GQLStatus && r.GotStatus != "" {
 		if r.GotStatus == c.Expect.GQLStatus {
+			if reason := diagnosticMiss(c.Expect.Diagnostic, r.Diagnostic); reason != "" {
+				r.Outcome, r.Evidence = Fail, EvidenceStatus
+				r.Reason = reason
+				return
+			}
 			r.Outcome, r.Evidence = Pass, EvidenceStatus
 			return
 		}
@@ -1383,6 +1389,48 @@ func judgeError(c *corpus.Case, caps adapter.Capabilities, r *CaseResult) {
 	// it. A condition case cannot reach here: one that names a code is skipped
 	// before it runs when the engine reports none.
 	r.Outcome, r.Evidence = Pass, EvidenceRejected
+}
+
+// diagnosticMiss reports why the record the engine attached does not satisfy
+// what the case asked of it, or "" when it does.
+//
+// It runs only after the code matched. A case that asserts a record is still
+// first a case about a condition, and an engine that raised the wrong
+// condition should be told which one it got wrong rather than told its record
+// is missing a field of a status it never reported.
+//
+// Each field is checked for equality and not for presence, because a record
+// naming the wrong thing is worse than a record naming nothing: it sends a
+// client to underline a token the statement got right.
+func diagnosticMiss(want *corpus.ExpectDiagnostic, got *adapter.Diagnostic) string {
+	if want == nil {
+		return ""
+	}
+	if got == nil {
+		return "the status carried no diagnostic record, and GA08 asks for one"
+	}
+	if want.Subject != "" && got.Subject != want.Subject {
+		if got.Subject == "" {
+			return fmt.Sprintf("the record does not say what the condition is about; the statement named %q", want.Subject)
+		}
+		return fmt.Sprintf("the record says the condition is about %q, and it is about %q", got.Subject, want.Subject)
+	}
+	if want.SubjectKind != "" && got.SubjectKind != want.SubjectKind {
+		if got.SubjectKind == "" {
+			return fmt.Sprintf("the record names a subject and not what sort of thing it is; %q is a %s", want.Subject, want.SubjectKind)
+		}
+		return fmt.Sprintf("the record calls the subject a %s, and it is a %s", got.SubjectKind, want.SubjectKind)
+	}
+	if want.Schema != "" && got.Schema != want.Schema {
+		if got.Schema == "" {
+			return "the record does not say which schema the statement was running in"
+		}
+		return fmt.Sprintf("the record says the statement ran in schema %q, and it ran in %q", got.Schema, want.Schema)
+	}
+	if want.Position && got.Line == 0 && got.Column == 0 {
+		return "the record points at no place in the statement"
+	}
+	return ""
 }
 
 func capList(caps []fixture.Capability) string {

@@ -115,6 +115,20 @@ cases:
       kind: error
       gqlstatus: "08007"
 
+  - id: condition/42002/record
+    name: The record beside the status names what the condition is about
+    kind: condition
+    features: [GA08]
+    conditions: ["42002"]
+    subclauses: ["23.2"]
+    query: RETURN nothing AS v
+    expect:
+      kind: error
+      gqlstatus: "42002"
+      diagnostic:
+        subject: nothing
+        subject_kind: variable
+
   - id: mandatory/test/write
     name: A mutating case is never warmed up
     kind: mandatory
@@ -184,6 +198,10 @@ func engine(t *testing.T, adjust func(*fake.Config)) adapter.Driver {
 			"MATCH (p:Person) RETURN p.age AS age":   {Table: table("age", 36, 999)},
 			"RETURN 1 / 0 AS v": {Failure: &adapter.Failure{
 				GQLStatus: "22012", Message: "division by zero"}},
+			"RETURN nothing AS v": {Failure: &adapter.Failure{
+				GQLStatus: "42002", Message: "nothing is not bound here",
+				Diagnostic: &adapter.Diagnostic{
+					Subject: "nothing", SubjectKind: "variable", Schema: "/", Line: 1, Column: 8}}},
 		},
 		BytesPerNode: 64,
 	}
@@ -1010,5 +1028,86 @@ func TestTheRunCarriesTheFeaturesNoPortableCaseCanReach(t *testing.T) {
 	}
 	if cov.FeaturesTotal != 228 {
 		t.Errorf("features total = %d: the register moved a denominator", cov.FeaturesTotal)
+	}
+}
+
+// GA08 is the record beside the status, and these four cases are the whole of
+// what the harness can say about it: the record is right, it names the wrong
+// thing, it names nothing, or there is no record at all. The code matches in
+// every one of them, which is the point. An engine can name the condition
+// perfectly and still leave a client parsing English to find out which token
+// it was about.
+
+func TestARecordThatNamesTheSubjectPasses(t *testing.T) {
+	r := result(t, run(t, engine(t, nil), runner.Config{}), "condition/42002/record")
+	if r.Outcome != runner.Pass || r.Evidence != runner.EvidenceStatus {
+		t.Fatalf("outcome %s evidence %q reason %q, want pass on gqlstatus", r.Outcome, r.Evidence, r.Reason)
+	}
+	if r.Diagnostic == nil || r.Diagnostic.Subject != "nothing" {
+		t.Errorf("the record the engine sent is not in the result: %+v", r.Diagnostic)
+	}
+}
+
+func TestARecordThatNamesTheWrongThingFails(t *testing.T) {
+	wrong := engine(t, func(c *fake.Config) {
+		c.Answers["RETURN nothing AS v"] = fake.Answer{Failure: &adapter.Failure{
+			GQLStatus: "42002", Message: "nothing is not bound here",
+			Diagnostic: &adapter.Diagnostic{Subject: "v", SubjectKind: "variable"}}}
+	})
+	r := result(t, run(t, wrong, runner.Config{}), "condition/42002/record")
+	if r.Outcome != runner.Fail {
+		t.Fatalf("outcome %s, want fail: a record pointing at the wrong token is worse than none", r.Outcome)
+	}
+	if !strings.Contains(r.Reason, `"v"`) || !strings.Contains(r.Reason, `"nothing"`) {
+		t.Errorf("the reason should name what the record said and what it is about, got %q", r.Reason)
+	}
+}
+
+func TestARecordWithNoSubjectFailsAndTheCodeStillMatched(t *testing.T) {
+	bare := engine(t, func(c *fake.Config) {
+		c.Answers["RETURN nothing AS v"] = fake.Answer{Failure: &adapter.Failure{
+			GQLStatus: "42002", Message: "nothing is not bound here",
+			Diagnostic: &adapter.Diagnostic{Schema: "/"}}}
+	})
+	r := result(t, run(t, bare, runner.Config{}), "condition/42002/record")
+	if r.Outcome != runner.Fail {
+		t.Fatalf("outcome %s, want fail", r.Outcome)
+	}
+	if r.GotStatus != "42002" {
+		t.Errorf("got status %q: the engine named the right condition and the record is what it got wrong", r.GotStatus)
+	}
+	if !strings.Contains(r.Reason, "nothing") {
+		t.Errorf("the reason should name what the statement wrote, got %q", r.Reason)
+	}
+}
+
+func TestNoRecordAtAllIsAGA08Failure(t *testing.T) {
+	silent := engine(t, func(c *fake.Config) {
+		c.Answers["RETURN nothing AS v"] = fake.Answer{Failure: &adapter.Failure{
+			GQLStatus: "42002", Message: "nothing is not bound here"}}
+	})
+	r := result(t, run(t, silent, runner.Config{}), "condition/42002/record")
+	if r.Outcome != runner.Fail {
+		t.Fatalf("outcome %s, want fail", r.Outcome)
+	}
+	if !strings.Contains(r.Reason, "GA08") {
+		t.Errorf("the reason should name the feature that is missing, got %q", r.Reason)
+	}
+}
+
+// A record is judged only after the code is. An engine that raised the wrong
+// condition should be told which one, not told that the record of a status it
+// never reported is short a field.
+func TestTheWrongCodeIsReportedBeforeTheRecordIs(t *testing.T) {
+	wrong := engine(t, func(c *fake.Config) {
+		c.Answers["RETURN nothing AS v"] = fake.Answer{Failure: &adapter.Failure{
+			GQLStatus: "42001", Message: "syntax error"}}
+	})
+	r := result(t, run(t, wrong, runner.Config{}), "condition/42002/record")
+	if r.Outcome != runner.Fail {
+		t.Fatalf("outcome %s, want fail", r.Outcome)
+	}
+	if !strings.Contains(r.Reason, "42001") || !strings.Contains(r.Reason, "42002") {
+		t.Errorf("the reason should be about the code, got %q", r.Reason)
 	}
 }

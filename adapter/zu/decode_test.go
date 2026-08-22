@@ -91,6 +91,49 @@ func TestDecodeSeparatesRaisedConditionsFromProtocolFaults(t *testing.T) {
 	}
 }
 
+// The record beside the status is what GA08 is about, and zu writes each of
+// its fields only where the record holds one, so the two things to establish
+// are that a full record arrives whole and that a bare one arrives as no
+// record at all rather than as a record of empty strings.
+func TestDecodeCarriesTheDiagnosticRecord(t *testing.T) {
+	t.Parallel()
+
+	_, err := decode([]byte(`{"error":"no variable q here","failure":{"gqlstatus":"42002",` +
+		`"condition":"syntax error or access rule violation, invalid reference",` +
+		`"severity":"exception","message":"no variable q here","subject_kind":"variable",` +
+		`"subject":"q","graph":"home","schema":"/","line":2,"column":8,"offset":24,` +
+		`"excerpt":"RETURN q.id AS id"}}`))
+	var fail *adapter.Failure
+	if !errors.As(err, &fail) {
+		t.Fatalf("want *adapter.Failure, got %T: %v", err, err)
+	}
+	got := fail.Diagnostic
+	if got == nil {
+		t.Fatal("the failure carries no diagnostic record")
+	}
+	want := adapter.Diagnostic{
+		Subject: "q", SubjectKind: "variable", Graph: "home", Schema: "/",
+		Line: 2, Column: 8, Excerpt: "RETURN q.id AS id",
+	}
+	if *got != want {
+		t.Errorf("record = %+v, want %+v", *got, want)
+	}
+
+	// A division by zero happens at no token and is about nothing named, so
+	// the shell writes neither and the adapter reports no record. A record of
+	// empty fields would read as an engine that answered and said nothing,
+	// which is a different finding.
+	_, err = decode([]byte(`{"error":"division by zero","failure":{"gqlstatus":"22012",` +
+		`"condition":"data exception, division by zero","severity":"exception",` +
+		`"message":"division by zero"}}`))
+	if !errors.As(err, &fail) {
+		t.Fatalf("want *adapter.Failure, got %T: %v", err, err)
+	}
+	if fail.Diagnostic != nil {
+		t.Errorf("record = %+v, want none for a condition about nothing named", *fail.Diagnostic)
+	}
+}
+
 func TestDecodeKeepsIntegersIntegral(t *testing.T) {
 	t.Parallel()
 

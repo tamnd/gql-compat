@@ -149,6 +149,55 @@ type Failure struct {
 	// when it can tell the difference, and should say in Message what broke,
 	// because a reader who cannot see the plumbing has only that sentence.
 	Transport bool
+
+	// Diagnostic is the record beside the status, for an engine that
+	// produces one. Nil means the engine reported no record, which is a
+	// finding about GA08 and not a gap in the harness.
+	Diagnostic *Diagnostic
+}
+
+// Diagnostic is the record ISO/IEC 39075:2024 subclause 23.2 attaches to a
+// GQL-status object, in the fields the standard names.
+//
+// It is separate from the code because the code says which condition was
+// raised and the record says what it was about. An engine can be perfect at
+// the first and useless at the second: "42002 invalid reference" with no name
+// in it leaves a client no way to underline the offending token except by
+// parsing the sentence, and parsing the sentence is what the whole status
+// mechanism exists to avoid. GA08 is the feature that asks for both.
+//
+// Every field is optional, because the standard makes most of them so and
+// because a condition raised while the statement ran has no token to point
+// at. An empty field means the engine said nothing, never that it said
+// nothing was there.
+type Diagnostic struct {
+	// Subject is the thing the statement named that the condition is about,
+	// spelled the way the statement spelled it: a variable, a label, a
+	// property, a graph.
+	Subject string `json:"subject,omitempty"`
+	// SubjectKind is what sort of thing Subject is, as one lower-case word
+	// out of graph, schema, label, property, variable, type and function. It
+	// is apart from Subject so that asking whether a condition is about a
+	// label is one string compared against one word.
+	SubjectKind string `json:"subject_kind,omitempty"`
+	// Graph and Schema are where the statement was running.
+	Graph  string `json:"graph,omitempty"`
+	Schema string `json:"schema,omitempty"`
+	// Line and Column are the place, one-based, and zero for a condition
+	// raised nowhere a token can be pointed at.
+	Line   int `json:"line,omitempty"`
+	Column int `json:"column,omitempty"`
+	// Excerpt is the source line that place falls on, for the client that
+	// still has the failure and no longer has the statement.
+	Excerpt string `json:"excerpt,omitempty"`
+}
+
+// Empty reports whether the record carries nothing at all, which is how an
+// adapter that built one out of an engine saying nothing is told apart from
+// an adapter that never built one.
+func (d *Diagnostic) Empty() bool {
+	return d == nil || (d.Subject == "" && d.SubjectKind == "" && d.Graph == "" &&
+		d.Schema == "" && d.Line == 0 && d.Column == 0 && d.Excerpt == "")
 }
 
 func (f *Failure) Error() string {

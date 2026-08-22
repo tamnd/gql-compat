@@ -177,6 +177,12 @@ type CaseResult struct {
 	GotStatus  string `json:"got_gqlstatus,omitempty"`
 	// Message is the engine's own error text, verbatim.
 	Message string `json:"message,omitempty"`
+	// Diagnostic is the record the engine attached to the status, nil for an
+	// engine that attached none. It is recorded on every failure and not only
+	// on the cases that assert one, because "which engines fill the record at
+	// all" is a question the report can answer for free from what is already
+	// coming back.
+	Diagnostic *adapter.Diagnostic `json:"diagnostic,omitempty"`
 	// Parse is the control statement's outcome, present only on a condition
 	// case that named a code the engine did not, and only when the case carried
 	// a control to run. It is what turns "wrong code" into either "wrong code"
