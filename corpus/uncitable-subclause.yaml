@@ -3,8 +3,8 @@
 # This is the third register and it is the smallest, which is the point. A
 # subclause is a piece of the standard's own table of contents, and nearly every
 # one of them specifies something a query can be written against, so the honest
-# answer to an uncited subclause is almost always a case. Two things make an
-# exception, and only one of them is here.
+# answer to an uncited subclause is almost always a case. Three things make an
+# exception, and two of them are here.
 #
 # The first is a clause heading. Clause 19 is titled Predicates and specifies
 # nothing on its own: what it specifies is 19.1 to 19.13. A corpus with a case
@@ -24,6 +24,29 @@
 # spells in angle brackets, and refuses the entry unless the grammar register
 # already holds all of them.
 #
+# The third is a subclause of Clause 4. Clause 4 is Concepts, and it is where the
+# standard says what its own words mean before the rest of the document states
+# rules in them. Most of it is still citable, because most of what it names is a
+# thing a statement says: a graph, a value, a binding table. Some of it is not.
+# An execution context is machinery an engine keeps, a GQL-request context is a
+# thing the standard needs a word for so that later subclauses can say what
+# happens to it, and no statement names either. Those entries carry the object
+# the subclause is about, the loader checks that ISO's own title says the entry
+# is about that, that the subclause is in Clause 4, and that no rule of the
+# published grammar has the object in its name. That last part is the claim: ISO
+# names its rules after what they are, so a thing a statement can address has a
+# rule with that thing in its name. If the title does name rules, they have to be
+# rules a case can write, because then the subclause is the part behind syntax
+# the corpus already reaches and the syntax is where the case belongs.
+#
+# That is a weaker claim than the second one and this file says so rather than
+# blurring the two. The second leaves nothing over: the subclause is the rules,
+# the rules are out of reach. The third proves the grammar has no name for the
+# thing and leaves the rest to a note. What keeps it honest is that a citation
+# beats an entry: a case citing a subclause in here fails the load, so the day
+# somebody writes a statement that addresses one of these, this file is what is
+# wrong and the loader is what says so.
+#
 # The bar is the one the other two registers set. An entry is not "no engine
 # implements this" or "the subclause is hard to write a case for": both of those
 # are cases somebody has not written. Nothing here changes a denominator. There
@@ -32,6 +55,202 @@
 
 version: 1
 uncitable:
+  - subclause: "4.1"
+    why: implementation-internal
+    object: use of terms
+    note: >-
+      The subclause says how the rest of the document uses words like shall and
+      may, and which of its terms are defined where. It is instructions for
+      reading the standard rather than anything an engine does, so the statement
+      that would cite it does not exist.
+
+  - subclause: "4.2.1"
+    why: implementation-internal
+    object: GQL-environment
+    note: >-
+      A GQL-environment is the standard's name for a GQL-implementation together
+      with the agents, sessions and catalogs it holds, which is everything a run
+      of this harness sits inside. A statement runs in one and never mentions
+      one, and the parts of it a statement does mention, the catalog and the
+      session, have their own subclauses and their own cases.
+
+  - subclause: "4.2.2"
+    why: implementation-internal
+    object: GQL-agent
+    note: >-
+      A GQL-agent is whatever starts a GQL-session and issues requests in it,
+      which for this project is the harness. No rule of the grammar names an
+      agent and no statement can ask which one it is running for, so the two
+      halves of a GQL-implementation are citable, in 4.2.3.2 and 4.2.3.3, and the
+      thing on the other side of them is not.
+
+  - subclause: "4.2.3.1"
+    why: implementation-internal
+    object: GQL-implementation
+    note: >-
+      The introduction to GQL-implementations says a GQL-implementation is a
+      GQL-client and a GQL-server together. Which half answers a case is a fact
+      about the two halves, 4.2.3.2 and 4.2.3.3, and those are cited by the two
+      cases where the answer comes from the client. This subclause is the
+      sentence that introduces them.
+
+  - subclause: "4.6.4"
+    why: implementation-internal
+    object: encompassing transaction
+    note: >-
+      An encompassing transaction is one an external agent started and handed to
+      the GQL-implementation, so the thing that began it is outside GQL by
+      definition and outside this harness with it. Nothing in the grammar starts
+      one, nothing in the grammar names one, and a case that ran inside one would
+      be a case about whatever tool started it.
+
+  - subclause: "4.7.2"
+    why: implementation-internal
+    object: GQL-request context
+    note: >-
+      A GQL-request context is the state a GQL-request runs against, and the
+      standard names it so that later subclauses can say what is put into it and
+      taken out of it. The three subclauses beneath it are registered here for
+      the same reason, so a heading covered by a case beneath is not available to
+      this one and the entry has to stand on its own.
+
+  - subclause: "4.7.2.1"
+    why: implementation-internal
+    object: GQL-request context
+    note: >-
+      The introduction says what a GQL-request context holds. It is the same
+      machinery 4.7.2 names, described rather than acted on, and a statement has
+      no word for it either way.
+
+  - subclause: "4.7.2.2"
+    why: implementation-internal
+    object: GQL-request context
+    note: >-
+      Creating the context is what an implementation does before it reads the
+      request, so by the time there is a statement to run the subclause is
+      already done with. What a statement can see afterwards is the session and
+      the catalog it was created from, and both have cases.
+
+  - subclause: "4.7.2.3"
+    why: implementation-internal
+    object: GQL-request context
+    note: >-
+      Modifying the context is the bookkeeping behind a statement that changes
+      the session or the transaction, and every one of those statements is
+      spelled by a rule with a case of its own. The change a case can see is the
+      one the statement made, not the one the context recorded.
+
+  - subclause: "4.7.7"
+    why: implementation-internal
+    object: operation
+    note: >-
+      An operation is the standard's word for a unit of work an implementation
+      performs, used so that other subclauses can say when one begins and ends.
+      No rule of the grammar has operation in its name and no statement asks for
+      one by that word, so what a case can address is the statement that caused
+      the operation.
+
+  - subclause: "4.8.1"
+    why: implementation-internal
+    object: execution context
+    note: >-
+      An execution context is the working state a statement executes against,
+      and the general description is the standard saying what belongs in one. An
+      engine that keeps that state in one structure and an engine that keeps it
+      in five answer every statement in this corpus the same way.
+
+  - subclause: "4.8.2"
+    why: implementation-internal
+    object: execution context
+    note: >-
+      Creation and initialization happen before execution, so the subclause is
+      finished before there is an answer to compare. What it initializes from is
+      the session and the request, and both are cited by cases.
+
+  - subclause: "4.8.3"
+    why: implementation-internal
+    object: execution context
+    note: >-
+      Modification is what the engine does to its own working state as a
+      statement runs. The statement is what a case writes and the answer is what
+      a case checks, and neither of those is this.
+
+  - subclause: "4.10.2.2"
+    why: implementation-internal
+    object: named procedure descriptor
+    note: >-
+      A named procedure descriptor is what a GQL-catalog holds for a procedure,
+      and this is the same fact the grammar register records twice already: the
+      standard supplies no statement that brings a procedure into existence, so
+      the descriptor is put there by something outside GQL. 15.3 and 17.5 are the
+      call and the reference halves of it, and this is the catalog half.
+
+  - subclause: "4.12.6"
+    why: implementation-internal
+    object: most specific static value type
+    note: >-
+      The most specific static value type of an expression is what the standard
+      computes so that other subclauses can state a rule about it. A statement
+      cannot ask an engine for it: what it can ask is whether a value is of a
+      type, which is the value type predicate, and that has its own subclause and
+      its own cases.
+
+  - subclause: "4.12.8"
+    why: implementation-internal
+    object: terminology
+    note: >-
+      Additional terminology related to data types is a list of words the rest of
+      the document uses, in the clause whose job is to define words. A case can
+      cite the subclause that states a rule in one of those words and this is not
+      one of them.
+
+  - subclause: "4.14.4"
+    why: implementation-internal
+    object: dynamic generation
+    note: >-
+      Dynamic generation of type tests and casts is how an implementation derives
+      the test or the cast it needs for a value expression whose static type is a
+      dynamic union. The deriving is the engine's; what a statement writes is the
+      value type predicate or the cast specification, spelled by 19.6 and 20.8,
+      and both of those are cited by cases.
+
+  - subclause: "4.14.4.1"
+    why: implementation-internal
+    object: dynamic generation
+    note: >-
+      The introduction sets up the four subclauses beneath 4.14.4 by saying what
+      is generated and for what. Its title names <value expression>, which is a
+      rule a case can write and does write, and that is where a case addressing
+      any of this belongs.
+
+  - subclause: "4.14.4.2"
+    why: implementation-internal
+    object: dynamic generation
+    note: >-
+      A value expression without operands is a literal or a reference, and this
+      subclause says what test or strict cast is generated for one. An engine
+      that generates it and an engine that hard-codes it answer
+      1 IS TYPED INT | STRING identically, and that statement is the case, under
+      19.6.
+
+  - subclause: "4.14.4.3"
+    why: implementation-internal
+    object: dynamic generation
+    note: >-
+      The same for a value expression that has operands, where the generation
+      recurses into them. The recursion is not observable: what is observable is
+      the answer to the predicate over the compound expression, and that is
+      already what a case writes.
+
+  - subclause: "4.14.4.4"
+    why: implementation-internal
+    object: dynamic generation
+    note: >-
+      A lax cast is the one that yields null rather than raising where a strict
+      cast would raise, and this subclause says which additional tests and casts
+      are generated for it. Which of the two a statement gets is 20.8's business
+      and 20.8 is where the case goes.
+
   - subclause: "15.3"
     why: registered-rule
     note: >-

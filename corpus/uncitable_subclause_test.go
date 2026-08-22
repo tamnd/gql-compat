@@ -59,6 +59,41 @@ func TestShippedSubclauseRegisterHoldsUp(t *testing.T) {
 			if named == 0 {
 				t.Errorf("%s is titled %q, which names no grammar rule", u.Subclause, title)
 			}
+		case corpus.ImplementationInternal:
+			// The claim is that the grammar has no name for the thing, so the
+			// entry has to say what the thing is, ISO's own title has to agree,
+			// and no rule may be named after it. Anything the title does name has
+			// to be a rule a case can write, because that is where the case goes.
+			switch {
+			case u.Object == "":
+				t.Errorf("%s claims its subject is unnameable and does not say what the subject is", u.Subclause)
+			case !strings.HasPrefix(u.Subclause, "4."):
+				t.Errorf("%s is outside Clause 4 and claims a reason only Clause 4 has", u.Subclause)
+			case !strings.Contains(strings.ToLower(title), strings.ToLower(u.Object)):
+				t.Errorf("%s says it is about %q and ISO titles it %q", u.Subclause, u.Object, title)
+			}
+			if named := known.ProductionsNaming(u.Object); len(named) > 0 {
+				t.Errorf("%s says nothing names %q and the grammar has <%s>", u.Subclause, u.Object, named[0])
+			}
+			for rest := title; ; {
+				open := strings.Index(rest, "<")
+				if open < 0 {
+					break
+				}
+				shut := strings.Index(rest[open:], ">")
+				if shut < 0 {
+					break
+				}
+				name := rest[open+1 : open+shut]
+				rest = rest[open+shut+1:]
+				if !known.Production(name) {
+					t.Errorf("%s is titled %q and <%s> is not a rule in the grammar", u.Subclause, title, name)
+				}
+				if registered[name] {
+					t.Errorf("%s is titled %q and <%s> is in the grammar register, so the entry belongs under %q",
+						u.Subclause, title, name, corpus.SpellsARegisteredRule)
+				}
+			}
 		default:
 			t.Errorf("%s claims reason %q, which no check in this test covers", u.Subclause, u.Why)
 		}
@@ -145,6 +180,34 @@ func TestTheSubclauseRegisterRefusesAnEntryItCannotCheck(t *testing.T) {
 			name: "a subclause whose rule the grammar register does not hold",
 			doc:  entry("  - subclause: \"14.4\"\n    why: registered-rule\n    note: one\n"),
 			want: "the grammar register does not hold",
+		},
+		{
+			// The second reason's own way of becoming a rubber stamp is an entry
+			// that names a thing the grammar does have a rule for, so this is the
+			// one that keeps it honest. Clause 4 is full of words a statement says.
+			name: "a subject the grammar names",
+			doc:  entry("  - subclause: \"4.4\"\n    why: implementation-internal\n    object: value\n    note: values are everywhere\n"),
+			want: "so a statement can say",
+		},
+		{
+			name: "a subject ISO's own title does not mention",
+			doc:  entry("  - subclause: \"4.1\"\n    why: implementation-internal\n    object: execution context\n    note: one\n"),
+			want: "which does not say that",
+		},
+		{
+			name: "no subject to look for in the grammar",
+			doc:  entry("  - subclause: \"4.1\"\n    why: implementation-internal\n    note: one\n"),
+			want: "no object",
+		},
+		{
+			name: "a subclause outside the clause that defines the standard's words",
+			doc:  entry("  - subclause: \"15.3\"\n    why: implementation-internal\n    object: named procedure call\n    note: one\n"),
+			want: "this reason is for Clause 4",
+		},
+		{
+			name: "a subject on an entry whose reason reads its subjects out of the title",
+			doc:  entry("  - subclause: \"15.3\"\n    why: registered-rule\n    object: procedure\n    note: one\n"),
+			want: "reads its objects out of the rules",
 		},
 		{
 			name: "a schema this build does not read",

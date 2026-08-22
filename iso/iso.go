@@ -478,6 +478,36 @@ func (c Codes) SubclauseTitle(number string) (string, bool) {
 	return s.Title, ok
 }
 
+// ProductionsNaming is every rule in the grammar whose own name contains the
+// phrase, matched without regard to case, sorted.
+//
+// The question behind it is whether the language gives a statement any way to
+// spell a thing. ISO names its rules after what they are, so a thing a program
+// can name has a rule with that thing in its name: a session is <session set
+// command>, a transaction is <start transaction command>, a procedure is <named
+// procedure call>. A phrase that appears in no rule name at all is a thing the
+// standard talks about and the grammar does not.
+func (c *Catalog) ProductionsNaming(phrase string) []string {
+	phrase = strings.ToLower(strings.TrimSpace(phrase))
+	if phrase == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range c.Productions {
+		if strings.Contains(strings.ToLower(p.Name), phrase) {
+			out = append(out, p.Name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// ProductionsNaming is the catalogue's answer, for a register that reasons
+// about what the grammar spells.
+func (c Codes) ProductionsNaming(phrase string) []string {
+	return c.Catalog.ProductionsNaming(phrase)
+}
+
 // Item returns the standard's own description of an implementation-defined or
 // implementation-dependent item, from either list.
 func (c Codes) Item(code string) (string, bool) {
