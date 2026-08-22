@@ -16,6 +16,7 @@ import (
 	"github.com/tamnd/gql-compat/fixture"
 	"github.com/tamnd/gql-compat/impdef"
 	"github.com/tamnd/gql-compat/iso"
+	"github.com/tamnd/gql-compat/metrics"
 	"github.com/tamnd/gql-compat/rows"
 	"github.com/tamnd/gql-compat/runner"
 )
@@ -946,6 +947,100 @@ func TestARunThatDoesNotChallengeRecordsNoDeclarations(t *testing.T) {
 	if r.Outcome != runner.Skip || len(r.Challenges) != 0 {
 		t.Errorf("outcome %s challenges %+v, want the ordinary skip", r.Outcome, r.Challenges)
 	}
+}
+
+// The floor a density is divided against is a property of the schema, not of
+// the engine, and this is the case that says so: two fixtures loaded by one
+// engine, one with a label and an edge type and one with a label, and the
+// second must not be charged the first's floor. A run that measured one empty
+// store and used it for both would give them the same number here.
+func TestEachFixtureGetsAFloorOfItsOwn(t *testing.T) {
+	d := engine(t, func(c *fake.Config) {
+		c.SchemaLoadable = true
+		c.BytesPerLabel = 4096
+	})
+	// Challenged, because that is what gets the second fixture loaded at all:
+	// the engine declares it cannot hold a date and the case is otherwise
+	// skipped before any store is written.
+	rep := run(t, d, runner.Config{Repeats: 1, Challenge: true})
+	two, dated := floorFor(t, rep, "two"), floorFor(t, rep, "dated")
+	for _, f := range []metrics.SchemaFloor{two, dated} {
+		if !f.OK {
+			t.Fatalf("%s has no floor of its own: %s", f.Fixture, f.Note)
+		}
+		if f.Bytes <= 0 {
+			t.Errorf("%s: a floor of %d bytes", f.Fixture, f.Bytes)
+		}
+	}
+	if two.Bytes <= dated.Bytes {
+		t.Errorf("the two-label fixture floors at %d and the one-label fixture at %d, which is one number for two schemas",
+			two.Bytes, dated.Bytes)
+	}
+	r := result(t, rep, "mandatory/test/right-answer")
+	if r.Load == nil {
+		t.Fatal("the case that loaded the fixture reports no load")
+	}
+	if r.Load.Floor != metrics.FloorFromSchema {
+		t.Errorf("density computed against %q, want the fixture's own shape", r.Load.Floor)
+	}
+	if r.Load.SchemaFloorBytes != two.Bytes {
+		t.Errorf("load floor %d, engine floor %d: the two are not the same measurement",
+			r.Load.SchemaFloorBytes, two.Bytes)
+	}
+	if r.Load.GraphBytes != r.Load.Disk.BytesAfter-two.Bytes {
+		t.Errorf("graph bytes %d, want the store of %d less the shape of %d",
+			r.Load.GraphBytes, r.Load.Disk.BytesAfter, two.Bytes)
+	}
+}
+
+// Most engines cannot be asked for a shape without rows, and their reports have
+// to say that rather than leave the reader to assume the good floor was used.
+func TestAnEngineThatCannotBeAskedForAShapeIsRecordedSayingSo(t *testing.T) {
+	rep := run(t, engine(t, nil), runner.Config{Repeats: 1})
+	f := floorFor(t, rep, "two")
+	if f.OK {
+		t.Fatalf("a fake with no LoadSchema reported a floor of %d bytes", f.Bytes)
+	}
+	if f.Note == "" {
+		t.Error("no note saying why the fixture has no floor of its own")
+	}
+	r := result(t, rep, "mandatory/test/right-answer")
+	if r.Load != nil && r.Load.Floor == metrics.FloorFromSchema {
+		t.Error("a density was computed against a floor that was never measured")
+	}
+}
+
+// A shape that would not load costs this fixture its floor and costs the run
+// nothing else. The cases still run, against the same graph, and the report
+// carries the engine's own words for why the better denominator is missing.
+func TestAShapeLoadThatFailsCostsTheFloorAndNotTheRun(t *testing.T) {
+	d := engine(t, func(c *fake.Config) {
+		c.SchemaLoadable = true
+		c.BytesPerLabel = 4096
+		c.SchemaLoadFails = func(string) error { return errors.New("this store holds no empty tables") }
+	})
+	rep := run(t, d, runner.Config{Repeats: 1})
+	f := floorFor(t, rep, "two")
+	if f.OK {
+		t.Fatalf("a shape load that failed reported a floor of %d bytes", f.Bytes)
+	}
+	if !strings.Contains(f.Note, "holds no empty tables") {
+		t.Errorf("note %q, want the engine's own words", f.Note)
+	}
+	if r := result(t, rep, "mandatory/test/right-answer"); r.Outcome != runner.Pass {
+		t.Errorf("outcome %s (%s): a case was lost to a floor that could not be measured", r.Outcome, r.Reason)
+	}
+}
+
+func floorFor(t *testing.T, rep *runner.Report, name string) metrics.SchemaFloor {
+	t.Helper()
+	for _, f := range rep.Engine.SchemaFloors {
+		if f.Fixture == name {
+			return f
+		}
+	}
+	t.Fatalf("no floor recorded for fixture %q in %+v", name, rep.Engine.SchemaFloors)
+	return metrics.SchemaFloor{}
 }
 
 func declaration(t *testing.T, rep *runner.Report, claim string) runner.DeclarationCheck {

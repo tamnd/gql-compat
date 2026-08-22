@@ -209,11 +209,25 @@ type Load struct {
 	// once per run from a load of the empty fixture. Zero means the run could
 	// not find out.
 	EmptyBytes int64 `json:"empty_store_bytes,omitempty"`
+	// SchemaFloorBytes is what this engine's store weighs holding this
+	// fixture's shape and none of its rows, taken from a load of the fixture's
+	// schema immediately before the fixture itself. Zero means the adapter
+	// cannot be asked for one.
+	//
+	// It is the same question EmptyBytes answers, asked about the right store.
+	// A floor measured once per run is one number for every fixture, and an
+	// engine that keeps a file per label does not have one number: a graph with
+	// six labels pays for six files before it holds a row, and subtracting the
+	// two-label floor from it charges the graph for four files that were never
+	// its bytes.
+	SchemaFloorBytes int64 `json:"schema_floor_bytes,omitempty"`
 	// SchemaBytes is the part of this store the engine says is fixed by the
 	// shape of the database rather than by the graph, when the engine can say.
-	// It is the same question EmptyBytes answers and a better answer to it:
-	// EmptyBytes is one measurement taken once for the whole run, and this is
-	// this store, after this load, from the engine that laid it out.
+	// It beats EmptyBytes, which is one measurement taken once for the whole
+	// run, because it is about this store after this load. It loses to
+	// SchemaFloorBytes, which is a directory weighed the way the numerator is
+	// weighed rather than a subtotal the engine attributes, and the difference
+	// between them is the store's unattributed slack.
 	SchemaBytes int64 `json:"schema_bytes,omitempty"`
 	// GraphBytes is what is left after SchemaBytes comes off, which is the
 	// numerator the densities below are computed from when it is known.
@@ -221,11 +235,15 @@ type Load struct {
 	// AllocUnit is the store's allocation granularity, when the engine reports
 	// one. It is what decides whether GraphBytes is an encoding or a rounding.
 	AllocUnit int64 `json:"alloc_unit_bytes,omitempty"`
-	// FloorRatio is the loaded store over its fixed part: over SchemaBytes when
-	// the engine reported one, and otherwise over the empty store. It is
-	// reported either way, and is what the DensityFloor test looks at on the
-	// cruder of those two routes.
+	// FloorRatio is the loaded store over its fixed part, whichever of the
+	// three the fixed part was taken from. It is reported either way, and is
+	// what the DensityFloor test looks at on the crudest of the three routes.
 	FloorRatio float64 `json:"floor_ratio,omitempty"`
+	// Floor names where the fixed part came from, so a density figure is never
+	// printed without the reader being able to see what it was divided against.
+	// The three answers are not equally good and the report says which one this
+	// is rather than averaging them into a number that looks the same.
+	Floor FloorFrom `json:"floor_from,omitempty"`
 	// DensityOK says the two density figures above were computed. When it is
 	// false they are zero and DensityNote says why, which is the whole point:
 	// a run of 2026-08-12 published nine densities spanning six nodes to 261 632
@@ -245,9 +263,72 @@ type Load struct {
 // figures, which are printed either way.
 const DensityFloor = 10.0
 
+// FloorFrom names which measurement the fixed part of a store was taken from.
+// The three are in descending order of how much a density computed against them
+// is worth, and printing the name beside the figure is what keeps a reader from
+// having to assume the best one.
+type FloorFrom string
+
+const (
+	// FloorFromSchema is a load of this fixture's shape with none of its rows,
+	// weighed on disk immediately before the fixture went in. It is the best of
+	// the three because it is the only one measured in the same units as the
+	// number it comes off: bytes a directory occupies, for this schema, on this
+	// engine, with whatever the store rounded up to already inside it.
+	FloorFromSchema FloorFrom = "fixture-schema"
+	// FloorFromEngine is the engine's own account of which part of this store it
+	// calls schema. It describes the right store, which is more than the empty
+	// load can say, but it is an accounting subtotal and not an occupancy: a
+	// store that allocates in whole blocks holds slack that belongs to no
+	// category, and subtracting a subtotal from a directory size leaves every
+	// byte of that slack charged to the graph. That is how a seven-node fixture
+	// came to publish 5 570 560 bits per edge on 2026-08-22.
+	FloorFromEngine FloorFrom = "engine"
+	// FloorFromEmpty is the run's single load of a graph with nothing in it. It
+	// is the same number for every fixture in the run, so it is right for the
+	// engine and only approximately right for any particular graph, and a
+	// density computed against it has to clear the DensityFloor ratio first.
+	FloorFromEmpty FloorFrom = "empty-store"
+)
+
+// Because is the phrase a report prints after the figure, so the constant and
+// the sentence explaining it cannot drift apart.
+func (f FloorFrom) Because() string {
+	switch f {
+	case FloorFromSchema:
+		return "a load of this fixture's schema with none of its rows"
+	case FloorFromEngine:
+		return "the engine's own breakdown of this store"
+	case FloorFromEmpty:
+		return "the run's one load of a graph with nothing in it"
+	}
+	return "nothing; no floor was available"
+}
+
+// SchemaFloor is what an engine's store weighs holding one fixture's shape and
+// none of its rows. There is one per fixture the run loaded, taken immediately
+// before that fixture went in, and it is the floor the fixture's density
+// figures are computed against.
+type SchemaFloor struct {
+	// Fixture is the fixture whose shape was loaded.
+	Fixture string `json:"fixture"`
+	// Bytes is the apparent size of the store holding that shape, and Files how
+	// many files it is spread over.
+	Bytes int64 `json:"bytes"`
+	Files int   `json:"files"`
+	// Wall is what loading the shape cost, which is the part of this fixture's
+	// ingest that was not its rows.
+	Wall time.Duration `json:"wall_ns"`
+	// OK says the measurement happened. Note says why it did not, which for
+	// most engines is that the adapter cannot be asked for a schema on its own.
+	OK   bool   `json:"available"`
+	Note string `json:"note,omitempty"`
+}
+
 // EmptyStore is what an engine's data directory weighs holding nothing. It is
 // measured once per run, from a load of a fixture with no nodes and no edges,
-// and every density figure in the report is checked against it.
+// and it is the floor under any fixture the run could not measure one of its
+// own for.
 type EmptyStore struct {
 	// Bytes is the apparent size of the empty store, and Files how many files
 	// it is spread over.
@@ -341,19 +422,32 @@ func (l *Load) Compute() {
 //
 // Every engine preallocates. zu's store has a floor near 3.5 MiB and grows in
 // 256 KiB steps, so a fixture small enough to fit inside the floor reports the
-// floor divided by itself, and reports it as an encoding. The harness knows the
-// size of the empty store because it measures one at the start of the run, so
-// this is a question the tool can answer rather than one the reader has to
-// think to ask.
+// floor divided by itself, and reports it as an encoding. So the question is
+// always what the fixed part of this store was, and there are three ways to
+// find out, tried best first.
+//
+// A load of this fixture's schema with none of its rows is best, because it is
+// the only one of the three measured the same way the numerator is: the size of
+// a directory, holding this shape, before a row went into it. The engine's own
+// breakdown is next, and it describes the right store but not the same
+// quantity, so it leaves the store's slack charged to the graph. The run's
+// single empty load is last and is the only one that has to clear the floor
+// ratio, because it is one number for every fixture in the run and an engine
+// that keeps a file per label does not have one number.
 func (l *Load) density(size int64) {
 	switch {
 	case size <= 0:
 		l.DensityNote = "the engine's store is not on this machine, so there is nothing to divide"
+	case l.SchemaFloorBytes > 0:
+		l.Floor = FloorFromSchema
+		l.exactDensity(size, l.SchemaFloorBytes)
 	case l.SchemaBytes > 0:
-		l.exactDensity(size)
+		l.Floor = FloorFromEngine
+		l.exactDensity(size, l.SchemaBytes)
 	case l.EmptyBytes <= 0:
 		l.DensityNote = "the size of this engine's empty store is not known, so how much of this is preallocation cannot be said"
 	default:
+		l.Floor = FloorFromEmpty
 		l.FloorRatio = float64(size) / float64(l.EmptyBytes)
 		if l.FloorRatio < DensityFloor {
 			l.DensityNote = fmt.Sprintf("the loaded store is %.1f× the empty one, under the %g× a density figure needs before it describes an encoding rather than the engine's floor",
@@ -369,33 +463,35 @@ func (l *Load) density(size int64) {
 	}
 }
 
-// exactDensity is the density test for an engine that can say which part of
-// its store is the graph, which is a different and much better question than
-// the one the floor ratio asks.
+// exactDensity is the density test for the two routes where the fixed part of
+// the store is a measured quantity rather than a thing to be bounded, which is
+// a different and much better question than the one the floor ratio asks. The
+// fixed part is passed in because it comes from a different place on each
+// route, and l.Floor says which; everything after that is the same test.
 //
 // The floor ratio exists because the harness could not tell preallocation from
 // encoding, so it refused to divide until the preallocation was at most a tenth
-// of the total. An engine that reports its schema size makes that guesswork
-// unnecessary: the fixed part comes off exactly, and what is left is the bytes
-// this graph cost. A fixture far smaller than the engine's floor, which the
-// ratio test could only withhold, now gets a real answer.
+// of the total. Knowing the size of the fixed part makes that guesswork
+// unnecessary: it comes off exactly, and what is left is the bytes this graph
+// cost. A fixture far smaller than the engine's floor, which the ratio test
+// could only withhold, now gets a real answer.
 //
 // What is left to be wrong about is rounding. A store that allocates in whole
 // blocks charges a graph for the tail of its last one, and for a small enough
 // graph that tail is most of the figure. So the same tenth applies, to the
 // quantity it was always about: with the allocation unit known, the graph must
 // occupy at least DensityFloor of them, and then the rounding is at most a
-// tenth of what is published. An engine that reports a schema size but no
+// tenth of what is published. An engine that reports a fixed part but no
 // allocation unit is believed and the figures stand, because there is nothing
 // left to suspect them of.
-func (l *Load) exactDensity(size int64) {
-	l.FloorRatio = float64(size) / float64(l.SchemaBytes)
-	l.GraphBytes = size - l.SchemaBytes
+func (l *Load) exactDensity(size, fixed int64) {
+	l.FloorRatio = float64(size) / float64(fixed)
+	l.GraphBytes = size - fixed
 	switch {
 	case l.GraphBytes <= 0:
 		l.GraphBytes = 0
-		l.DensityNote = fmt.Sprintf("the whole %s store is the fixed part the engine writes for an empty database, so this graph added nothing that can be divided",
-			FormatBytes(size))
+		l.DensityNote = fmt.Sprintf("the whole %s store is the fixed part, measured as %s, so this graph added nothing that can be divided",
+			FormatBytes(size), l.Floor.Because())
 	case l.AllocUnit > 0 && float64(l.GraphBytes) < DensityFloor*float64(l.AllocUnit):
 		l.DensityNote = fmt.Sprintf("the graph occupies %s, under the %g allocation units of %s a density figure needs before the rounding up to a whole unit is less than a tenth of it",
 			FormatBytes(l.GraphBytes), DensityFloor, FormatBytes(l.AllocUnit))
@@ -420,9 +516,10 @@ func (l *Load) exactDensity(size int64) {
 // thing the engine allocated, so the share of the larger of the two counts is
 // compared against the empty store and the figures are withheld when it wins.
 // This catches shares that are absurd rather than shares that are merely
-// inflated; the fix that would catch both is to measure the floor from the
-// smallest non-empty graph instead of from an empty one, which is recorded in
-// the roadmap because it changes what the empty load is for.
+// inflated, and it is only reached by an engine that could not be asked for a
+// floor of its own. The fix that catches both is to stop guessing at the fixed
+// part, which is what SchemaFloorBytes is: an adapter that implements
+// SchemaLoader never comes down this route at all.
 func (l *Load) shareOverEmptyStore(size int64) (int64, bool) {
 	elements := max(l.Nodes, l.Edges)
 	if elements <= 0 {

@@ -255,6 +255,24 @@ type session struct {
 // file is scaffolding this harness put there and not something zu would pay
 // for in use.
 func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadStats, error) {
+	return s.stage(ctx, fx, true)
+}
+
+// LoadSchema converts a database holding the fixture's tables and none of its
+// rows, which leaves a store this fixture could be loaded into without any
+// further shape being created. It is the same route Load takes, staging file
+// and conversion and all, so what it leaves on disk is comparable with what
+// Load leaves on disk, which is the whole reason the harness asks for it.
+//
+// The counts come back zero because nothing was loaded. Anything else would be
+// a claim about a graph that is not there.
+func (s *session) LoadSchema(ctx context.Context, fx *fixture.Fixture) (adapter.LoadStats, error) {
+	return s.stage(ctx, fx, false)
+}
+
+// stage is Load and LoadSchema. rows says whether the staging database is
+// filled or only created; nothing else about the route differs.
+func (s *session) stage(ctx context.Context, fx *fixture.Fixture, rows bool) (adapter.LoadStats, error) {
 	if err := s.stopShell(); err != nil {
 		return adapter.LoadStats{}, err
 	}
@@ -269,7 +287,11 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 	if err := os.RemoveAll(stage); err != nil {
 		return adapter.LoadStats{}, err
 	}
-	if err := writeFixtureDB(ctx, stage, fx); err != nil {
+	write := writeFixtureDB
+	if !rows {
+		write = writeFixtureSchemaDB
+	}
+	if err := write(ctx, stage, fx); err != nil {
 		return adapter.LoadStats{}, fmt.Errorf("zu: staging fixture %s: %w", fx.Name, err)
 	}
 
@@ -303,10 +325,11 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 	}
 
 	stats := adapter.LoadStats{
-		Nodes:      len(fx.Nodes),
-		Edges:      len(fx.Edges),
 		EngineWall: wall,
 		Detail:     strings.TrimSpace(string(out)),
+	}
+	if rows {
+		stats.Nodes, stats.Edges = len(fx.Nodes), len(fx.Edges)
 	}
 	// Asked after the conversion and before the shell comes back up, so it
 	// reads a file nothing is writing to, and outside the timed section above,

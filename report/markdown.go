@@ -625,11 +625,14 @@ func writeLoads(b io.Writer, rep *runner.Report) {
 	p("One row per fixture load. Cases that reused a graph another case had already loaded contribute nothing here, which is why these times must not be summed into a per-case cost.\n\n")
 	p("**Wall** is everything the harness waited for; **engine** is the part of it the engine itself spent, where the adapter can separate the two, and is what the rates are computed against. The gap between them is this harness's cost of getting the fixture in — a staging file, an encoded batch, a process start — and belongs to the route rather than to the store.\n\n")
 	p("%s\n\n", floorSentence(rep))
+	if s := schemaFloorSentence(rep); s != "" {
+		p("%s\n\n", s)
+	}
 	if s := schemaSentence(loadsOf(loads)); s != "" {
 		p("%s\n\n", s)
 	}
-	p("| Fixture | Triggered by | Nodes | Edges | Wall | Engine | nodes/s | edges/s | Apparent Δ | Allocated Δ | × floor | graph | bits/edge | bytes/node | RSS peak | CPU |\n")
-	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	p("| Fixture | Triggered by | Nodes | Edges | Wall | Engine | nodes/s | edges/s | Apparent Δ | Allocated Δ | × floor | floor from | graph | bits/edge | bytes/node | RSS peak | CPU |\n")
+	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|\n")
 	for i := range loads {
 		c := loads[i]
 		l := c.Load
@@ -641,11 +644,11 @@ func writeLoads(b io.Writer, rep *runner.Report) {
 		if l.EngineWall > 0 {
 			engine = metrics.Format(l.EngineWall)
 		}
-		p("| %s | `%s` | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+		p("| %s | `%s` | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 			c.Fixture, c.ID, l.Nodes, l.Edges, metrics.Format(l.Wall), engine,
 			num(l.NodesPerSec), num(l.EdgesPerSec),
 			dashSigned(l.Disk.OK, l.Disk.Growth()), dashSigned(l.Disk.OK, l.Disk.AllocGrowth()),
-			floorCell(l), dashBytes(l.SchemaBytes > 0, l.GraphBytes),
+			floorCell(l), floorFromCell(l), dashBytes(l.GraphBytes > 0, l.GraphBytes),
 			dashFloat(l.DensityOK, l.BitsPerEdge), dashFloat(l.DensityOK, l.BytesPerNode),
 			dashBytes(l.Process.MemoryOK, l.Process.RSSPeak), cpu)
 	}
@@ -672,7 +675,7 @@ func floorSentence(rep *runner.Report) string {
 		}
 		return fmt.Sprintf("The bits/edge and bytes/node columns are withheld throughout, because they are the whole store divided by the graph and this run does not know how much of the store is the engine's own preallocation: %s.", reason)
 	}
-	return fmt.Sprintf("The × floor column is the loaded store over this engine's empty one, which weighs %s across %d files with no graph in it. Below %g× the store is mostly that floor, dividing it by the fixture measures the preallocation, and bits/edge and bytes/node are withheld rather than printed. A load that clears the floor is checked once more, per element, because an engine whose empty store is measured before it has written anything understates its own fixed cost: a graph whose single node or single edge appears to weigh more than the whole empty store is measuring allocation, and its density is withheld too. That second check catches the shares that are absurd rather than the ones that are merely inflated, so a small fixture that clears both is still worth reading beside a large one rather than on its own.",
+	return fmt.Sprintf("The × floor column is the loaded store over its fixed part and the floor from column names where that fixed part was measured, because the three answers are not equally good and a density printed without one is a number a reader has to take on trust. This engine's empty store, which is the last of the three and the one a row falls back to, weighs %s across %d files with no graph in it. On that route and only on that route, below %g× the store is mostly the floor, dividing it by the fixture measures the preallocation, and bits/edge and bytes/node are withheld rather than printed. A load that clears the floor is checked once more, per element, because an engine whose empty store is measured before it has written anything understates its own fixed cost: a graph whose single node or single edge appears to weigh more than the whole empty store is measuring allocation, and its density is withheld too. That second check catches the shares that are absurd rather than the ones that are merely inflated, so a small fixture that clears both is still worth reading beside a large one rather than on its own.",
 		metrics.FormatBytes(es.Bytes), es.Files, metrics.DensityFloor)
 }
 
@@ -688,7 +691,7 @@ func floorSentence(rep *runner.Report) string {
 func schemaSentence(loads []*metrics.Load) string {
 	var with *metrics.Load
 	for _, l := range loads {
-		if l.SchemaBytes > 0 {
+		if l.Floor == metrics.FloorFromEngine {
 			with = l
 			break
 		}
@@ -696,7 +699,7 @@ func schemaSentence(loads []*metrics.Load) string {
 	if with == nil {
 		return ""
 	}
-	s := fmt.Sprintf("This engine reports how much of its store is fixed by the shape of the database rather than by the graph, so for those loads the **graph** column is the store with that part taken off, and it is that column and not the whole store that bits/edge and bytes/node divide. The × floor column is the store over the fixed part, which for the first such load was %s of a %s store.",
+	s := fmt.Sprintf("Where the floor from column says engine, no floor of the fixture's own was available and the engine's own account of its store was used instead: it reports how much of the store is fixed by the shape of the database rather than by the graph, the **graph** column is the store with that part taken off, and it is that column and not the whole store that bits/edge and bytes/node divide. For the first such load the fixed part was %s of a %s store. It is the weaker of the two exact routes, because an engine reports the bytes it attributes and a store that allocates in whole blocks holds slack it attributes to neither side, which the subtraction then hands to the graph.",
 		metrics.FormatBytes(with.SchemaBytes), metrics.FormatBytes(with.Disk.BytesAfter))
 	if with.AllocUnit > 0 {
 		s += fmt.Sprintf(" A store that grows in units of %s still rounds the last one up, so a density is withheld until the graph fills at least %g of them and the rounding is under a tenth of the figure.",
@@ -710,6 +713,67 @@ func floorCell(l *metrics.Load) string {
 		return "—"
 	}
 	return fmt.Sprintf("%.1f×", l.FloorRatio)
+}
+
+// floorFromCell names the measurement the row's fixed part came from, in one
+// word, so that the three routes can be told apart down a column.
+func floorFromCell(l *metrics.Load) string {
+	switch l.Floor {
+	case metrics.FloorFromSchema:
+		return "schema"
+	case metrics.FloorFromEngine:
+		return "engine"
+	case metrics.FloorFromEmpty:
+		return "empty"
+	}
+	return "—"
+}
+
+// schemaFloorSentence describes the per-fixture floor: what it is, what it cost
+// and which fixtures got one.
+//
+// It is the best of the three denominators and it is also the least obvious, so
+// the sentence says what was actually done rather than naming the route. A
+// reader who knows that the store was weighed twice, once holding the fixture's
+// labels and columns and no rows and once holding the fixture, can decide for
+// themselves whether the difference is an encoding. A reader told only that the
+// floor was schema aware cannot.
+func schemaFloorSentence(rep *runner.Report) string {
+	floors := rep.Engine.SchemaFloors
+	if len(floors) == 0 {
+		return ""
+	}
+	var ok int
+	var total int64
+	var wall time.Duration
+	var largest metrics.SchemaFloor
+	var refused string
+	for _, f := range floors {
+		if !f.OK {
+			if refused == "" {
+				refused = f.Note
+			}
+			continue
+		}
+		ok++
+		total += f.Bytes
+		wall += f.Wall
+		if f.Bytes > largest.Bytes {
+			largest = f
+		}
+	}
+	if ok == 0 {
+		if refused == "" {
+			refused = "the run measured none"
+		}
+		return "No fixture in this run has a floor of its own: " + refused + ". The density columns fall back to what the engine says about its store, and then to the one empty load, which is one number for every fixture in the run."
+	}
+	s := fmt.Sprintf("Before each of %d fixtures was loaded, the same engine was given that fixture's shape with none of its rows and the store was weighed: its labels, its edge types, its property columns and not one node or edge. That is the floor those fixtures' densities are divided against, and it is per fixture because the quantity is, a graph with six labels having paid for six of whatever a label costs before it holds a row. The heaviest of them was %s at %s, the %d together cost %s of loading, and both sides of the subtraction are now the size of a directory rather than a directory on one side and the engine's own accounting on the other.",
+		ok, largest.Fixture, metrics.FormatBytes(largest.Bytes), ok, metrics.Format(wall))
+	if refused != "" {
+		s += " Not every fixture got one: " + refused + "."
+	}
+	return s
 }
 
 // loadsOf pulls the loads out of the cases that triggered them.

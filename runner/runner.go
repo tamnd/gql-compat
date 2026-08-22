@@ -290,6 +290,7 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 		rep.Implementation = ex.observe(ctx, cfg.Probes, cfg.Catalog)
 	}
 
+	rep.Engine.SchemaFloors = ex.schemaFloors()
 	rep.Run.Finished = time.Now()
 	rep.Run.Wall = rep.Run.Finished.Sub(started)
 	rep.Totals, rep.Coverage = summarize(cfg.Catalog, unwritable, rep.Cases)
@@ -320,6 +321,11 @@ type executor struct {
 	// empty is what this engine's store weighs with no graph in it, measured
 	// once before the first case and carried into every load's density gate.
 	empty metrics.EmptyStore
+	// floors is what each fixture's own shape weighs, measured once per fixture
+	// immediately before that fixture is first loaded. It is the floor the
+	// fixture's density figures come off, and the reason it is keyed by fixture
+	// rather than being one number is that two schemas do not cost the same.
+	floors map[string]metrics.SchemaFloor
 	// loadWall is what each fixture cost to ingest, most recently. It is what
 	// tells a mutating case how many times its graph can be put back inside the
 	// budget, which is a question that can only be answered by having loaded it
@@ -463,6 +469,96 @@ func (e *executor) measureEmpty(ctx context.Context) metrics.EmptyStore {
 		Wall:  load.Wall,
 		OK:    true,
 	}
+}
+
+// measureFloor loads this fixture's shape with none of its rows and weighs what
+// is left on disk, once per fixture, immediately before the fixture itself. It
+// returns the session the run should carry on with, which is a new one: see
+// below for why.
+//
+// This is the denominator every density figure for this fixture is computed
+// against, and it is per fixture because the quantity is. The empty store the
+// run measures once is one number for every graph in it, and an engine that
+// writes a file per label or a column per property does not have one number: a
+// fixture with six labels pays for six of whatever they cost before it holds a
+// row, and taking the two-label floor off it charges its graph for four files
+// that were never its bytes. Asking the engine instead is better and still not
+// this, because an engine reports the bytes it attributes to schema and a store
+// that allocates in whole blocks holds slack it attributes to nothing at all.
+// Weighing the directory twice, once with the shape and once with the shape and
+// the graph, is the only one of the three where both sides of the subtraction
+// are the same kind of number.
+//
+// The session is thrown away afterwards on purpose. The fixture is about to be
+// loaded and the load has to be measured from an empty directory, the way every
+// load in the report was measured, or the ingest figures would carry whatever
+// the floor measurement left behind. A fresh session costs what it costs and it
+// is paid once per fixture, not once per case.
+//
+// Every way this can fail produces a note rather than an error. A floor that
+// could not be measured costs this fixture the best of the three denominators
+// and nothing else, and the density falls back to the two that were already
+// there.
+func (e *executor) measureFloor(ctx context.Context, sess adapter.Session, fx *fixture.Fixture) (adapter.Session, error) {
+	if e.floors == nil {
+		e.floors = map[string]metrics.SchemaFloor{}
+	}
+	if _, done := e.floors[fx.Name]; done {
+		return sess, nil
+	}
+	floor := metrics.SchemaFloor{Fixture: fx.Name}
+	defer func() { e.floors[fx.Name] = floor }()
+
+	loader, ok := sess.(adapter.SchemaLoader)
+	if !ok {
+		floor.Note = "this adapter cannot be asked for a fixture's shape on its own"
+		return sess, nil
+	}
+
+	dir := sess.DataDir()
+	before := metrics.Before(dir)
+	start := time.Now()
+	lctx, cancel := context.WithTimeout(ctx, e.cfg.LoadTimeout)
+	_, err := loader.LoadSchema(lctx, fx)
+	cancel()
+	floor.Wall = time.Since(start)
+	disk := metrics.After(dir, before)
+
+	// Whatever happened, the store now holds something the next measurement
+	// must not see. That is true of the failures too: an adapter that got half
+	// way through writing a shape and then gave up has left the half behind.
+	e.discard()
+	fresh, serr := e.session(ctx)
+	if serr != nil {
+		floor.Note = "reopening a session after the shape load: " + serr.Error()
+		return nil, serr
+	}
+
+	switch {
+	case err != nil:
+		floor.Note = "loading the shape of " + fx.Name + ": " + err.Error()
+	case !disk.OK:
+		floor.Note = "the engine's store is not on this machine"
+	case disk.BytesAfter <= 0:
+		floor.Note = "the engine wrote nothing for a database with this shape and no rows"
+	default:
+		floor.Bytes, floor.Files, floor.OK = disk.BytesAfter, disk.Files, true
+	}
+	return fresh, nil
+}
+
+// schemaFloors is what the run measured, in fixture order so that two runs of
+// the same suite print the same list.
+func (e *executor) schemaFloors() []metrics.SchemaFloor {
+	if len(e.floors) == 0 {
+		return nil
+	}
+	out := make([]metrics.SchemaFloor, 0, len(e.floors))
+	for _, f := range e.floors {
+		out = append(out, f)
+	}
+	slices.SortFunc(out, func(a, b metrics.SchemaFloor) int { return strings.Compare(a.Fixture, b.Fixture) })
+	return out
 }
 
 func (e *executor) close() {
@@ -909,6 +1005,18 @@ func (e *executor) ensureLoaded(ctx context.Context, sess adapter.Session, fx *f
 		}
 		sess = s
 	}
+	// The floor this fixture's density comes off, weighed on a store of its own
+	// before this one starts, and only for a fixture that has a shape to weigh.
+	// The empty fixture is where the run's other floor comes from and has no
+	// schema of its own, so measuring one would be measuring the same store
+	// twice and calling the second answer a fixture's.
+	if fx.Name != EmptyFixture {
+		s, err := e.measureFloor(ctx, sess, fx)
+		if err != nil {
+			return nil, nil, err
+		}
+		sess = s
+	}
 	dir := sess.DataDir()
 	disk := metrics.Before(dir)
 	sampler := samplerFor(sess, e.cfg.SampleInterval)
@@ -958,6 +1066,10 @@ func (e *executor) ensureLoaded(ctx context.Context, sess adapter.Session, fx *f
 		Process:    proc,
 		Disk:       metrics.After(dir, disk),
 		EmptyBytes: e.empty.Bytes,
+		// This fixture's own floor, where the engine could be asked for one. It
+		// is the best denominator the run has and the only one that is about
+		// this schema, so metrics prefers it to both of the others.
+		SchemaFloorBytes: e.floors[fx.Name].Bytes,
 		// What the engine says about its own store, where it says anything. It
 		// is not checked against the empty load: the two answer the same
 		// question and this one answers it about this store, so a disagreement

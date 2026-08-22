@@ -89,6 +89,22 @@ type Config struct {
 	// measure: the harness reads the directory, so a fake that wrote nothing
 	// would make every disk figure zero and hide a bug in the reader.
 	BytesPerNode int
+	// BytesPerLabel is how many bytes the session writes per distinct label and
+	// edge type in the fixture, before any row. It is the engine that keeps a
+	// file per label, which is the whole reason a density floor has to be per
+	// fixture: with this set, two fixtures of the same size have different
+	// floors and a run that used one number for both would be wrong about one
+	// of them.
+	BytesPerLabel int
+	// SchemaLoadable, when set, makes the session an adapter.SchemaLoader, so
+	// the harness can ask it for a fixture's shape on its own and weigh it. Left
+	// false the session does not implement the interface at all, which is the
+	// position most engines are in and has to stay reachable in a test.
+	SchemaLoadable bool
+	// SchemaLoadFails, when set, decides by fixture name whether the shape load
+	// refuses. A floor that could not be measured is a note in the report and
+	// not a failed run, and that is worth a test of its own.
+	SchemaLoadFails func(fixture string) error
 	// Version is what the driver reports as the engine version.
 	Version string
 	// FailVersion makes Version return an error, to check that a run survives
@@ -146,8 +162,13 @@ func (d *driver) Open(_ context.Context, workdir string) (adapter.Session, error
 		return nil, err
 	}
 	s := &session{cfg: d.cfg, dir: workdir}
-	if d.cfg.Explain != nil {
+	switch {
+	case d.cfg.Explain != nil && d.cfg.SchemaLoadable:
+		return &explainingShaped{explaining: &explaining{session: s}}, nil
+	case d.cfg.Explain != nil:
 		return &explaining{session: s}, nil
+	case d.cfg.SchemaLoadable:
+		return &shaped{session: s}, nil
 	}
 	return s, nil
 }
@@ -215,6 +236,9 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 			return adapter.LoadStats{}, err
 		}
 	}
+	if err := s.writeShape(built); err != nil {
+		return adapter.LoadStats{}, err
+	}
 	if s.cfg.BytesPerNode > 0 {
 		blob := make([]byte, len(built.Nodes)*s.cfg.BytesPerNode)
 		path := filepath.Join(s.dir, "graph.dat")
@@ -227,6 +251,62 @@ func (s *session) Load(ctx context.Context, fx *fixture.Fixture) (adapter.LoadSt
 		Edges:  len(built.Edges),
 		Detail: "no engine; the fixture was counted and discarded",
 	}, nil
+}
+
+// writeShape writes what this engine pretends a fixture's shape costs, which is
+// a fixed number of bytes for every distinct label and edge type in it.
+func (s *session) writeShape(built *fixture.Fixture) error {
+	if s.cfg.BytesPerLabel <= 0 {
+		return nil
+	}
+	kinds := map[string]bool{}
+	for _, n := range built.Nodes {
+		for _, l := range n.Labels {
+			kinds[l] = true
+		}
+	}
+	for _, e := range built.Edges {
+		kinds[e.Type] = true
+	}
+	blob := make([]byte, len(kinds)*s.cfg.BytesPerLabel)
+	return os.WriteFile(filepath.Join(s.dir, "schema.dat"), blob, 0o644)
+}
+
+// shaped is a session that can be given a fixture's shape on its own. Like
+// explaining above it is a separate type, because a fake that always had the
+// method could not stand in for the engines whose adapters cannot be asked.
+type shaped struct{ *session }
+
+// LoadSchema writes what the shape costs and nothing else, and removes any
+// graph a previous load left, so that what is on disk afterwards is a store
+// this fixture could be loaded into with no further shape being created.
+func (s *shaped) LoadSchema(_ context.Context, fx *fixture.Fixture) (adapter.LoadStats, error) {
+	built, err := fx.Materialize()
+	if err != nil {
+		return adapter.LoadStats{}, err
+	}
+	if s.cfg.SchemaLoadFails != nil {
+		if err := s.cfg.SchemaLoadFails(fx.Name); err != nil {
+			return adapter.LoadStats{}, err
+		}
+	}
+	if err := os.Remove(filepath.Join(s.dir, "graph.dat")); err != nil && !os.IsNotExist(err) {
+		return adapter.LoadStats{}, err
+	}
+	if err := s.writeShape(built); err != nil {
+		return adapter.LoadStats{}, err
+	}
+	return adapter.LoadStats{Detail: "no engine; the shape was written and the rows were not"}, nil
+}
+
+// explainingShaped is both of the above, for a test that wants an engine with
+// plans and a measurable floor. Go decides what a value implements from its
+// type, so a session that has to have two optional methods has to be a type
+// that has both.
+type explainingShaped struct{ *explaining }
+
+func (s *explainingShaped) LoadSchema(ctx context.Context, fx *fixture.Fixture) (adapter.LoadStats, error) {
+	return (&shaped{session: s.session}).LoadSchema(ctx, fx)
 }
 
 func (s *session) Exec(ctx context.Context, stmt string, _ map[string]any) (*adapter.Result, error) {

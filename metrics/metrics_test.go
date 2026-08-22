@@ -286,6 +286,92 @@ func TestAGraphThatFitsInsideTheFixedPartGetsNoDensity(t *testing.T) {
 	}
 }
 
+// A floor measured by loading the fixture's shape beats the engine's own
+// account of the same store, because the two are not the same quantity. The
+// numbers are zu's from 2026-08-22: a store of 4 MiB holding seven nodes and
+// eight edges, of which the engine called 2 MiB schema, and which weighed
+// 3.75 MiB with the shape in it and no rows. The engine's answer publishes two
+// megabytes of allocation slack as an encoding; the measured floor sees the
+// quarter megabyte the graph actually took and withholds it as one block.
+func TestAMeasuredSchemaFloorBeatsTheEnginesOwnAccount(t *testing.T) {
+	l := metrics.Load{
+		Wall:             time.Second,
+		Nodes:            7,
+		Edges:            8,
+		EmptyBytes:       262_144,
+		SchemaBytes:      2_097_152,
+		SchemaFloorBytes: 3_932_160,
+		AllocUnit:        262_144,
+		Disk:             metrics.DiskDelta{BytesAfter: 4_194_304, OK: true},
+	}
+	l.Compute()
+	if l.Floor != metrics.FloorFromSchema {
+		t.Fatalf("floor taken from %q, want the fixture's own shape", l.Floor)
+	}
+	if l.GraphBytes != 262_144 {
+		t.Errorf("graph bytes %d, want the store less the shape it was loaded into", l.GraphBytes)
+	}
+	if l.DensityOK {
+		t.Fatalf("density reported at %v bits/edge for eight edges in one block", l.BitsPerEdge)
+	}
+	if l.DensityNote == "" {
+		t.Error("no reason given for the missing density")
+	}
+}
+
+// The same store with no measured floor falls back to the engine, and that is
+// the figure this whole route exists to stop being the only one available: two
+// megabytes of slack over eight edges, published as an encoding.
+func TestWithoutAMeasuredFloorTheEnginesAccountIsUsedAndSaysSo(t *testing.T) {
+	l := metrics.Load{
+		Wall:        time.Second,
+		Nodes:       7,
+		Edges:       8,
+		EmptyBytes:  262_144,
+		SchemaBytes: 2_097_152,
+		Disk:        metrics.DiskDelta{BytesAfter: 4_194_304, OK: true},
+	}
+	l.Compute()
+	if l.Floor != metrics.FloorFromEngine {
+		t.Fatalf("floor taken from %q, want the engine's own account", l.Floor)
+	}
+	if l.GraphBytes != 2_097_152 {
+		t.Errorf("graph bytes %d, want the store less what the engine calls schema", l.GraphBytes)
+	}
+}
+
+// A run with neither says so too, and the name of the route is what tells a
+// reader that the ratio gate was the one that applied.
+func TestTheEmptyStoreRouteNamesItself(t *testing.T) {
+	l := metrics.Load{
+		Wall:       time.Second,
+		Nodes:      1_000_000,
+		Edges:      999_999,
+		EmptyBytes: 262_144,
+		Disk:       metrics.DiskDelta{BytesAfter: 12_000_000, OK: true},
+	}
+	l.Compute()
+	if l.Floor != metrics.FloorFromEmpty {
+		t.Fatalf("floor taken from %q, want the run's empty load", l.Floor)
+	}
+	if !l.DensityOK {
+		t.Fatalf("density withheld: %s", l.DensityNote)
+	}
+}
+
+// Every route a load can take has a sentence a report can print. A fourth added
+// without one would print an empty phrase where the denominator belongs.
+func TestEveryFloorSaysWhereItCameFrom(t *testing.T) {
+	for _, f := range []metrics.FloorFrom{metrics.FloorFromSchema, metrics.FloorFromEngine, metrics.FloorFromEmpty} {
+		if f.Because() == "" || f.Because() == string(f) {
+			t.Errorf("floor %q has no sentence explaining it", f)
+		}
+	}
+	if metrics.FloorFrom("").Because() == "" {
+		t.Error("a load with no floor at all has nothing to print")
+	}
+}
+
 // An engine that reports a schema size but no allocation unit has nothing left
 // to be suspected of, and the figures stand.
 func TestAKnownSchemaWithNoAllocationUnitStillDivides(t *testing.T) {
