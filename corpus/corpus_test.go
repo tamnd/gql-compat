@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -158,6 +159,42 @@ func TestErrorExpectationsNameAStatus(t *testing.T) {
 		if _, ok := cat.Status(c.Expect.GQLStatus); !ok {
 			t.Errorf("%s: GQLSTATUS %q is not in conditions.xml", c.ID, c.Expect.GQLStatus)
 		}
+	}
+}
+
+// A diagnostic assertion is checked field by field against ISO's own
+// vocabulary, because a case that asked for a subject kind of "node" would
+// fail every engine over a word the standard does not use.
+func TestDiagnosticAssertionsAreWellFormed(t *testing.T) {
+	suite, _ := load(t)
+	seen := 0
+	for _, c := range suite.Cases {
+		d := c.Expect.Diagnostic
+		if d == nil {
+			continue
+		}
+		seen++
+		if c.Expect.Kind != corpus.ExpectError {
+			t.Errorf("%s: a diagnostic record belongs to a condition, not to a %s case", c.ID, c.Expect.Kind)
+		}
+		if c.Expect.GQLStatus == "" {
+			t.Errorf("%s: a case that asserts a record must name the status the record hangs off", c.ID)
+		}
+		if (d.Subject == "") != (d.SubjectKind == "") {
+			t.Errorf("%s: a subject and its kind go together or not at all", c.ID)
+		}
+		if d.SubjectKind != "" && !slices.Contains(corpus.SubjectKinds, d.SubjectKind) {
+			t.Errorf("%s: %q is not a subject kind ISO 39075 subclause 23.2 names", c.ID, d.SubjectKind)
+		}
+		if d.Subject != "" && !strings.Contains(c.Query, d.Subject) {
+			t.Errorf("%s: the record is asserted to be about %q, which the query never writes", c.ID, d.Subject)
+		}
+		if !slices.Contains(c.Features, "GA08") {
+			t.Errorf("%s: asserting a record is testing GA08, so the case has to claim it", c.ID)
+		}
+	}
+	if seen == 0 {
+		t.Error("no case asserts a diagnostic record, so GA08 is claimed and never measured")
 	}
 }
 

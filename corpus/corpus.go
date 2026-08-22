@@ -118,7 +118,44 @@ type Expect struct {
 	// ErrorContains, for engines that report no GQLSTATUS, is a substring the
 	// message should hold. It is weaker evidence and is reported as such.
 	ErrorContains string `yaml:"error_contains" json:"error_contains,omitempty"`
+
+	// Diagnostic, when set, is what the record beside the status has to
+	// carry. It is how GA08 is tested: the feature is not the code, which
+	// GQLStatus already grades, but the record the standard attaches to it.
+	Diagnostic *ExpectDiagnostic `yaml:"diagnostic" json:"diagnostic,omitempty"`
 }
+
+// ExpectDiagnostic is the assertion on a diagnostic record, in the fields ISO
+// subclause 23.2 names.
+//
+// Only the fields set are checked, and each is checked for equality rather
+// than for presence, because a record with a subject that names the wrong
+// thing is worse than one with no subject: the first sends a client to
+// underline a token the statement got right.
+//
+// There is deliberately no way to assert an excerpt or a message here. Those
+// are the engine's own prose and no two engines write the same sentence, so an
+// assertion on them would be scoring the wording rather than the record.
+type ExpectDiagnostic struct {
+	// Subject is the name the condition is about, spelled the way the query
+	// spelled it.
+	Subject string `yaml:"subject" json:"subject,omitempty"`
+	// SubjectKind is what sort of thing that name is: graph, schema, label,
+	// property, variable, type or function.
+	SubjectKind string `yaml:"subject_kind" json:"subject_kind,omitempty"`
+	// Schema is the schema the statement ran in, which for a case run against
+	// a fresh session is the root the standard opens in.
+	Schema string `yaml:"schema" json:"schema,omitempty"`
+	// Position requires that the record point at some token. The line and the
+	// column themselves are not asserted: two engines that both point at the
+	// right word disagree about which character it starts at as soon as one of
+	// them counts a keyword the other folded.
+	Position bool `yaml:"position" json:"position,omitempty"`
+}
+
+// SubjectKinds is what an ExpectDiagnostic may ask a subject to be, which is
+// the list ISO 39075 subclause 23.2 draws its subject fields from.
+var SubjectKinds = []string{"graph", "schema", "label", "property", "variable", "type", "function"}
 
 // Case is one conformance test.
 type Case struct {
@@ -379,6 +416,22 @@ func (c *Case) Validate(known KnownCodes) error {
 	if c.Unprovokable != "" && (c.Kind != KindCondition || c.Expect.Kind != ExpectError) {
 		return fmt.Errorf("%s: unprovokable withdraws a condition case from the run, and this is %s expecting %s",
 			where, c.Kind, c.Expect.Kind)
+	}
+	if d := c.Expect.Diagnostic; d != nil {
+		if c.Expect.Kind != ExpectError {
+			return fmt.Errorf("%s: a diagnostic record belongs to a condition, and this case expects %s",
+				where, c.Expect.Kind)
+		}
+		if (d.Subject == "") != (d.SubjectKind == "") {
+			return fmt.Errorf("%s: a subject and its kind are asserted together or not at all", where)
+		}
+		if d.SubjectKind != "" && !slices.Contains(SubjectKinds, d.SubjectKind) {
+			return fmt.Errorf("%s: %q is not one of the subject kinds %s names: %s",
+				where, d.SubjectKind, "ISO 39075 subclause 23.2", strings.Join(SubjectKinds, ", "))
+		}
+		if *d == (ExpectDiagnostic{}) {
+			return fmt.Errorf("%s: the diagnostic assertion asks for nothing", where)
+		}
 	}
 	for _, s := range c.Expect.AlsoGQLStatus {
 		if c.Expect.Kind != ExpectError || c.Expect.GQLStatus == "" {

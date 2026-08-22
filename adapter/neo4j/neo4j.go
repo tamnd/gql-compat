@@ -444,12 +444,62 @@ func convertError(err error) error {
 		if f.Message == "" {
 			f.Message = n.Error()
 		}
+		f.Diagnostic = diagnosticOf(n.GqlDiagnosticRecord)
 		return f
 	}
 	if strings.Contains(err.Error(), "context deadline exceeded") {
 		return &adapter.Failure{Timeout: true, Message: err.Error()}
 	}
 	return &adapter.Failure{Message: err.Error()}
+}
+
+// diagnosticOf reads the driver's diagnostic record into the harness's, taking
+// the fields Neo4j actually fills and inventing nothing for the ones it does
+// not.
+//
+// The server sends a map rather than a struct, with the standard's field names
+// in upper case and its own additions prefixed by an underscore, so the keys
+// here are Neo4j's spelling and not ISO's abbreviations. CURRENT_SCHEMA is the
+// one ISO field always present, because the driver supplies a default for it,
+// and _position is the place, one-based, where the server had one to give.
+//
+// Nothing is read as a subject. Neo4j has _status_parameters, whose keys vary
+// with the message template, and picking one of them as "the thing this
+// condition is about" would be the harness deciding what the engine meant.
+// A report that says Neo4j names the schema and the position and not the
+// subject is a finding; a report that guesses is not.
+func diagnosticOf(rec map[string]any) *adapter.Diagnostic {
+	if len(rec) == 0 {
+		return nil
+	}
+	out := &adapter.Diagnostic{}
+	if s, ok := rec["CURRENT_SCHEMA"].(string); ok {
+		out.Schema = s
+	}
+	if pos, ok := rec["_position"].(map[string]any); ok {
+		out.Line = asInt(pos["line"])
+		out.Column = asInt(pos["column"])
+	}
+	if out.Empty() {
+		return nil
+	}
+	return out
+}
+
+// asInt reads a number out of the untyped map the server sends. Bolt integers
+// arrive as int64 and JSON-shaped ones as float64, and a position that came
+// back as the wrong Go type is a position lost for no reason a reader could
+// see.
+func asInt(v any) int {
+	switch n := v.(type) {
+	case int64:
+		return int(n)
+	case int:
+		return n
+	case float64:
+		return int(n)
+	}
+	return 0
 }
 
 // convertValue maps Bolt's types onto the harness's neutral ones.

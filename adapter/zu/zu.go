@@ -493,11 +493,45 @@ type frame struct {
 // diagnostic is one GQLSTATUS record: the standard's code and text in fields
 // of their own, and zu's message apart from them, so nothing here has to parse
 // prose to grade a condition.
+//
+// The fields after the message are what ISO 39075 subclause 23.2 asks the
+// record to carry, and zu writes each of them only where the record holds
+// one. A missing field is the engine saying the condition was about nothing
+// named, or was raised at no token, rather than the protocol omitting
+// something it knew.
 type diagnostic struct {
-	GQLStatus string `json:"gqlstatus"`
-	Condition string `json:"condition"`
-	Severity  string `json:"severity"`
-	Message   string `json:"message"`
+	GQLStatus   string `json:"gqlstatus"`
+	Condition   string `json:"condition"`
+	Severity    string `json:"severity"`
+	Message     string `json:"message"`
+	Subject     string `json:"subject"`
+	SubjectKind string `json:"subject_kind"`
+	Graph       string `json:"graph"`
+	Schema      string `json:"schema"`
+	Line        int    `json:"line"`
+	Column      int    `json:"column"`
+	Excerpt     string `json:"excerpt"`
+}
+
+// record is the diagnostic in the harness's own vocabulary, or nil for a
+// condition the engine reported nothing about beyond its code.
+func (d *diagnostic) record() *adapter.Diagnostic {
+	if d == nil {
+		return nil
+	}
+	out := &adapter.Diagnostic{
+		Subject:     d.Subject,
+		SubjectKind: d.SubjectKind,
+		Graph:       d.Graph,
+		Schema:      d.Schema,
+		Line:        d.Line,
+		Column:      d.Column,
+		Excerpt:     d.Excerpt,
+	}
+	if out.Empty() {
+		return nil
+	}
+	return out
 }
 
 // Exec sends one query frame and reads one response line.
@@ -541,6 +575,7 @@ func (s *session) Explain(ctx context.Context, stmt string, _ map[string]any) (s
 		fail := &adapter.Failure{Message: f.Error}
 		if f.Failure != nil {
 			fail.GQLStatus = f.Failure.GQLStatus
+			fail.Diagnostic = f.Failure.record()
 		}
 		return "", fail
 	}
@@ -606,6 +641,7 @@ func decode(line []byte) (*adapter.Result, error) {
 		fail := &adapter.Failure{Message: f.Error}
 		if f.Failure != nil {
 			fail.GQLStatus = f.Failure.GQLStatus
+			fail.Diagnostic = f.Failure.record()
 		}
 		return nil, fail
 	}
