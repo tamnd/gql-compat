@@ -1,0 +1,355 @@
+# The lexical layer: how the characters become tokens.
+#
+# ISO's grammar describes the same text twice. <GQL-program> derives a
+# statement out of clauses, and <token>, <GQL terminal character> and the
+# literal rules describe the characters that statement is written in. The two
+# do not meet: nothing reachable from <GQL-program> names <token>, which is why
+# a walk of the grammar from its syntactic root finds fifty rules that look
+# unreachable and are nothing of the sort. They are the lexer's half of the
+# same document.
+#
+# That half is what this file is for. A case here cites a lexical rule when the
+# query spells what the rule spells, and asserts the value the engine gives
+# back rather than merely that it parsed, because the reading of an escape is
+# not visible in an accept. `RETURN 'a\\b'` parses everywhere; the question the
+# case exists to ask is whether what comes back is one backslash.
+#
+# Two conventions worth stating. Where a control character is the subject the
+# case counts characters rather than returning them, since a driver is free to
+# hand a tab back in whatever encoding its transport uses and the count is the
+# same through all of them. And where a rule is one of the grammar's roots,
+# named by nothing because the rule that would name it is written "!! See the
+# Syntax Rules.", the case says so in a comment: citing it is a claim that the
+# query contains what the rule spells, which is a weaker claim than a
+# derivation and is still worth making.
+
+defaults:
+  kind: mandatory
+  fixture: unit
+  tags: [read, lexical]
+
+cases:
+  # ------------------------------------------------------------------ escapes
+
+  - id: mandatory/lexical/escaped-reverse-solidus
+    name: Two reverse solidi in a string are one backslash
+    subclauses: ["21.2"]
+    productions:
+      [
+        character string literal,
+        single quoted character sequence,
+        unbroken single quoted character sequence,
+        single quoted character representation,
+        character representation,
+        escaped character,
+        escaped reverse solidus,
+        reverse solidus,
+        quote,
+      ]
+    # The first escape to write down, because it is the one that decides how
+    # every other escape in a string is read. An engine that returns two
+    # characters here has not implemented escaping at all, and an engine that
+    # returns a backspace has unfolded the line twice, which is what zu's
+    # shell was doing until tamnd/zu#623.
+    query: |
+      RETURN 'a\\b' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["a\\b"]]
+
+  - id: mandatory/lexical/escaped-quote
+    name: A reverse solidus before a quote puts the quote in the string
+    subclauses: ["21.2"]
+    productions: [escaped character, escaped quote, reverse solidus, quote]
+    query: |
+      RETURN 'it\'s' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["it's"]]
+
+  - id: mandatory/lexical/doubled-quote
+    name: A quote written twice is the other way to put one in a string
+    subclauses: ["21.2"]
+    productions: [double single quote, single quoted character representation]
+    # ISO gives the same character two spellings and an engine is not free to
+    # have only one of them. <double single quote> is one of the rules the
+    # grammar writes as "!! See the Syntax Rules.", which is not a reason it
+    # cannot be cited: the standard names the rule, this query writes what it
+    # names, and what the two quotes stand for is not left to anybody.
+    query: |
+      RETURN 'it''s' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["it's"]]
+
+  - id: mandatory/lexical/escaped-control-characters
+    name: The five control escapes each stand for one character
+    subclauses: ["21.2", "20.22"]
+    productions:
+      [
+        escaped character,
+        escaped tab,
+        escaped newline,
+        escaped carriage return,
+        escaped form feed,
+        escaped backspace,
+      ]
+    tags: [read, lexical, string]
+    # Counted rather than returned. A tab and a form feed survive a JSON
+    # transport, a Bolt transport and a C string differently enough that
+    # comparing the text would be comparing drivers, and the count is five
+    # under every one of them. An engine that left the escapes alone answers
+    # ten.
+    query: |
+      RETURN CHARACTER_LENGTH('\t\n\r\f\b') AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: mandatory/lexical/escaped-delimiters-of-the-other-kinds
+    name: A string may hold the other two delimiters by escaping them
+    subclauses: ["21.2"]
+    productions:
+      [
+        escaped character,
+        escaped double quote,
+        escaped grave accent,
+        double quote,
+        grave accent,
+      ]
+    # Neither character needs escaping inside single quotes, and ISO defines
+    # the escapes anyway so that one escape list serves all three quoted
+    # sequences. An engine that refuses these has a per-quote escape list,
+    # which is the divergence being looked for.
+    query: |
+      RETURN '\"\`' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [['"`']]
+
+  - id: mandatory/lexical/unicode-escapes
+    name: The two unicode escapes name a character by four or six hex digits
+    subclauses: ["21.2"]
+    productions:
+      [
+        escaped character,
+        unicode escape value,
+        unicode 4 digit escape value,
+        unicode 6 digit escape value,
+        hex digit,
+        standard digit,
+        octal digit,
+        binary digit,
+        reverse solidus,
+      ]
+    # The six digit form is the one that matters: a character above the basic
+    # multilingual plane cannot be written with four digits, and an engine
+    # holding text as UTF-16 has to put a surrogate pair together to answer
+    # this. The digit rules are cited because the escape spells them, `4` an
+    # octal digit and `0` and `1` binary digits, which is where those three
+    # rules are reachable from at all.
+    query: |
+      RETURN 'A\U01F600' AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [["A😀"]]
+
+  # ------------------------------------------------------------------ numbers
+
+  - id: mandatory/lexical/decimal-integer-digits
+    name: An integer literal is a run of digits
+    subclauses: ["21.2"]
+    productions:
+      [
+        unsigned value specification,
+        unsigned literal,
+        unsigned numeric literal,
+        unsigned decimal integer,
+        digit,
+        standard digit,
+        octal digit,
+        binary digit,
+      ]
+    # ISO defines the digits in a chain rather than as a set: a binary digit is
+    # 0 or 1, an octal digit is one of those or 2 through 7, a standard digit
+    # is one of those or 8 or 9. This literal spells one of each so that the
+    # citation is a derivation and not an approximation of one.
+    query: |
+      RETURN 1902 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1902]]
+
+  - id: mandatory/lexical/digit-group-separator
+    name: An underscore may stand between the digits of a number
+    subclauses: ["21.2"]
+    productions: [unsigned decimal integer, underscore]
+    # <unsigned decimal integer> ::= <digit> [ { [ <underscore> ] <digit> }...
+    # ], with the underscore in the mandatory rule rather than behind a
+    # feature, so an engine that refuses this refuses a number ISO says is a
+    # number. It is the sort of thing an engine grows when somebody asks and
+    # not before, which is why the case is here.
+    query: |
+      RETURN 1_000 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1000]]
+
+  - id: optional/gl06/exponent-sign
+    kind: optional
+    name: The exponent of a number in scientific notation may carry a sign
+    features: [GL06]
+    subclauses: ["21.2"]
+    productions:
+      [
+        unsigned decimal in scientific notation,
+        mantissa,
+        exponent,
+        signed decimal integer,
+        sign,
+        plus sign,
+        exact number suffix,
+      ]
+    # <exponent> ::= <signed decimal integer> and the sign is optional, so the
+    # corpus's other scientific-notation case reaches <exponent> without ever
+    # reaching <sign>. A plus sign is the half nobody writes and the half an
+    # engine is most likely to have forgotten.
+    query: |
+      RETURN 1.5E+2M AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[150]]
+
+  # ------------------------------------------------------------- byte strings
+
+  - id: optional/gv35/byte-string-literal
+    kind: optional
+    name: An X before a quoted run of hex digits is a byte string literal
+    features: [GV35]
+    requires: [GA06]
+    subclauses: ["21.2", "19.6"]
+    productions:
+      [
+        unsigned literal,
+        general literal,
+        byte string literal,
+        hex digit,
+        quote,
+        byte string type,
+        value type predicate,
+      ]
+    # The corpus tested BYTES by naming the type and never by writing one,
+    # on the grounds that there is no portable byte string literal. There is:
+    # ISO spells it in full. What is not portable is what an engine hands back
+    # for one, since the standard does not say how a byte string crosses a
+    # driver, so the case asks the type of the literal rather than its value.
+    query: |
+      RETURN (X'01AF' IS TYPED BYTES) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv35/byte-string-literal-spaced
+    kind: optional
+    name: Spaces may stand between the hex digits of a byte string literal
+    features: [GV35]
+    requires: [GA06]
+    subclauses: ["21.2"]
+    productions: [byte string literal, space, hex digit]
+    # The one place a space is a token rather than a separator, which is why
+    # <space> sits under <GQL special character> and why no other case in the
+    # corpus can cite it. ISO puts the spaces between the two hexits of a byte
+    # as well as between bytes, so an engine reading the literal two
+    # characters at a time off the source gets this wrong.
+    query: |
+      RETURN (X'01 AF' IS TYPED BYTES) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  # ------------------------------------------------------- tokens and letters
+
+  - id: mandatory/lexical/the-punctuation-of-an-expression
+    name: The operators and separators of an expression are delimiter tokens
+    subclauses: ["21.3", "21.4"]
+    productions:
+      [
+        token,
+        delimiter token,
+        GQL special character,
+        left paren,
+        right paren,
+        plus sign,
+        minus sign,
+        asterisk,
+        solidus,
+        comma,
+      ]
+    # A value is projected rather than an acceptance asserted, because the
+    # question about punctuation is whether the engine grouped it the way the
+    # grammar does. Nine parses as (1+2)*3-4 and eleven as 1+(2*3)-4 minus
+    # nothing at all; only the first is arithmetic as ISO orders it.
+    query: |
+      RETURN (1 + 2) * 3 - 4 AS a, 12 / 4 AS b
+    expect:
+      kind: rows
+      columns: [a, b]
+      rows: [[5, 3]]
+
+  - id: mandatory/lexical/the-words-of-a-statement
+    name: A statement is keywords and identifiers written in Latin letters
+    subclauses: ["21.3", "21.4"]
+    productions:
+      [
+        token,
+        non-delimiter token,
+        keyword,
+        reserved word,
+        GQL terminal character,
+        GQL language character,
+        simple Latin letter,
+        simple Latin upper-case letter,
+        simple Latin lower-case letter,
+        colon,
+      ]
+    # The bottom of the grammar, where a query stops being clauses and becomes
+    # characters. Every case in the corpus derives these rules and none of them
+    # said so, which is the same gap the structural spine had before #56: a
+    # denominator counts what is claimed, and a rule every case exercises reads
+    # as uncovered until one case claims it.
+    query: |
+      MATCH (u:Solo)
+      RETURN 1 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
+
+  - id: mandatory/lexical/an-unquoted-name-is-a-non-delimited-identifier
+    name: An identifier written without delimiters is a non-delimited identifier
+    subclauses: ["21.1", "21.3"]
+    productions: [non-delimited identifier, regular identifier, identifier]
+    # <non-delimited identifier> is one of the grammar's roots: no rule names
+    # it, because it exists for the rest of the standard to refer to rather
+    # than for a derivation to pass through. Citing it claims the query
+    # contains one, which this one does twice, in the label and in the alias.
+    # The rule is worth a case of its own because the line it draws is the one
+    # engines get wrong: what may be delimited and what may not.
+    query: |
+      MATCH (u:Solo)
+      RETURN 1 AS alias
+    expect:
+      kind: rows
+      columns: [alias]
+      rows: [[1]]

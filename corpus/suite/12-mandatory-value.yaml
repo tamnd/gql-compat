@@ -36,7 +36,24 @@ cases:
   - id: mandatory/value/literal-character-string
     name: A character string literal in single quotes is returned unchanged
     subclauses: ["21.2"]
-    productions: [character string literal, general literal]
+    productions:
+      [
+        character string literal,
+        general literal,
+        unsigned literal,
+        single quoted character sequence,
+        unbroken single quoted character sequence,
+        single quoted character representation,
+        character representation,
+        string literal character,
+        quote,
+      ]
+    # The whole chain from the literal down to the characters, because the
+    # rules between the two are named nowhere else in the corpus and a
+    # denominator counts what is claimed. <character representation> and
+    # <string literal character> are both written "!! See the Syntax Rules.",
+    # so citing them claims the query contains what the standard's prose says
+    # they are, which for five unremarkable letters it does.
     query: |
       RETURN 'hello' AS v
     expect:
@@ -165,11 +182,26 @@ cases:
   - id: mandatory/value/normalize
     name: NORMALIZE returns a string that is already in normal form unchanged
     subclauses: ["20.24", "19.7"]
-    productions: [normalize function, normal form]
+    productions:
+      [
+        normalize function,
+        normal form,
+        keyword,
+        non-reserved word,
+        non-delimiter token,
+        token,
+      ]
     tags: [string]
     # The argument is ASCII, so the case does not depend on the engine having
     # a Unicode normalization table; it depends only on NORMALIZE existing and
     # being the identity where the standard says it is.
+    #
+    # NFC is where the corpus reaches <non-reserved word>. The syntactic layer
+    # spells it out of <normal form>; the lexical layer reads the same three
+    # letters as a keyword, and ISO lists NFC among the words that are keywords
+    # without being reserved. Both readings are of one query, which is what the
+    # two halves of the grammar are for, and the corpus had no case claiming
+    # the second half of it.
     query: |
       RETURN NORMALIZE('ab', NFC) AS v
     expect:
@@ -377,8 +409,21 @@ cases:
   - id: mandatory/value/parameter-reference
     name: A general parameter reference binds a value supplied outside the statement
     subclauses: ["20.4"]
-    productions: [dynamic parameter specification, general parameter reference, parameter name]
+    productions:
+      [
+        dynamic parameter specification,
+        general parameter reference,
+        parameter name,
+        separated identifier,
+        extended identifier,
+        dollar sign,
+      ]
     tags: [parameters]
+    # <separated identifier> ::= <extended identifier> | <delimited identifier>
+    # and there is no third alternative, which settles what an unquoted name
+    # is: an extended identifier. A parameter name is the one place the corpus
+    # can say so, since everywhere else a name is written the grammar reaches
+    # it through <regular identifier> instead.
     params:
       threshold: 40
     query: |

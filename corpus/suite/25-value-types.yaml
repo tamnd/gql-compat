@@ -447,16 +447,17 @@ cases:
     features: [GV35]
     requires: [GA06]
     subclauses: ["4.16.4", "18.9", "19.6"]
-    productions: [byte string type, value type predicate]
-    # There is no portable byte string literal to cast, so the type name is
-    # written where a type name is all that is needed. An integer is not a byte
-    # string under any reading of the predicate.
+    productions: [byte string type, byte string literal, value type predicate]
+    # Both directions, because either one alone is passed by an engine that has
+    # no byte strings and answers false to everything. The literal is ISO's own
+    # spelling and is portable in a way the value it stands for is not, which is
+    # why the case asks a type and not a value.
     query: |
-      RETURN (1 IS TYPED BYTES) AS v
+      RETURN (X'01AF' IS TYPED BYTES) AS v, (1 IS TYPED BYTES) AS w
     expect:
       kind: rows
-      columns: [v]
-      rows: [[false]]
+      columns: [v, w]
+      rows: [[true, false]]
 
   - id: optional/gv37/byte-string-maximum-length
     name: A byte string type may name a maximum length
@@ -464,12 +465,15 @@ cases:
     requires: [GA06]
     subclauses: ["4.16.4", "18.9", "19.6"]
     productions: [byte string type, max length, value type predicate]
+    # The length is counted in octets and not in the hexits the literal is
+    # written with, so two octets are inside BYTES(2) and outside BYTES(1). An
+    # engine counting characters off the source answers the other way round.
     query: |
-      RETURN (1 IS TYPED BYTES(10)) AS v
+      RETURN (X'01AF' IS TYPED BYTES(10)) AS v, (X'01AF' IS TYPED BYTES(1)) AS w
     expect:
       kind: rows
-      columns: [v]
-      rows: [[false]]
+      columns: [v, w]
+      rows: [[true, false]]
 
   - id: optional/gv36/byte-string-minimum-length
     name: A byte string type may name a minimum and a maximum length
@@ -477,12 +481,15 @@ cases:
     requires: [GA06]
     subclauses: ["4.16.4", "18.9", "19.6"]
     productions: [byte string type, min length, max length, value type predicate]
+    # The minimum is the half of the pair an engine forgets, since a type is
+    # usually read as a bound above. Two octets are exactly the minimum and
+    # belong; the same two are under a minimum of three.
     query: |
-      RETURN (1 IS TYPED BYTES(2, 10)) AS v
+      RETURN (X'01AF' IS TYPED BYTES(2, 10)) AS v, (X'01AF' IS TYPED BYTES(3, 10)) AS w
     expect:
       kind: rows
-      columns: [v]
-      rows: [[false]]
+      columns: [v, w]
+      rows: [[true, false]]
 
   - id: optional/gv38/byte-string-fixed-length
     name: BINARY is the fixed length byte string type
@@ -490,12 +497,16 @@ cases:
     requires: [GA06]
     subclauses: ["4.16.4", "18.9", "19.6"]
     productions: [byte string type, fixed length, value type predicate]
+    # BINARY(4) is one length and not a bound, so a four octet string belongs
+    # and a two octet one does not. It is the difference between this feature
+    # and GV37, and an engine that implements the fixed form as a maximum
+    # answers true twice.
     query: |
-      RETURN (1 IS TYPED BINARY(4)) AS v
+      RETURN (X'01AF03FF' IS TYPED BINARY(4)) AS v, (X'01AF' IS TYPED BINARY(4)) AS w
     expect:
       kind: rows
-      columns: [v]
-      rows: [[false]]
+      columns: [v, w]
+      rows: [[true, false]]
 
   # ----------------------------------------------------------------- temporal
 
