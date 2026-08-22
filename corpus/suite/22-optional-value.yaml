@@ -415,17 +415,23 @@ cases:
   - id: optional/gv50/list-value-constructor
     name: A list value constructor builds a list from an enumeration
     features: [GV50]
-    subclauses: ["20.17"]
+    subclauses: ["20.17", "21.2"]
     productions:
       [
         list value constructor,
         list value constructor by enumeration,
         list element list,
         list element,
+        list literal,
         left bracket,
         right bracket,
         comma,
       ]
+    # A list literal is a list value constructor by enumeration and nothing
+    # else, so the grammar reaches this query two ways: as a literal under
+    # <general literal> and as a constructor under <value expression primary>.
+    # Both citations are on the one derivation ISO wrote, which is why they sit
+    # on one case rather than on two.
     tags: [list]
     query: |
       RETURN [1, 2, 3] AS v
@@ -520,6 +526,35 @@ cases:
       unordered: true
       columns: [name]
       rows: [[launch]]
+
+  - id: optional/gv45/record-value
+    name: A record value is a brace, a list of fields and a closing brace
+    features: [GV45]
+    subclauses: ["20.18", "20.19", "21.2"]
+    productions:
+      [
+        record constructor,
+        record literal,
+        fields specification,
+        field list,
+        field,
+        field name,
+        left brace,
+        right brace,
+        colon,
+      ]
+    # Every other record in the corpus is an argument to a function or an
+    # operand of a comparison, so the corpus had records and had never returned
+    # one. RECORD is optional in front of the brace and is left off here
+    # because the shorter spelling is the one a record in an expression
+    # position is written in, and because <record literal> reaches the
+    # constructor only through this form.
+    query: |
+      RETURN {a: 1, b: 'x'} AS r
+    expect:
+      kind: rows
+      columns: [r]
+      rows: [[{a: 1, b: x}]]
 
   - id: optional/gl09/float-number-suffix
     name: An F suffix writes a literal as single precision

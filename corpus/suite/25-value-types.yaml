@@ -563,7 +563,7 @@ cases:
     features: [GV46]
     requires: [GA06]
     subclauses: ["4.12.7", "18.9", "18.10", "19.6"]
-    productions: [record type, field types specification, field type list, field type]
+    productions: [record type, field types specification, field type list, field type, field name]
     query: |
       RETURN (1 IS TYPED RECORD { a :: INT }) AS v
     expect:
