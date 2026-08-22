@@ -233,6 +233,17 @@ Every case, not just the performance ones, carries a full measurement:
   endpoints in no order at all, and the run states the widest figure it
   published and whether any of them is past the point of describing an
   encoding.
+- **A channel the harness breaks on purpose** — two of ISO's sixty-eight
+  conditions are about what a client does not know. 08007 is a connection lost
+  with a commit in flight and 40003 is a statement whose completion is unknown
+  after a rollback, and no statement raises either, because neither is about the
+  statement. Both cases send an ordinary transaction command and then destroy
+  the channel without reading a word back, which puts the client in the state
+  the condition names every time instead of racing the engine for it. What
+  answers is the engine's client rather than the engine, so the report says
+  which channel was broken, who spoke for it, and whether that speaker is code
+  in this repository. An adapter with no way to break its own channel skips the
+  two cases, and the skip names the adapter.
 
 > **Unavailable is never zero.** Page-fault counters are Linux-only, a server
 > engine's data directory is not on this machine, and a sampler that got no

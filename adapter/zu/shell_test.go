@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/tamnd/gql-compat/adapter"
 )
 
 // The greeting is the one line of the session that answers no request, and
@@ -208,5 +210,61 @@ func TestAShellSpeakingANewerProtocolIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "adapter/zu") {
 		t.Fatalf("error = %v, want it to say what to update", err)
+	}
+}
+
+// The whole of 08007 is a client that sent a commit and never learned what
+// became of it, so the whole of this test is that the adapter does not read.
+// Reading would be a wait to see whether the answer beat the kill, and a client
+// that got the answer is not in the state the condition describes; it would
+// also put the verdict at the mercy of two processes' scheduling. The fake
+// shell here answers every line it is given, so a CutAfter that read anything
+// at all would find a perfectly good reply waiting.
+func TestCuttingTheChannelLeavesACommitsOutcomeUnknown(t *testing.T) {
+	s := fakeSession(t, "1")
+	if _, err := s.Exec(context.Background(), "START TRANSACTION", nil); err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if s.PID() == 0 {
+		t.Fatal("no shell running after a statement")
+	}
+	f := adapter.AsFailure(s.CutAfter(context.Background(), "COMMIT", nil))
+	if f == nil {
+		t.Fatal("a destroyed channel has to come back as a failure; the client cannot report success for an outcome it does not know")
+	}
+	if f.GQLStatus != "08007" {
+		t.Errorf("gqlstatus %q, want 08007 for a commit whose resolution is unknown", f.GQLStatus)
+	}
+	if !f.Fatal {
+		t.Error("the session is gone and the failure has to say so, or the next case runs on a dead shell")
+	}
+	// Transport is for the harness's plumbing breaking by accident, and the
+	// runner turns it into an error that stays out of the score. This one is
+	// the measurement, so filing it there would withdraw the case it exists to
+	// run.
+	if f.Transport {
+		t.Error("a fault the harness injected on purpose is not the plumbing failing")
+	}
+	if pid := s.PID(); pid != 0 {
+		t.Errorf("pid = %d, want none: the shell outlived the channel it was answering on", pid)
+	}
+}
+
+func TestCuttingTheChannelUnderAnythingElseLeavesACompletionUnknown(t *testing.T) {
+	f := adapter.AsFailure(fakeSession(t, "1").CutAfter(context.Background(), "ROLLBACK", nil))
+	if f == nil || f.GQLStatus != "40003" {
+		t.Fatalf("failure %v, want 40003 for a statement whose completion is unknown", f)
+	}
+}
+
+// The record is what stops a pass here being read as a statement about zu. zu
+// was killed before it could say anything, and the code came from this file.
+func TestTheZuFaultTransportSaysTheClientIsThisRepository(t *testing.T) {
+	tr := fakeSession(t, "1").FaultTransport()
+	if !tr.Harness {
+		t.Error("zu's shell protocol has no client but this adapter, and the record has to admit it")
+	}
+	if tr.Channel == "" || tr.Client == "" {
+		t.Errorf("transport %+v names neither what broke nor who spoke for it", tr)
 	}
 }

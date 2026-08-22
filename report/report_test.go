@@ -833,3 +833,78 @@ func ingestSection(out string) string {
 	}
 	return rest
 }
+
+// A pass on a case that reached its condition by having the channel killed
+// under it is not the same kind of fact as any other pass in the conditions
+// table. The engine answered nothing, because it was killed before it could;
+// what named the code was whichever client was left holding the broken end. A
+// table of counts cannot show that, so the table gets a sentence, and where the
+// client is an adapter in this repository the sentence has to say so.
+func TestTheConditionsTableSaysWhichCodesCameFromABrokenChannel(t *testing.T) {
+	rendered := func(t *testing.T, adjust func(*runner.CaseResult)) string {
+		t.Helper()
+		rep := sample()
+		c := runner.CaseResult{
+			ID: "condition/08007/commit-lost", Name: "a commit whose outcome never came back",
+			Kind: corpus.KindCondition, Conditions: []string{"08007"},
+			Mode: runner.ModeConformance, Statement: "COMMIT", WantStatus: "08007",
+		}
+		adjust(&c)
+		rep.Cases = append(rep.Cases, c)
+		rep.Coverage.Conditions["08007"] = runner.Status{Cases: 1, Pass: 1,
+			Description: "connection exception: transaction resolution unknown"}
+		var b bytes.Buffer
+		if err := report.Write(&b, rep, report.FormatMarkdown); err != nil {
+			t.Fatalf("rendering: %v", err)
+		}
+		return b.String()
+	}
+
+	t.Run("the client was this repository", func(t *testing.T) {
+		out := rendered(t, func(c *runner.CaseResult) {
+			c.Outcome, c.Evidence, c.GotStatus = runner.Pass, runner.EvidenceStatus, "08007"
+			c.Fault = &runner.FaultRecord{Kind: corpus.FaultCutAfterSend,
+				Channel: "the zu shell subprocess", Client: "this adapter", Harness: true}
+		})
+		for _, want := range []string{"the zu shell subprocess", "this adapter",
+			"code in this repository", "condition/08007/commit-lost"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("the report never says %q", want)
+			}
+		}
+	})
+
+	t.Run("the client was somebody else's driver", func(t *testing.T) {
+		out := rendered(t, func(c *runner.CaseResult) {
+			c.Outcome, c.Evidence, c.GotStatus = runner.Pass, runner.EvidenceStatus, "08007"
+			c.Fault = &runner.FaultRecord{Kind: corpus.FaultCutAfterSend,
+				Channel: "the Bolt connection", Client: "the Neo4j driver"}
+		})
+		if !strings.Contains(out, "the Neo4j driver") {
+			t.Error("the report never names the driver that answered")
+		}
+		// The self-assessment sentence belongs only where the client is ours.
+		// Printing it against a vendor's driver would be disclaiming a
+		// measurement this harness did not make.
+		if strings.Contains(out, "code in this repository") {
+			t.Error("a third party's driver was described as this repository's code")
+		}
+	})
+
+	t.Run("no transport was available", func(t *testing.T) {
+		out := rendered(t, func(c *runner.CaseResult) {
+			c.Outcome, c.Skip = runner.Skip, runner.SkipNoFaultInjection
+			c.Reason = "the fake adapter cannot destroy its own channel"
+		})
+		if !strings.Contains(out, "gap in the adapter and not in the engine") {
+			t.Error("a skip for want of a transport must not read as a gap in the engine")
+		}
+	})
+
+	t.Run("no fault anywhere in the run", func(t *testing.T) {
+		out := render(t, report.FormatMarkdown)
+		if strings.Contains(out, "with the statement in flight") {
+			t.Error("a run that injected no fault talks about faults")
+		}
+	})
+}

@@ -116,6 +116,19 @@ cases:
       kind: error
       gqlstatus: "08007"
 
+  - id: condition/40003/cut-channel
+    name: A statement whose completion is unknown once the channel is gone
+    kind: condition
+    conditions: ["40003"]
+    subclauses: ["8.3"]
+    fault: cut-after-send
+    setup:
+      - START TRANSACTION
+    query: ROLLBACK
+    expect:
+      kind: error
+      gqlstatus: "40003"
+
   - id: condition/42002/record
     name: The record beside the status names what the condition is about
     kind: condition
@@ -434,6 +447,73 @@ type countingSession struct {
 func (s countingSession) Exec(ctx context.Context, stmt string, params map[string]any) (*adapter.Result, error) {
 	s.count(stmt)
 	return s.Session.Exec(ctx, stmt, params)
+}
+
+// The other half of the argument the withdrawal above rests on. Two of ISO's
+// codes are about a client that does not know what happened, and a harness that
+// owns the channel can put a client in that state whenever it likes: send the
+// statement, destroy the channel, read nothing. What comes back is the client's
+// account of the wreckage, and the result has to say so.
+func TestAFaultCaseIsJudgedOnWhatTheClientSaysAboutADeadChannel(t *testing.T) {
+	var cut string
+	d := engine(t, func(c *fake.Config) {
+		c.Capabilities.MultipleStatements = true
+		c.Cut = func(stmt string) error {
+			cut = stmt
+			return &adapter.Failure{GQLStatus: "40003", Fatal: true,
+				Message: "the connection went with a statement in flight"}
+		}
+		c.CutTransport = adapter.FaultTransport{
+			Channel: "the pretend connection", Client: "the fake adapter", Harness: true}
+	})
+	r := result(t, run(t, d, runner.Config{}), "condition/40003/cut-channel")
+	if r.Outcome != runner.Pass {
+		t.Fatalf("outcome %s reason %q, want a pass", r.Outcome, r.Reason)
+	}
+	// The setup opens the transaction and the query is what must be in flight
+	// when the channel dies. A fault injected on the setup would be measuring
+	// nothing at all.
+	if cut != "ROLLBACK" {
+		t.Errorf("the channel was cut under %q, want the case's own statement", cut)
+	}
+	if r.Fault == nil {
+		t.Fatal("a case that ran through a fault must record the fault it ran through")
+	}
+	if r.Fault.Kind != corpus.FaultCutAfterSend {
+		t.Errorf("fault kind %q, want %q", r.Fault.Kind, corpus.FaultCutAfterSend)
+	}
+	if !r.Fault.Harness {
+		t.Error("a fake engine's client is code in this repository, and the record has to admit it")
+	}
+	// One channel, one statement, one execution. A second would be measuring a
+	// session this one destroyed.
+	if r.Repeats != 1 || r.Warmups != 0 {
+		t.Errorf("%d repeats and %d warmups, want 1 and 0", r.Repeats, r.Warmups)
+	}
+	if !strings.Contains(r.Reason, "the fake adapter") {
+		t.Errorf("the reason should name what answered, got %q", r.Reason)
+	}
+}
+
+func TestAFaultCaseSkipsWhereTheAdapterCannotBreakItsOwnChannel(t *testing.T) {
+	// Nothing here is the engine's fault, and the skip has to say so: an
+	// adapter that has not been taught to break its channel is a morning's work
+	// away from a verdict, and recording it against the engine would retire a
+	// gap that is still open.
+	d := engine(t, func(c *fake.Config) { c.Capabilities.MultipleStatements = true })
+	r := result(t, run(t, d, runner.Config{}), "condition/40003/cut-channel")
+	if r.Outcome != runner.Skip || r.Skip != runner.SkipNoFaultInjection {
+		t.Fatalf("outcome %s skip %q, want a no-fault-injection skip", r.Outcome, r.Skip)
+	}
+	if !strings.Contains(r.Reason, "fake") {
+		t.Errorf("the reason should name the adapter that came up short, got %q", r.Reason)
+	}
+	if r.WantStatus != "40003" {
+		t.Errorf("want_gqlstatus %q, want the code the case names", r.WantStatus)
+	}
+	if r.Fault != nil {
+		t.Error("no fault was injected, so no fault should be recorded")
+	}
 }
 
 func TestSkippingCannotImproveTheRate(t *testing.T) {

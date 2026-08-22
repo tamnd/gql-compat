@@ -169,27 +169,29 @@ cases:
       gqlstatus: "G1003"
       also_gqlstatus: ["25G04"]
 
-  # The last two codes of the sixty-eight, and the only two this corpus cannot
-  # put to an engine. Both are raised when the channel the answer would come
-  # back on is gone, so the statement that provokes one is an ordinary commit
-  # and the thing that makes it raise is a socket dying at a chosen instant.
-  # They are written out anyway, with the code they name and the reason no run
-  # will ever judge them, so that a reader counting the corpus against the
-  # condition surface finds two skips with an explanation rather than two codes
-  # nobody mentioned.
+  # The last two codes of the sixty-eight, and the only two no statement in
+  # this corpus provokes. Neither is about the statement. Both are about the
+  # channel the answer would have come back on, so the statement is an ordinary
+  # commit or rollback and the thing that raises the code is that channel dying
+  # before anything came back over it. Both were written out of every run for
+  # months on the argument that provoking them meant killing a socket at a
+  # chosen instant, which was true and was not a reason, because the harness
+  # owns the socket. They carry a fault instead now: the runner sends the
+  # statement, destroys the channel without reading, and judges whatever the
+  # engine's client says about a connection that is gone. An adapter whose
+  # session cannot do that skips them and the skip names the adapter.
   - id: condition/08007/commit-whose-outcome-never-came-back
     name: A connection lost while a transaction is resolving leaves the outcome unknown
     conditions: ["08007"]
     subclauses: ["8.4", "23.1", "4.9.3"]
     productions: [commit command]
     requires: [GT01]
-    tags: [error, transaction, unreachable]
+    tags: [error, transaction, fault]
     mutating: true
-    unprovokable: >-
-      the condition is the connection failing between the commit being sent and
-      its outcome being reported, so raising it means killing the socket at one
-      instant and reading it means trusting a driver's account of a connection
-      that no longer exists
+    fault: cut-after-send
+    setup:
+      - "START TRANSACTION"
+      - "INSERT (:GqlCompatUnknownOutcome {n: 1})"
     query: |
       COMMIT
     expect:
@@ -202,12 +204,12 @@ cases:
     subclauses: ["8.3", "23.1", "4.9.3"]
     productions: [rollback command]
     requires: [GT01]
-    tags: [error, transaction, unreachable]
+    tags: [error, transaction, fault]
     mutating: true
-    unprovokable: >-
-      the condition is a rollback after which the engine cannot say whether a
-      statement completed, which is a state the engine reaches by losing track
-      of its own work rather than by anything the statement said
+    fault: cut-after-send
+    setup:
+      - "START TRANSACTION"
+      - "INSERT (:GqlCompatUnknownCompletion {n: 1})"
     query: |
       ROLLBACK
     expect:

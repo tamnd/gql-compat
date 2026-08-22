@@ -308,6 +308,72 @@ type Explainer interface {
 	Explain(ctx context.Context, stmt string, params map[string]any) (string, error)
 }
 
+// FaultInjector is a session that can break the channel a statement was sent
+// on, at the one instant that leaves a client not knowing what happened to it.
+// It is optional; the runner asks for it with a type assertion and skips the
+// cases that need it when a session does not have it.
+//
+// Two of ISO's sixty-eight conditions are about that instant and nothing else.
+// 08007 is a connection lost while a transaction was being resolved, so the
+// commit's outcome is unknown, and 40003 is a statement whose completion is
+// unknown after a rollback. Neither is raised by anything a statement says, and
+// for as long as this harness had no way to break a channel on purpose both
+// were written out of every run with a paragraph explaining why. That paragraph
+// was true about statements and false about clients: a client that never reads
+// the answer to a commit it sent is in exactly the state 08007 names, and
+// putting it there takes one kill at one moment.
+//
+// The measurement it makes is a narrow one and the report says so. What answers
+// a destroyed channel is the engine's client, not the engine, so a case run
+// this way grades the client's account of a connection that is gone. That is
+// third-party evidence when the client is the vendor's driver and it is this
+// repository grading its own code when the client is an adapter here, which is
+// why FaultTransport is part of the interface rather than a comment.
+type FaultInjector interface {
+	// CutAfter writes the statement to the channel and then destroys the
+	// channel, without reading anything back.
+	//
+	// Nothing is read on purpose. A read would be a wait to see whether the
+	// answer beat the kill, and a client that got the answer is not in the
+	// state either condition describes; it would also make the outcome a race
+	// between two processes, which is no way to reach a verdict. Writing and
+	// then destroying puts the client in the unknown state every time, which
+	// is the whole of what the two conditions say.
+	//
+	// The error returned is the client's own account of that state, and it is
+	// what the case is judged on. Returning nil says the client noticed
+	// nothing, which is an answer too: it fails the case, because a driver
+	// that reports success for a statement whose outcome it cannot know is
+	// worse than one that reports the wrong code.
+	//
+	// The session is unusable afterwards and the runner discards it.
+	CutAfter(ctx context.Context, stmt string, params map[string]any) error
+
+	// FaultTransport says what CutAfter breaks and who speaks for it, for the
+	// report to print beside the verdict.
+	FaultTransport() FaultTransport
+}
+
+// FaultTransport is what an adapter destroys to reach a condition no statement
+// raises, and what then reports the failure.
+type FaultTransport struct {
+	// Channel is the thing that gets destroyed, in the adapter's own words:
+	// "the shell subprocess", "the Bolt connection".
+	Channel string
+	// Client is what produces the error CutAfter returns, named so a reader
+	// knows whose account of a dead channel the verdict rests on.
+	Client string
+	// Harness is true when Client is code in this repository rather than the
+	// engine's own driver.
+	//
+	// It is the difference between a measurement and a self-assessment. A
+	// vendor's driver mapping a lost connection to 08007 is evidence about
+	// that driver; an adapter here doing the same is this harness agreeing
+	// with itself, and a report that printed the two the same way would be
+	// claiming more than it knows.
+	Harness bool
+}
+
 // SchemaLoader is a session whose engine can be given a fixture's shape with
 // none of its contents: the labels, the edge types, the property names and the
 // types those properties hold, and not one node or edge. It is optional; the

@@ -392,7 +392,13 @@ func (h *htmlWriter) coverage(rep *runner.Report) {
 	h.p(`<p>ISO gives mandatory features no code, so a claim about one can only cite the subclause that specifies it. This corpus cites %d of the %d clauses that specify behaviour.</p>`,
 		len(cov.Subclauses), cov.SubclausesTotal)
 	h.statusTable("", "Subclause", cov.Subclauses)
-	h.statusTable("GQLSTATUS conditions tested", "Code", cov.Conditions)
+	if s := faultSentence(rep); s != "" && len(cov.Conditions) > 0 {
+		h.p(`<h3>GQLSTATUS conditions tested</h3>`)
+		h.p(`<p>%s</p>`, e(s))
+		h.statusTable("", "Code", cov.Conditions)
+	} else {
+		h.statusTable("GQLSTATUS conditions tested", "Code", cov.Conditions)
+	}
 	h.p(`</section>`)
 }
 

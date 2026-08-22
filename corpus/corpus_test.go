@@ -540,3 +540,71 @@ func TestCitedProductionsAppearInTheirCase(t *testing.T) {
 		}
 	}
 }
+
+// A fault is the harness reaching past the statement to break the channel it
+// was sent on, which is a liberty no ordinary case should take. ISO defines two
+// codes that need it and sixty-six that do not, so every fault in the corpus
+// has to be one of the two, and both of them have to be there.
+func TestFaultsAreUsedOnlyWhereALostChannelIsTheCondition(t *testing.T) {
+	suite, _ := load(t)
+	found := map[string]string{"08007": "", "40003": ""}
+	for _, c := range suite.Cases {
+		if c.Fault == "" {
+			continue
+		}
+		if len(c.Conditions) != 1 {
+			t.Errorf("%s injects a fault and claims %d conditions, and a fault reaches one code",
+				c.ID, len(c.Conditions))
+			continue
+		}
+		code := c.Conditions[0]
+		if _, ok := found[code]; !ok {
+			t.Errorf("%s breaks the channel to raise %s, which is not a code a lost channel raises",
+				c.ID, code)
+			continue
+		}
+		// A commit whose outcome is unknown is only worth anything when there
+		// was a transaction to commit. Without the setup the case cuts the
+		// channel under a statement that would have failed anyway.
+		if len(c.Setup) == 0 {
+			t.Errorf("%s cuts the channel with no transaction open, so the statement in flight had nothing to resolve", c.ID)
+		}
+		found[code] = c.ID
+	}
+	for code, id := range found {
+		if id == "" {
+			t.Errorf("nothing in the corpus reaches %s, and nothing but a fault can", code)
+		}
+	}
+}
+
+func TestAFaultIsRefusedOnACaseThatCannotCarryOne(t *testing.T) {
+	_, cat := load(t)
+	known := iso.Codes{Catalog: cat}
+	sound := func() corpus.Case {
+		return corpus.Case{
+			ID: "condition/40003/cut", Name: "A channel that went", Kind: corpus.KindCondition,
+			Conditions: []string{"40003"}, Subclauses: []string{"8.3"},
+			Setup: []string{"START TRANSACTION"}, Query: "ROLLBACK",
+			Fault:  corpus.FaultCutAfterSend,
+			Expect: corpus.Expect{Kind: corpus.ExpectError, GQLStatus: "40003"},
+		}
+	}
+	base := sound()
+	if err := base.Validate(known); err != nil {
+		t.Fatalf("a well-formed fault case was refused: %v", err)
+	}
+	for what, spoil := range map[string]func(*corpus.Case){
+		"a fault no adapter knows how to inject":             func(c *corpus.Case) { c.Fault = "unplug-the-rack" },
+		"a case that is not a condition":                     func(c *corpus.Case) { c.Kind = corpus.KindMandatory },
+		"a case expecting rows":                              func(c *corpus.Case) { c.Expect = corpus.Expect{Kind: corpus.ExpectAccept} },
+		"a case also withdrawn as unprovokable":              func(c *corpus.Case) { c.Unprovokable = "because the socket has to die" },
+		"a control statement with no session left to run it": func(c *corpus.Case) { c.Parses = "ROLLBACK" },
+	} {
+		c := sound()
+		spoil(&c)
+		if err := c.Validate(known); err == nil {
+			t.Errorf("%s was accepted", what)
+		}
+	}
+}

@@ -105,6 +105,20 @@ type Config struct {
 	// refuses. A floor that could not be measured is a note in the report and
 	// not a failed run, and that is worth a test of its own.
 	SchemaLoadFails func(fixture string) error
+	// Cut, when set, makes the session an adapter.FaultInjector answering with
+	// what it returns. Left nil the session does not implement the interface,
+	// which is where every adapter starts and where a test of the skip has to
+	// be able to put one.
+	//
+	// It is given the statement that was in flight when the channel went,
+	// because that is the one thing a client in this position knows: a driver
+	// deciding between 08007 and 40003 has nothing else to decide on.
+	Cut func(stmt string) error
+	// CutTransport is what the session reports about the fault it injects. The
+	// zero value is filled in with a channel and a client named for the fake,
+	// with Harness true, because a fake engine's client is by definition code in
+	// this repository.
+	CutTransport adapter.FaultTransport
 	// Version is what the driver reports as the engine version.
 	Version string
 	// FailVersion makes Version return an error, to check that a run survives
@@ -162,15 +176,89 @@ func (d *driver) Open(_ context.Context, workdir string) (adapter.Session, error
 		return nil, err
 	}
 	s := &session{cfg: d.cfg, dir: workdir}
+	var sess adapter.Session = s
 	switch {
 	case d.cfg.Explain != nil && d.cfg.SchemaLoadable:
-		return &explainingShaped{explaining: &explaining{session: s}}, nil
+		sess = &explainingShaped{explaining: &explaining{session: s}}
 	case d.cfg.Explain != nil:
-		return &explaining{session: s}, nil
+		sess = &explaining{session: s}
 	case d.cfg.SchemaLoadable:
-		return &shaped{session: s}, nil
+		sess = &shaped{session: s}
 	}
-	return s, nil
+	if d.cfg.Cut == nil {
+		return sess, nil
+	}
+	// The fault transport is bolted onto whichever of the four the config asked
+	// for rather than being a fifth alternative, because an engine that can
+	// break its channel can also have plans and a measurable floor and a test
+	// may want any combination. cuts holds its session in a named field, so
+	// nothing it carries competes with what the embedded session already
+	// promotes.
+	c := cuts{s: s}
+	switch b := sess.(type) {
+	case *explainingShaped:
+		return &cuttingExplainingShaped{explainingShaped: b, cuts: c}, nil
+	case *explaining:
+		return &cuttingExplaining{explaining: b, cuts: c}, nil
+	case *shaped:
+		return &cuttingShaped{shaped: b, cuts: c}, nil
+	}
+	return &cutting{session: s, cuts: c}, nil
+}
+
+// cuts is the fault transport, written once and embedded by each of the four
+// combinations below.
+type cuts struct{ s *session }
+
+// CutAfter records the statement, closes the session, and answers with whatever
+// the config said a lost channel looks like on this engine.
+//
+// The session is closed first so that a test can assert what the runner does
+// with the wreckage: a runner that kept the handle would find a session that
+// refuses every statement, which is what a real one would find too.
+func (c cuts) CutAfter(_ context.Context, stmt string, _ map[string]any) error {
+	c.s.mu.Lock()
+	c.s.calls++
+	c.s.cut = strings.TrimSpace(stmt)
+	c.s.closed = true
+	cut := c.s.cfg.Cut
+	c.s.mu.Unlock()
+	return cut(strings.TrimSpace(stmt))
+}
+
+// FaultTransport describes the break, defaulting to words about the fake so a
+// test that does not care about the wording still gets a record with something
+// in it.
+func (c cuts) FaultTransport() adapter.FaultTransport {
+	t := c.s.cfg.CutTransport
+	if t.Channel == "" {
+		t.Channel = "the pretend connection to " + c.s.cfg.Name
+	}
+	if t.Client == "" {
+		t.Client = "the " + c.s.cfg.Name + " adapter"
+		t.Harness = true
+	}
+	return t
+}
+
+type cutting struct {
+	*session
+	cuts
+}
+
+type cuttingExplaining struct {
+	*explaining
+	cuts
+}
+
+type cuttingShaped struct {
+	*shaped
+	cuts
+}
+
+type cuttingExplainingShaped struct {
+	*explainingShaped
+	cuts
 }
 
 // explaining is a session that can also be asked for a plan. It is a separate
@@ -199,6 +287,17 @@ type session struct {
 	// asking for one outside the timed series is that it is not a statement,
 	// and a test of that has to be able to see the difference.
 	explains int
+	// cut is the statement that was in flight when the channel was destroyed,
+	// empty on a session nobody cut. A test that the fault was injected on the
+	// case's own statement, and not on its setup, has nowhere else to look.
+	cut string
+}
+
+// Cut reports the statement this session's channel was destroyed under.
+func (s *session) Cut() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cut
 }
 
 // Calls reports how many statements this session has been given, warmups

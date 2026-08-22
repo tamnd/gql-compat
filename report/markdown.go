@@ -269,7 +269,68 @@ func writeCoverage(b io.Writer, rep *runner.Report) {
 	p("ISO gives mandatory features no code, so a claim about one can only cite the subclause that specifies it. This corpus cites %d of the %d clauses that specify behaviour.\n\n",
 		len(cov.Subclauses), cov.SubclausesTotal)
 	writeStatusTable(b, "", "Subclause", cov.Subclauses)
+	if s := faultSentence(rep); s != "" && len(cov.Conditions) > 0 {
+		p("### GQLSTATUS conditions tested\n\n")
+		p("%s\n\n", s)
+		writeStatusTable(b, "", "Code", cov.Conditions)
+		return
+	}
 	writeStatusTable(b, "### GQLSTATUS conditions tested", "Code", cov.Conditions)
+}
+
+// faultSentence says which conditions were reached by breaking the channel
+// rather than by anything a statement said, and who spoke for the break.
+//
+// It exists because a pass on one of those rows is not the same kind of fact as
+// a pass on any other row of the table it sits above. Two of ISO's codes are
+// about what a client does not know, so reaching them means killing the engine
+// mid-statement, and the engine then answers nothing at all: what names the
+// code is whatever client is left holding the broken end. Where that client is
+// an adapter in this repository, the row is this harness agreeing with itself,
+// which is worth having and is not worth as much as the rest of the table. A
+// reader scanning a coverage table cannot see any of that, so the table gets a
+// sentence.
+func faultSentence(rep *runner.Report) string {
+	var ran, skipped []string
+	var t *runner.FaultRecord
+	for i := range rep.Cases {
+		c := &rep.Cases[i]
+		switch {
+		case c.Skip == runner.SkipNoFaultInjection:
+			skipped = append(skipped, c.ID)
+		case c.Fault != nil:
+			ran = append(ran, c.ID)
+			t = c.Fault
+		}
+	}
+	if len(ran) == 0 && len(skipped) == 0 {
+		return ""
+	}
+	if len(ran) == 0 {
+		return fmt.Sprintf("%d of these codes are raised by the channel dying with a statement in flight and by nothing a statement can say, and the %s adapter has no way to break its own channel, so %s went unjudged. That is a gap in the adapter and not in the engine, which was never asked.",
+			len(skipped), rep.Engine.Adapter, idList(skipped))
+	}
+	s := fmt.Sprintf("%s reached %s by having %s destroyed with the statement in flight, which is the only way ISO's two unknown-outcome codes are reached at all. The engine answered nothing on %s: it was killed first. What named the code was %s.",
+		idList(ran), plural2(len(ran), "its condition", "their conditions"),
+		t.Channel, plural2(len(ran), "that row", "those rows"), t.Client)
+	if t.Harness {
+		s += " That is code in this repository and not the engine's own driver, so read a pass there as this harness reading a dead channel correctly, not as the engine raising the condition."
+	} else {
+		s += " Read a pass there as that client naming the right code for a connection that is gone, not as the engine raising the condition."
+	}
+	if len(skipped) > 0 {
+		s += fmt.Sprintf(" %s asked for the same treatment and did not get it, because no transport was available.", idList(skipped))
+	}
+	return s
+}
+
+// plural2 picks between two whole phrases, for the sentences where English
+// changes more than a letter.
+func plural2(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func writeStatusTable(b io.Writer, heading, label string, items map[string]runner.Status) {

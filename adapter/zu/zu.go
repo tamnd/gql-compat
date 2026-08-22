@@ -395,10 +395,20 @@ func (s *session) startShellLocked() error {
 	if s.cmd != nil {
 		return nil
 	}
+	// A session that has never been given a fixture has no file, and zu's shell
+	// refuses to open one that is not there. Started on nothing it serves
+	// memory, which is the honest description of a session with no graph in it:
+	// the alternative is a session that cannot run a statement until somebody
+	// loads a graph the case never asked for. It happens to the cases that need
+	// no fixture, and to the case after any that discarded the session.
+	args := []string{"shell", "--format", "jsonl"}
+	if _, err := os.Stat(s.path); err == nil {
+		args = []string{"shell", s.path, "--format", "jsonl"}
+	}
 	// The shell outlives any single statement's context, so it is started
 	// against the background: a per-statement deadline must abort the read,
 	// not kill the process the next statement needs.
-	cmd := exec.Command(s.driver.binary, "shell", s.path, "--format", "jsonl") //nolint:noctx // deliberate: see above.
+	cmd := exec.Command(s.driver.binary, args...) //nolint:noctx // deliberate: see above.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -625,6 +635,118 @@ func (s *session) Explain(ctx context.Context, stmt string, _ map[string]any) (s
 		return "", fail
 	}
 	return f.Text, nil
+}
+
+// CutAfter writes the statement to the shell and then kills the shell, without
+// reading a word of what it may have said back.
+//
+// Nothing is read on purpose, and the honesty of the whole case rests on that.
+// A read would be a wait to see whether the answer beat the kill, and the two
+// outcomes of that race are a client that knows what happened, which is not the
+// state either condition describes, and a client that does not, which is. Not
+// reading reaches the second every time, whatever the shell managed to do with
+// the statement first. Whether the transaction committed is now genuinely
+// unknown to this process, which is not a simulation of 08007 but the thing
+// itself.
+//
+// SIGKILL rather than the quit frame stopLocked sends: a shell asked politely
+// to leave would answer the statement on its way out, and the file's epoch
+// being left consistent is exactly what this case must not arrange.
+func (s *session) CutAfter(ctx context.Context, stmt string, params map[string]any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cmd == nil {
+		if err := s.startShellLocked(); err != nil {
+			return err
+		}
+	}
+	req := map[string]any{"op": "query", "q": stmt}
+	if len(params) > 0 {
+		req["params"] = params
+	}
+	line, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	if _, err := s.in.Write(append(line, '\n')); err != nil {
+		// The channel broke before the statement was on it, so there is no
+		// statement in flight and no condition to observe. That is the
+		// harness's plumbing failing, not the engine's.
+		s.killLocked()
+		return &adapter.Failure{Transport: true, Fatal: true,
+			Message: "zu: the statement never reached the shell: " + err.Error()}
+	}
+	if err := ctx.Err(); err != nil {
+		s.killLocked()
+		return &adapter.Failure{Timeout: true, Fatal: true, Message: err.Error()}
+	}
+	s.killLocked()
+	return unknownOutcome(stmt)
+}
+
+// FaultTransport says what CutAfter breaks and who speaks for it.
+//
+// Harness is true, and it is the most important field in the record. zu's shell
+// protocol has no client but this adapter, so the code below is this repository
+// deciding what a dead pipe means and then this repository checking the answer.
+// A pass on one of these two cases is worth having — the mapping is the one ISO
+// specifies and a client that got it wrong would be worth knowing about — and it
+// is not evidence about zu, which was killed before it could say anything.
+func (s *session) FaultTransport() adapter.FaultTransport {
+	return adapter.FaultTransport{
+		Channel: "the zu shell subprocess",
+		Client:  "this adapter, the only client zu's shell protocol has",
+		Harness: true,
+	}
+}
+
+// killLocked destroys the shell without letting it finish anything. The caller
+// holds s.mu.
+func (s *session) killLocked() {
+	if s.cmd == nil {
+		return
+	}
+	if s.cmd.Process != nil {
+		_ = s.cmd.Process.Kill()
+	}
+	// Reaped so the process does not linger as a zombie for the rest of the
+	// run, and the pipes are dropped along with it: whatever is in the read
+	// buffer is an answer to a statement whose outcome this session has already
+	// declared unknown, and reading it later would contradict that.
+	_ = s.cmd.Wait()
+	if s.in != nil {
+		_ = s.in.Close()
+	}
+	s.cmd, s.in, s.out = nil, nil, nil
+}
+
+// unknownOutcome is the code ISO names for the statement that was in flight
+// when the channel went.
+//
+// A commit is 08007, connection exception with the transaction's resolution
+// unknown: the commit was sent, nothing came back, and whether it took is not
+// something this client can find out. Anything else is 40003, transaction
+// rollback with a statement's completion unknown, which is the state a client
+// is in when the work of a transaction it abandoned may or may not have
+// finished.
+//
+// The rule is the client's to apply and not the engine's, which is the whole
+// reason FaultTransport reports Harness. A vendor's driver would apply its own
+// version of it and the report would be reading a third party's judgement; here
+// it is reading this file's.
+func unknownOutcome(stmt string) error {
+	if head := strings.ToUpper(strings.TrimSpace(stmt)); strings.HasPrefix(head, "COMMIT") {
+		return &adapter.Failure{
+			GQLStatus: "08007",
+			Fatal:     true,
+			Message:   "the connection to zu was lost with a commit in flight, so whether the transaction resolved is unknown to this client",
+		}
+	}
+	return &adapter.Failure{
+		GQLStatus: "40003",
+		Fatal:     true,
+		Message:   "the connection to zu was lost with a statement in flight, so whether it completed is unknown to this client",
+	}
 }
 
 // roundTrip writes one frame and reads the one line that answers it. The
