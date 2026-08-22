@@ -118,7 +118,7 @@ cases:
   - id: condition/42002/redeclared-variable
     name: Binding one variable to two different element types is an invalid reference
     conditions: ["42002"]
-    subclauses: ["16.4", "16.7"]
+    subclauses: ["16.4", "16.7", "22.1"]
     productions: [element variable declaration]
     fixture: social
     # `k` is declared as an edge and then as a node in the same graph pattern.

@@ -17,8 +17,13 @@ defaults:
 cases:
   - id: mandatory/pattern/node-pattern-unlabelled
     name: A node pattern with only a variable binds every node in the graph
-    subclauses: ["16.4"]
+    subclauses: ["16.4", "22.2"]
     productions: [node pattern, element variable declaration]
+    # The simplest match there is, which is why 22.2 is cited here rather than
+    # anywhere else. That subclause is the machinery the standard defines
+    # matching in terms of, and a pattern with no label and no predicate is the
+    # one case where the answer is the machinery and nothing else: every node
+    # in the graph, once each.
     query: |
       MATCH (x)
       RETURN COUNT(*) AS n
@@ -29,7 +34,7 @@ cases:
 
   - id: mandatory/pattern/edge-pattern-directed
     name: A right-pointing full edge pattern binds edges of a type in their direction
-    subclauses: ["16.7"]
+    subclauses: ["16.7", "22.3"]
     productions:
       [
         element pattern,
@@ -56,11 +61,16 @@ cases:
 
   - id: mandatory/pattern/edge-property-predicate
     name: A property of an edge variable is readable in a where clause
-    subclauses: ["16.7", "16.13", "20.11"]
+    subclauses: ["16.7", "16.13", "16.10", "20.11", "22.6"]
     productions: [property reference, element variable reference, period, edge reference value expression]
     # The source of a property reference is a node, an edge or a record, and
     # the grammar has a rule for each. This is the corpus case where the source
     # is an edge.
+    #
+    # 16.10 is the reference itself and 22.6 is what the engine has to do with
+    # it: apply the bindings the pattern produced before the expression can be
+    # evaluated at all. Every case in the corpus that names a variable in an
+    # expression does that, and this is the one that says so.
     query: |
       MATCH (p:Person)-[k:KNOWS]->(q:Person)
       WHERE k.since > 2018

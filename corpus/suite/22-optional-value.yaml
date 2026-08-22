@@ -483,6 +483,27 @@ cases:
       columns: [v]
       rows: [[[1, 2, 3]]]
 
+  - id: optional/gv50/list-of-a-value-and-a-null
+    name: A list holding a value and a null keeps both of them as written
+    features: [GV50]
+    subclauses: ["20.17", "22.18"]
+    productions:
+      [list value constructor by enumeration, list element list, list element]
+    tags: [list, "null"]
+    # A list value has one element type and this constructor is handed two, so
+    # something has to combine them, and subclause 22.18 is where ISO says what:
+    # the general combination of an integer and the type of a null is an integer
+    # that admits nulls. What the case measures is that combining the types
+    # leaves the values alone, so the 1 comes back an integer and the null comes
+    # back a null rather than the pair arriving as some third thing or the
+    # constructor refusing a list that is not all of one type.
+    query: |
+      RETURN [1, NULL] AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[[1, null]]]
+
   - id: optional/gf12/cardinality-of-list-property
     name: CARDINALITY counts the elements of a stored list
     features: [GF12, GV50]

@@ -186,6 +186,29 @@ cases:
       columns: [name]
       rows: [[Alice], [Carol], [Alice], [Carol], [Erin]]
 
+  - id: optional/gq03/union-all-of-a-value-and-a-null
+    name: A union column filled from an integer and from a null is one column
+    features: [GQ03]
+    subclauses: ["14.2", "22.19"]
+    productions: [set operator, set quantifier]
+    tags: [composition, "null"]
+    # The two operands give the one column two types, and the union has to
+    # settle on a single type for it before a row exists, from the operand types
+    # alone. That is the static combination of subclause 22.19, as against the
+    # general combination of 22.18 which has values in hand, and its answer here
+    # is an integer column that admits nulls. An engine that never takes the
+    # step has nothing to widen and reports the two branches as a type mismatch,
+    # which is a fair reading of a union of unlike things and is not this one.
+    query: |
+      RETURN 1 AS v
+      UNION ALL
+      RETURN NULL AS v
+    expect:
+      kind: rows
+      unordered: true
+      columns: [v]
+      rows: [[1], [null]]
+
   - id: optional/gq04/except-distinct
     name: EXCEPT DISTINCT subtracts the right operand's records from the left
     features: [GQ04]
