@@ -1135,6 +1135,230 @@ cases:
       columns: [step]
       rows: [[1]]
 
+  # The rest of ISO 16.12: what may be written between the two slashes.
+  #
+  # The seven arrows around the slashes are covered above. These are the
+  # contents, which is a small grammar of its own: a label expression per
+  # step, steps written against each other for a concatenation, a bar for a
+  # union of them, parentheses to group, a quantifier or a question mark
+  # behind any of it, and a direction written on a single step that overrides
+  # the arrow around the whole stretch. Every rule on the derivation is cited
+  # from the case that writes it, which is why the concatenation case names
+  # eight of them: a stretch of two labels goes through contents, term,
+  # concatenation, factor low, factor high, tertiary, secondary and primary to
+  # reach the label, and a case that writes one exercises all eight.
+
+  - id: optional/g080/simplified-contents-concatenation
+    name: Two labels written against each other inside the slashes are two steps
+    features: [G080]
+    subclauses: ["16.12"]
+    productions:
+      [
+        simplified contents,
+        simplified term,
+        simplified concatenation,
+        simplified factor low,
+        simplified factor high,
+        simplified tertiary,
+        simplified secondary,
+        simplified primary,
+      ]
+    query: |
+      MATCH (a:Step)-/ LINK LINK /->(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      columns: [step]
+      rows: [[2]]
+
+  - id: optional/g080/simplified-contents-union
+    name: A bar inside the slashes is either label on the one step
+    features: [G080]
+    subclauses: ["16.12"]
+    productions: [simplified path union, vertical bar]
+    # Both sides name the same type on purpose. What the case measures is
+    # that the bar is a union of labels on one step rather than two walks of
+    # the stretch, so the answer is the answer of one step and not twice it.
+    query: |
+      MATCH (a:Step)-/ LINK | LINK /->(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      columns: [step]
+      rows: [[1]]
+
+  - id: optional/g080/simplified-contents-in-parentheses
+    name: Parentheses inside the slashes group a stretch
+    features: [G080]
+    subclauses: ["16.12"]
+    productions: [simplified primary, left paren, right paren]
+    query: |
+      MATCH (a:Step)-/ (LINK LINK) /->(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      columns: [step]
+      rows: [[2]]
+
+  - id: optional/g080/simplified-contents-quantified
+    name: A quantifier inside the slashes counts the steps it is written behind
+    features: [G080, G036]
+    subclauses: ["16.12"]
+    productions: [simplified quantified, graph pattern quantifier]
+    query: |
+      MATCH (a:Step)-/ LINK{2} /->(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      columns: [step]
+      rows: [[2]]
+
+  - id: optional/g080/simplified-contents-questioned
+    name: A question mark inside the slashes makes the step optional
+    features: [G080, G037]
+    subclauses: ["16.12"]
+    productions: [simplified questioned, question mark]
+    # Zero steps is a node standing on itself, so the node the pattern
+    # started from is one of the answers and the node one hop on is the
+    # other.
+    query: |
+      MATCH (a:Step)-/ LINK? /->(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[0], [1]]
+
+  - id: optional/g081/simplified-override-left-or-right
+    name: A step written between two arrowheads walks either way whatever the arrow said
+    features: [G081]
+    subclauses: ["16.12"]
+    productions: [simplified direction override, simplified override left or right]
+    query: |
+      MATCH (a:Step)-/ <LINK> /-(b:Step)
+      WHERE a.step = 2
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[1], [3]]
+
+  - id: optional/g081/simplified-override-any-direction
+    name: A minus sign in front of a step says the step may go either way
+    features: [G081]
+    subclauses: ["16.12"]
+    productions: [simplified override any direction, minus sign]
+    # The override that says what the pattern would have said anyway, which
+    # is the point of it: a stretch whose arrow points one way can still name
+    # a step that does not.
+    query: |
+      MATCH (a:Step)-/ -LINK /->(b:Step)
+      WHERE a.step = 2
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      unordered: true
+      columns: [step]
+      rows: [[1], [3]]
+
+  - id: optional/g081/simplified-override-undirected
+    name: A tilde in front of a step asks for an edge with no direction
+    features: [G081, GH02]
+    subclauses: ["16.12"]
+    productions: [simplified override undirected, tilde]
+    fixture: undirected
+    query: |
+      MATCH (a:Peer)-/ ~FRIEND /-(b:Peer)
+      WHERE a.name = 'north'
+      RETURN b.name AS name
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[south]]
+
+  - id: optional/g081/simplified-override-left-or-undirected
+    name: A step may ask for an edge that points left or has no direction
+    features: [G081, GH02]
+    subclauses: ["16.12"]
+    productions: [simplified override left or undirected, left arrow tilde]
+    fixture: undirected
+    query: |
+      MATCH (a:Peer)-/ <~FRIEND /-(b:Peer)
+      WHERE a.name = 'south'
+      RETURN b.name AS name
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[north]]
+
+  - id: optional/g081/simplified-override-undirected-or-right
+    name: A step may ask for an edge that points right or has no direction
+    features: [G081, GH02]
+    subclauses: ["16.12"]
+    productions: [simplified override undirected or right, right angle bracket]
+    fixture: undirected
+    query: |
+      MATCH (a:Peer)-/ ~FRIEND> /-(b:Peer)
+      WHERE a.name = 'north'
+      RETURN b.name AS name
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[south]]
+
+  - id: optional/g080/simplified-contents-multiset-alternation
+    name: A multiset alternation inside the slashes keeps both walks
+    features: [G080, G030]
+    subclauses: ["16.12"]
+    productions: [simplified multiset alternation, multiset alternation operator]
+    # The bar above is a union and answers each walk once. This one is the
+    # multiset, so a walk both sides find is found twice, and the count is
+    # the whole of the difference between the two operators.
+    query: |
+      MATCH (a:Step)-/ LINK |+| LINK /->(b:Step)
+      WHERE a.step = 0
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[2]]
+
+  - id: optional/g080/simplified-contents-conjunction
+    name: An ampersand inside the slashes asks for a step wearing both labels
+    features: [G080]
+    subclauses: ["16.12"]
+    productions: [simplified conjunction, ampersand]
+    query: |
+      MATCH (a:Step)-/ LINK & LINK /->(b:Step)
+      WHERE a.step = 0
+      RETURN b.step AS step
+    expect:
+      kind: rows
+      columns: [step]
+      rows: [[1]]
+
+  - id: optional/g080/simplified-contents-negation
+    name: An exclamation mark inside the slashes asks for a step without that label
+    features: [G080]
+    subclauses: ["16.12"]
+    productions: [simplified negation, exclamation mark]
+    fixture: social
+    query: |
+      MATCH (a:Person)-/ !KNOWS /->(b)
+      WHERE a.name = 'Alice'
+      RETURN b.name AS name
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[Acme]]
+
   - id: optional/g046/adjacent-vertex-patterns
     name: Two node patterns written against each other describe one node
     features: [G046]
