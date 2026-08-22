@@ -646,6 +646,79 @@ cases:
       columns: [v]
       rows: [[2]]
 
+  - id: optional/gs11/session-set-value-from-a-subquery
+    name: A session value parameter can be initialized from a subquery
+    features: [GS03, GS11]
+    subclauses: ["7.1"]
+    productions: [session set value parameter clause, opt typed value initializer, value initializer, nested query specification]
+    fixture: social
+    tags: [write, session]
+    mutating: true
+    # The subquery is worked out once, where it is written, and what the
+    # session then holds is the value it answered. An engine that held the
+    # query instead of the value would answer the same number here, so the
+    # case is evidence of the form being accepted and read back rather than of
+    # when it was evaluated; the ordering question needs a write between the
+    # set and the read, which is a different feature.
+    setup:
+      - "SESSION SET VALUE $people = { MATCH (p:Person) RETURN COUNT(*) AS n }"
+    query: |
+      RETURN $$people AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[5]]
+
+  - id: optional/gs02/session-set-binding-table-from-a-subquery
+    name: SESSION SET BINDING TABLE holds the rows a subquery answered
+    features: [GS02, GS10]
+    subclauses: ["7.1", "14.8"]
+    productions: [session set binding table parameter clause, opt typed binding table initializer, binding table initializer, nested query specification]
+    requires: [GQ23]
+    fixture: social
+    tags: [write, session]
+    mutating: true
+    # Binding the parameter is GS02 and initializing it from a query in braces
+    # is GS10, so the statement claims both. Reading it back needs a FOR over a
+    # binding table, which is GQ23 and a different feature, so an engine
+    # without one is skipped rather than failed: the read is how the case gets
+    # its evidence and not what it is measuring.
+    setup:
+      - "SESSION SET BINDING TABLE $berliners = { MATCH (p:Person) WHERE p.city = 'Berlin' RETURN p.name AS name }"
+    query: |
+      FOR r IN $$berliners
+      RETURN r.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Alice], [Carol]]
+
+  - id: optional/gs13/session-set-binding-table-from-a-reference
+    name: A session binding table parameter can be initialized from another one
+    features: [GS02, GS13]
+    subclauses: ["7.1", "11.2", "14.8"]
+    productions: [opt typed binding table initializer, binding table initializer, binding table expression, reference parameter specification]
+    requires: [GQ23]
+    fixture: social
+    tags: [write, session]
+    mutating: true
+    # The initializer is an expression rather than a query, and the only
+    # binding table expression a portable case can write is a reference to a
+    # table the session already holds. Both names then stand for the same
+    # rows, which is what the read shows.
+    setup:
+      - "SESSION SET BINDING TABLE $first = { MATCH (p:Person) WHERE p.age = 27 RETURN p.name AS name }"
+      - "SESSION SET BINDING TABLE $second = $first"
+    query: |
+      FOR r IN $$second
+      RETURN r.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Bob], [Dave]]
+
   - id: optional/gs04/session-reset-all-characteristics
     name: SESSION RESET ALL CHARACTERISTICS returns the session to how it started
     features: [GS04]
