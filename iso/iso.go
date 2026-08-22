@@ -110,6 +110,15 @@ type Production struct {
 	Keywords []string `json:"keywords"`
 	// Terminals are the punctuation and symbol terminals the rule names.
 	Terminals []string `json:"terminals"`
+	// RequiresKeyword is true when every alternative of the right-hand side
+	// spells at least one of Keywords at a position the grammar does not make
+	// optional. It is the machine-checkable half of "a case that uses this
+	// rule says one of these words": <match statement> requires MATCH, while
+	// <is or colon> does not require IS because a colon will do and <element
+	// variable declaration> does not require TEMP because the grammar puts it
+	// in brackets. False here is not "no keywords", it is "the rule can be
+	// reached without saying one".
+	RequiresKeyword bool `json:"requires_keyword,omitempty"`
 	// SeeTheRules marks a rule the grammar declines to expand. ISO writes
 	// "!! See the Syntax Rules." where the alternatives would go, which is the
 	// grammar saying the syntax is somebody else's to define: the lexer's, in
@@ -615,6 +624,7 @@ func parseGrammar(data []byte) ([]Production, error) {
 		p.Keywords = sortedKeys(side.kws)
 		p.Terminals = sortedKeys(side.terms)
 		p.SeeTheRules = side.seeTheRules
+		p.RequiresKeyword = side.requiresKeyword()
 		out = append(out, p)
 	}
 	if len(out) == 0 {
@@ -629,13 +639,52 @@ type rhs struct {
 	// seeTheRules is set by the <seeTheRules/> element, the artifact's spelling
 	// of "!! See the Syntax Rules.".
 	seeTheRules bool
+	// alts counts the top-level <alt> elements and keyworded counts the ones
+	// holding a keyword outside every <opt>. A rule with no <alt> at all is
+	// one alternative, which is why alts starts at zero and requiresKeyword
+	// reads it as one.
+	alts, keyworded int
+	// optDepth is how many <opt> elements deep the walk currently is, and
+	// altKeyword records whether the alternative being walked has yet spelled
+	// a keyword the grammar does not make optional.
+	optDepth   int
+	altKeyword bool
+}
+
+// requiresKeyword reports whether every alternative of the walked rule spells
+// one of the rule's own keywords at a non-optional position.
+func (r *rhs) requiresKeyword() bool {
+	alts, keyworded := r.alts, r.keyworded
+	if alts == 0 {
+		// No <alt>: the whole right-hand side is the one alternative, and the
+		// walk left its verdict in altKeyword.
+		alts = 1
+		if r.altKeyword {
+			keyworded = 1
+		}
+	}
+	return keyworded == alts
 }
 
 // walkRHS consumes tokens up to the end of the element the decoder has just
 // entered, collecting every <BNF> reference, <kw> keyword, and
 // <terminalsymbol> it passes.
+//
+// It also tracks two things the flat lists cannot carry: which <alt> elements
+// are the rule's own alternatives rather than an inner group's, and whether
+// the walk is inside an <opt>. Those two are what turn "this rule mentions
+// MATCH somewhere" into "a case using this rule has to say MATCH".
 func walkRHS(dec *xml.Decoder, side *rhs) error {
 	depth := 1
+	// rhsDepth is the depth at which <rhs> was seen, so an <alt> one deeper is
+	// one of the rule's own alternatives and an <alt> further in is not.
+	rhsDepth := -1
+	var opts []int
+	finish := func() {
+		if side.alts > 0 && side.altKeyword {
+			side.keyworded++
+		}
+	}
 	for depth > 0 {
 		tok, err := dec.Token()
 		if err != nil {
@@ -643,7 +692,21 @@ func walkRHS(dec *xml.Decoder, side *rhs) error {
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
+			here := depth
 			depth++
+			switch t.Name.Local {
+			case "rhs":
+				rhsDepth = here
+			case "alt":
+				if here == rhsDepth+1 {
+					finish()
+					side.alts++
+					side.altKeyword = false
+				}
+			case "opt":
+				opts = append(opts, here)
+				side.optDepth++
+			}
 			switch t.Name.Local {
 			case "BNF", "allAltsFrom":
 				for _, a := range t.Attr {
@@ -658,6 +721,9 @@ func walkRHS(dec *xml.Decoder, side *rhs) error {
 					depth--
 					if s != "" {
 						side.kws[strings.ToUpper(s)] = true
+						if side.optDepth == 0 {
+							side.altKeyword = true
+						}
 					}
 				}
 			case "terminalsymbol":
@@ -670,8 +736,13 @@ func walkRHS(dec *xml.Decoder, side *rhs) error {
 			}
 		case xml.EndElement:
 			depth--
+			if n := len(opts); n > 0 && opts[n-1] == depth {
+				opts = opts[:n-1]
+				side.optDepth--
+			}
 		}
 	}
+	finish()
 	return nil
 }
 
