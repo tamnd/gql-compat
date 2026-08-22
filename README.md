@@ -86,6 +86,18 @@ claim checkable, and the report has a column for them, so a family sitting at
 fifteen of eighteen says which kind of gap it is. Nothing about them moves a
 number: they are still four of the 228 and still not supported.
 
+The grammar has the same split and a register of its own,
+[`corpus/uncitable.yaml`](corpus/uncitable.yaml). A citation is a claim that the
+case exercises the rule, so the uncited productions have to be told apart into
+the ones nobody has written a case for and the nine no case can reach: two whose
+spelling ISO hands to the implementer, two the feature register already
+accounts for, and five reachable only through those. The obvious rule is the
+wrong one and the file says so. A production the grammar declines to expand is
+not by itself out of reach, because a query with a space in it exercises
+`<whitespace>` and one with `1e6` in it exercises `<unsigned decimal in
+scientific notation>`; the test is that the grammar declines to expand it *and*
+ISO's own list of implementation-defined items names it.
+
 ---
 
 ## What it measures

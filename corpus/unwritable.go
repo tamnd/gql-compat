@@ -100,6 +100,14 @@ type KnownGrammar interface {
 	// Creates reports whether the grammar spells a statement that puts a
 	// thing of this kind into the catalog.
 	Creates(kind string) bool
+	// Referrers is the rules whose right-hand sides name this one, sorted. A
+	// rule with none is a start symbol.
+	Referrers(name string) []string
+	// LeftToTheImplementation reports whether the grammar declines to expand
+	// the rule and one of ISO's lists of implementation-defined and
+	// implementation-dependent items names it, which together are the standard
+	// saying what the rule matches is the implementer's to decide.
+	LeftToTheImplementation(name string) bool
 }
 
 // unwritableFile is the on-disk shape of the register.

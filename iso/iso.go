@@ -246,6 +246,58 @@ func (c *Catalog) Production(name string) (Production, bool) {
 	return p, ok
 }
 
+// Referrers returns the rules whose right-hand sides name this one, sorted.
+//
+// It is the grammar read backwards, and it answers the only question that can
+// tell you a rule is out of reach: a rule with no referrer is a start symbol,
+// and a rule whose every referrer is itself unreachable is unreachable too.
+func (c *Catalog) Referrers(name string) []string {
+	name = strings.Trim(name, "<>")
+	var out []string
+	for _, p := range c.Productions {
+		if slices.Contains(p.References, name) {
+			out = append(out, p.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// LeftToTheImplementation reports whether the standard hands this rule's
+// spelling to the implementer rather than to a reader of the grammar.
+//
+// Two things have to be true and neither is enough on its own. The grammar has
+// to decline to expand the rule, which it writes as "!! See the Syntax Rules.",
+// and one of ISO's two lists of implementation-defined and
+// implementation-dependent items has to name the rule in its description.
+//
+// Unexpanded alone is not enough. <newline> and <whitespace> are unexpanded and
+// every query ever written is full of both, so a case can cite them perfectly
+// honestly. Named alone is not enough either: the lists name <value expression>
+// and <non-delimited identifier>, which the grammar expands in full. It is the
+// two together that are the standard saying, in two places and in two
+// documents, that what this rule matches is nobody's to write down but the
+// implementer's.
+func (c *Catalog) LeftToTheImplementation(name string) bool {
+	p, ok := c.Production(name)
+	if !ok || !p.SeeTheRules {
+		return false
+	}
+	// The lists write a rule name in guillemets where the grammar writes it in
+	// angle brackets, so the needle is built rather than matched loosely: a
+	// substring search for the bare name would find <graph name> inside <graph
+	// type name> and call the wrong rule implementation-defined.
+	needle := "‹" + p.Name + "›"
+	for _, list := range [][]Behaviour{c.ImplementationDefined, c.ImplementationDependent} {
+		for _, b := range list {
+			if strings.Contains(b.Description, needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Behaviour returns the implementation-defined or implementation-dependent
 // item with the given code, from either list.
 //

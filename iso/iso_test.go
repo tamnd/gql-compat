@@ -208,3 +208,52 @@ func TestAKeywordIsRequiredOnlyWhenEveryAlternativeSpellsIt(t *testing.T) {
 		t.Errorf("%d of %d productions require a keyword, which is not a believable share", n, len(c.Productions))
 	}
 }
+
+// Referrers is the grammar read backwards, and reading it backwards is what
+// lets a caller say a rule is out of reach. The table is one rule of each shape
+// that matters: a start symbol, a rule with exactly one way in, and a rule half
+// the grammar names.
+func TestReferrersReadsTheGrammarBackwards(t *testing.T) {
+	c := MustLoad()
+	for _, tc := range []struct {
+		name string
+		want []string
+	}{
+		{"GQL-program", nil},
+		{"procedure name", []string{"catalog procedure parent and name"}},
+		{"procedure argument list", []string{"named procedure call"}},
+		// Two ways in, which is the answer worth having: <optional operand> is
+		// how OPTIONAL MATCH is spelled, and a reader who assumed one referrer
+		// would have missed half the rule's uses.
+		{"simple match statement", []string{"match statement", "optional operand"}},
+	} {
+		got := c.Referrers(tc.name)
+		if len(got) != len(tc.want) {
+			t.Errorf("<%s> is named by %v, want %v", tc.name, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("<%s> is named by %v, want %v", tc.name, got, tc.want)
+				break
+			}
+		}
+	}
+	// Angle brackets are stripped the way Production strips them, so a caller
+	// holding a name in either spelling gets the same answer.
+	if len(c.Referrers("<procedure name>")) != 1 {
+		t.Error("a name in angle brackets did not resolve")
+	}
+	// Every rule but a handful is named by something. If this climbs the walk
+	// has stopped following references.
+	roots := 0
+	for _, p := range c.Productions {
+		if len(c.Referrers(p.Name)) == 0 {
+			roots++
+		}
+	}
+	if roots < 1 || roots > 30 {
+		t.Errorf("%d of %d rules are named by nothing, which is not a believable share of start symbols",
+			roots, len(c.Productions))
+	}
+}
