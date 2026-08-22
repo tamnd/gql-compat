@@ -483,3 +483,60 @@ func TestEveryExcusingFeatureIsAlsoTestedAsAFeature(t *testing.T) {
 		}
 	}
 }
+
+// TestCitedProductionsAppearInTheirCase is the cheapest check there is against
+// a padded citation.
+//
+// A production citation is a claim that the case exercises the rule, and the
+// coverage number the report prints is the sum of those claims. Nothing stops
+// a case listing a rule it never spells, and a corpus that did that would
+// publish a bigger number than it earned, which is worse than an uncited
+// production because a gap is honest and a false number is not.
+//
+// The check a machine can make is narrow on purpose. It applies only to the
+// rules whose every alternative spells a keyword the grammar does not put in
+// brackets, and for those, one of the words has to appear in something the
+// case sends to the engine. <match statement> qualifies and MATCH has to be
+// there. <node pattern> does not, because it is punctuation and other rules.
+// <is or colon> does not, because a colon will do instead of IS, and <element
+// variable declaration> does not, because TEMP is optional. So this catches
+// the citation that named a rule the case never reaches and lets through the
+// one that named a plausible neighbour, which is what a reviewer is for.
+func TestCitedProductionsAppearInTheirCase(t *testing.T) {
+	suite, cat := load(t)
+	word := regexp.MustCompile(`[A-Za-z_][A-Za-z_0-9]*`)
+	for _, c := range suite.Cases {
+		// Everything the engine is asked, not just the query. A case whose
+		// setup does the writing and whose query does the reading exercises
+		// both halves and may cite the rules of both.
+		var sent strings.Builder
+		sent.WriteString(c.Query)
+		sent.WriteString("\n")
+		sent.WriteString(c.Parses)
+		sent.WriteString("\n")
+		for _, s := range c.Setup {
+			sent.WriteString(s)
+			sent.WriteString("\n")
+		}
+		spoken := map[string]bool{}
+		for _, w := range word.FindAllString(strings.ToUpper(sent.String()), -1) {
+			spoken[w] = true
+		}
+		for _, name := range c.Productions {
+			p, ok := cat.Production(name)
+			if !ok || !p.RequiresKeyword {
+				continue
+			}
+			said := false
+			for _, k := range p.Keywords {
+				if spoken[strings.ToUpper(k)] {
+					said = true
+					break
+				}
+			}
+			if !said {
+				t.Errorf("%s cites <%s> and spells none of its keywords %v", c.ID, name, p.Keywords)
+			}
+		}
+	}
+}

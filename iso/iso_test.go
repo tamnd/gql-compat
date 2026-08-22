@@ -158,3 +158,53 @@ func TestGrammarExtraction(t *testing.T) {
 		}
 	}
 }
+
+// TestAKeywordIsRequiredOnlyWhenEveryAlternativeSpellsIt guards the difference
+// between a rule that mentions a word and a rule that makes you say it.
+//
+// The distinction is the whole value of the field. <return statement> begins
+// RETURN and there is no other way in, so a case citing it and never spelling
+// RETURN cited the wrong rule. <is or colon> mentions IS and accepts a colon
+// instead; <element variable declaration> mentions TEMP and puts it in
+// brackets; <aggregate function> mentions COUNT in one alternative of four.
+// Read those three as required and the check built on this field would reject
+// correct citations, which is the failure that gets a check deleted.
+func TestAKeywordIsRequiredOnlyWhenEveryAlternativeSpellsIt(t *testing.T) {
+	c := MustLoad()
+	for _, tc := range []struct {
+		name string
+		want bool
+		why  string
+	}{
+		{"return statement", true, "RETURN is the only way in"},
+		{"insert statement", true, "INSERT is the only way in"},
+		{"session set schema clause", true, "SCHEMA is not optional"},
+		{"is or colon", false, "a colon will do instead of IS"},
+		{"element variable declaration", false, "TEMP is in brackets"},
+		{"aggregate function", false, "COUNT is one alternative of several"},
+		{"record constructor", false, "RECORD is in brackets"},
+		{"primitive result statement", false, "FINISH is one alternative of two"},
+		{"node pattern", false, "the rule spells no keyword at all"},
+	} {
+		p, ok := c.Production(tc.name)
+		if !ok {
+			t.Errorf("<%s> missing from the grammar", tc.name)
+			continue
+		}
+		if p.RequiresKeyword != tc.want {
+			t.Errorf("<%s> requires a keyword = %v, want %v: %s", tc.name, p.RequiresKeyword, tc.want, tc.why)
+		}
+	}
+	// A sanity bound on the whole grammar. If this drops to nothing the walk
+	// has stopped seeing <alt> boundaries, and if it climbs to most of the
+	// grammar it has stopped seeing <opt>.
+	n := 0
+	for _, p := range c.Productions {
+		if p.RequiresKeyword {
+			n++
+		}
+	}
+	if n < 50 || n > len(c.Productions)/3 {
+		t.Errorf("%d of %d productions require a keyword, which is not a believable share", n, len(c.Productions))
+	}
+}
