@@ -66,6 +66,55 @@ cases:
     # statement>. Nine rules apart, one statement apart, and the corpus cited
     # none of them until this case.
 
+  - id: optional/gd01/use-before-an-insert
+    name: A use graph clause may focus a statement that writes
+    features: [GD01, GQ01]
+    subclauses: ["13.1", "16.2"]
+    productions:
+      [focused linear data-modifying statement, focused linear data-modifying statement body]
+    fixture: blank
+    mutating: true
+    # The writing half of the focused and ambient split. Every other write case
+    # in this file is ambient, so the three rules a USE in front of a write
+    # derives were the ones nothing reached.
+    query: |
+      USE CURRENT_PROPERTY_GRAPH
+      INSERT (x:Person {name: 'Zoe'})
+      RETURN x.name AS name
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[Zoe]]
+
+  - id: optional/gd01/insert-in-braces
+    name: A statement that writes may be written inside braces on its own
+    features: [GD01]
+    subclauses: ["9.1", "13.1"]
+    productions:
+      [nested data-modifying procedure specification, data-modifying procedure specification]
+    fixture: blank
+    mutating: true
+    # Not a subquery and not a procedure call: a linear data-modifying
+    # statement is either a body or a braced specification, and this is the
+    # second of the two written at the top level of a program with nothing
+    # around it.
+    query: |
+      { INSERT (:Person {name: 'Zoe'}) }
+    expect:
+      kind: accept
+
+  - id: optional/gd01/use-before-a-braced-insert
+    name: A use graph clause may focus a braced statement that writes
+    features: [GD01, GQ01]
+    subclauses: ["13.1", "16.2"]
+    productions: [focused nested data-modifying procedure specification]
+    fixture: blank
+    mutating: true
+    query: |
+      USE CURRENT_PROPERTY_GRAPH { INSERT (:Person {name: 'Zoe'}) }
+    expect:
+      kind: accept
+
   - id: optional/gd01/insert-is-visible-to-a-later-match
     name: A node inserted by one statement is matched by the next
     features: [GD01]
@@ -283,9 +332,22 @@ cases:
     name: CREATE GRAPH adds a graph with an open graph type to the catalog
     features: [GC04, GG01]
     subclauses: ["12.4"]
-    productions: [create graph statement, catalog graph parent and name, open graph type]
+    productions:
+      [
+        linear catalog-modifying statement,
+        simple catalog-modifying statement,
+        primitive catalog-modifying statement,
+        create graph statement,
+        catalog graph parent and name,
+        open graph type,
+      ]
     tags: [write, catalog]
     mutating: true
+    # The three rules above the statement are on the derivation of every
+    # catalog case in this file and none of them named one, the same way the
+    # spine of a query went uncited until one case said so. They are cited
+    # here rather than everywhere, because a citation is a claim that the case
+    # exercises the rule and repeating the claim adds nothing to it.
     query: |
       CREATE GRAPH gqlcompat_create ANY
     expect:

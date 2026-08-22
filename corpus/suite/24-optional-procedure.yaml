@@ -29,7 +29,18 @@ cases:
     name: An inline procedure runs a nested query and yields its table
     features: [GP01]
     subclauses: ["15.1", "15.2", "9.2"]
-    productions: [call procedure statement, procedure call, inline procedure call, nested procedure specification]
+    productions:
+      [
+        call query statement,
+        call procedure statement,
+        procedure call,
+        inline procedure call,
+        nested procedure specification,
+      ]
+    # A call reaches <call procedure statement> down one of three rules,
+    # depending on what the called body does. This body only reads, so the rule
+    # above it is <call query statement>, and the other two are the cases
+    # further down that call a body which writes.
     query: |
       CALL { MATCH (p:Person) RETURN p.name AS name }
       RETURN name AS name
@@ -321,3 +332,42 @@ cases:
         - [Carol, Globex]
         - [Dave, null]
         - [Erin, null]
+
+  - id: optional/gp01/call-a-body-that-writes
+    name: A call whose body writes is a data-modifying statement and not a query
+    features: [GP01, GD01]
+    subclauses: ["13.6", "15.1"]
+    productions: [call data-modifying procedure statement]
+    tags: [write, procedure]
+    fixture: blank
+    mutating: true
+    # Which of the three rules a CALL derives is settled by the body and not by
+    # the call, so this statement and the inline procedure case at the top of
+    # the file are the same words over a different body and take different
+    # paths through Clause 13 and Clause 14. The MATCH after it is what makes
+    # the case evidence rather than an accept: the node the called body wrote
+    # is there to be found.
+    query: |
+      CALL { INSERT (:Note {t: 'x'}) }
+      MATCH (n:Note)
+      RETURN n.t AS t
+    expect:
+      kind: rows
+      columns: [t]
+      rows: [[x]]
+
+  - id: optional/gp01/call-a-body-that-changes-the-catalog
+    name: A call whose body changes the catalog is a catalog-modifying statement
+    features: [GP01, GC04, GP18]
+    subclauses: ["12.8", "15.1"]
+    productions:
+      [call catalog-modifying procedure statement, catalog-modifying procedure specification]
+    tags: [write, catalog, procedure]
+    mutating: true
+    # The third of the three, and the one an engine is most likely to refuse
+    # outright, which is a conformant answer and the reason GP18 is claimed
+    # beside GP01 here.
+    query: |
+      CALL { CREATE GRAPH gqlcompat_call_catalog ANY }
+    expect:
+      kind: accept

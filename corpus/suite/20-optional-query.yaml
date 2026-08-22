@@ -56,6 +56,77 @@ cases:
       columns: [n]
       rows: [[5]]
 
+  - id: optional/gq01/use-before-each-statement
+    name: A use graph clause may be written again in front of a later statement
+    features: [GQ01]
+    subclauses: ["16.2"]
+    productions:
+      [
+        focused linear query statement part,
+        focused linear query and primitive result statement part,
+      ]
+    tags: [composition, pattern]
+    # ISO builds a focused linear query statement out of parts, each one a use
+    # graph clause and the statements under it, and only the last part carries
+    # the result statement. A query with one USE in it derives the last part
+    # and never the others, which is why this case writes two: the first part
+    # is the rule that only appears when a second clause follows it.
+    #
+    # Both clauses name the same graph, because what the case measures is that
+    # the clause may be repeated and not what happens when the graph changes
+    # underneath a bound variable.
+    query: |
+      USE CURRENT_PROPERTY_GRAPH
+      MATCH (p:Person)
+      USE CURRENT_PROPERTY_GRAPH
+      MATCH (p)-[:KNOWS]->(q:Person)
+      RETURN p.name AS knower, q.name AS known
+    expect:
+      kind: rows
+      unordered: true
+      columns: [knower, known]
+      rows:
+        - [Alice, Bob]
+        - [Alice, Carol]
+        - [Bob, Carol]
+        - [Carol, Dave]
+        - [Dave, Erin]
+
+  - id: optional/gq01/use-before-a-result-statement
+    name: A use graph clause may stand in front of a result statement with nothing between them
+    features: [GQ01]
+    subclauses: ["16.2"]
+    productions: [focused primitive result statement]
+    fixture: unit
+    tags: [composition]
+    # The shortest focused query there is. Nothing in it reads the graph, so
+    # the clause is doing the one thing this rule exists for, which is to say
+    # what the statement is focused on before the statement says anything.
+    query: |
+      USE CURRENT_PROPERTY_GRAPH
+      RETURN 1 AS one
+    expect:
+      kind: rows
+      columns: [one]
+      rows: [[1]]
+
+  - id: optional/gq01/use-before-a-nested-query
+    name: A use graph clause may focus a whole nested query at once
+    features: [GQ01]
+    subclauses: ["16.2"]
+    productions: [focused nested query specification, nested query specification]
+    tags: [composition]
+    # The braces are the statement here rather than a subquery inside one: a
+    # focused nested query specification is a use graph clause and a braced
+    # query, and it is the fourth and last shape a focused linear query
+    # statement can take.
+    query: |
+      USE CURRENT_PROPERTY_GRAPH { MATCH (p:Person) RETURN COUNT(*) AS n }
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
   - id: optional/gq02/otherwise
     name: OTHERWISE evaluates its right operand only when the left yields no records
     features: [GQ02]
@@ -515,6 +586,29 @@ cases:
       kind: rows
       columns: [n]
       rows: [[3]]
+
+  - id: optional/gq20/next-yield
+    name: A yield clause after NEXT chooses which columns the next statement sees
+    features: [GQ20]
+    subclauses: ["9.2"]
+    productions:
+      [yield clause, yield item list, yield item, yield item name, yield item alias]
+    tags: [composition]
+    # NEXT hands the whole binding table on unless a yield clause narrows it.
+    # This is the only place in the language a yield clause can be written
+    # without naming a procedure the standard supplies no way to create, which
+    # is why the corpus reaches the rule here and not through a call.
+    query: |
+      MATCH (p:Person)
+      WHERE p.age > 30
+      RETURN p.name AS name, p.age AS age
+      NEXT YIELD name AS who
+      RETURN who
+    expect:
+      kind: rows
+      unordered: true
+      columns: [who]
+      rows: [[Alice], [Carol], [Erin]]
 
   - id: optional/gq21/optional-match-block
     name: An OPTIONAL block over several match statements yields nulls when the block finds nothing
