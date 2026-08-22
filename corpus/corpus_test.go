@@ -228,6 +228,67 @@ func TestEveryFeatureFamilyIsCovered(t *testing.T) {
 	t.Logf("%d of %d optional features claimed by at least one case", len(claimed), len(cat.Features))
 }
 
+// A case names things: the columns it declares it will get back, and the
+// labels, edge types and property names its fixture puts in the graph. Every
+// one of those positions is an <identifier> in ISO 21.3, and a reserved word
+// spelled plainly is not one. A case that picks a reserved word is asking
+// every conforming engine to refuse the statement, and the refusal is then
+// published against the engine rather than against the case.
+//
+// This is a regression test for exactly that: `start`, `finish`, `same`,
+// `size` and the label `Value` were all reserved words the corpus was using
+// as names, and they cost the first engine strict enough to say so eight
+// failures it had not earned.
+//
+// The rule is checked on the names the corpus declares rather than on the
+// statement text, because telling an identifier from a keyword inside a
+// statement needs the parser this harness deliberately does not have. A
+// declared column and a fixture label are unambiguous, and in practice a case
+// that avoids a reserved word in those two places has avoided it everywhere.
+func TestNoCaseNamesSomethingWithAReservedWord(t *testing.T) {
+	cat, err := iso.Load()
+	if err != nil {
+		t.Fatalf("loading the ISO catalogue: %v", err)
+	}
+	suite, fixtures, err := corpus.LoadEmbedded(iso.Codes{Catalog: cat})
+	if err != nil {
+		t.Fatalf("loading the embedded suite: %v", err)
+	}
+
+	for _, c := range suite.Cases {
+		for _, col := range c.Expect.Columns {
+			if cat.Reserved(col) {
+				t.Errorf("%s declares the column %q, which ISO 21.3 reserves; rename it", c.ID, col)
+			}
+		}
+	}
+	for _, name := range fixtures.Names() {
+		f, _ := fixtures.Get(name)
+		for _, n := range f.Nodes {
+			for _, l := range n.Labels {
+				if cat.Reserved(l) {
+					t.Errorf("fixture %s gives node %s the label %q, which ISO 21.3 reserves", name, n.Key, l)
+				}
+			}
+			for p := range n.Props {
+				if cat.Reserved(p) {
+					t.Errorf("fixture %s gives node %s the property %q, which ISO 21.3 reserves", name, n.Key, p)
+				}
+			}
+		}
+		for _, e := range f.Edges {
+			if cat.Reserved(e.Type) {
+				t.Errorf("fixture %s gives an edge the type %q, which ISO 21.3 reserves", name, e.Type)
+			}
+			for p := range e.Props {
+				if cat.Reserved(p) {
+					t.Errorf("fixture %s gives an edge the property %q, which ISO 21.3 reserves", name, p)
+				}
+			}
+		}
+	}
+}
+
 // TestACaseCannotReadAPropertyItsFixtureNeverGenerates is a regression test
 // for a corpus bug that cost an engine three failures it had not earned:
 // three performance cases queried n.p0 and n.p1 against a fixture declared

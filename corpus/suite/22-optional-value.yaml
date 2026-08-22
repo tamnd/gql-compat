@@ -291,12 +291,12 @@ cases:
     # inference, not a quotation, and an engine that disagrees will show up as
     # a GF01 skip rather than as a failure.
     query: |
-      MATCH (v:Value)
+      MATCH (v:Datum)
       WHERE v.n = 3
-      RETURN FLOOR(v.x) AS down, CEIL(v.x) AS up, ABS(-v.x) AS size
+      RETURN FLOOR(v.x) AS down, CEIL(v.x) AS up, ABS(-v.x) AS magnitude
     expect:
       kind: rows
-      columns: [down, up, size]
+      columns: [down, up, magnitude]
       rows: [[2, 3, 2.5]]
 
   - id: optional/gf01/power-square-root-modulus
@@ -371,7 +371,7 @@ cases:
     # The order of a collected list is not specified, so the case asserts its
     # length. Asserting the elements would be asserting an accident.
     query: |
-      MATCH (v:Value)
+      MATCH (v:Datum)
       RETURN CARDINALITY(COLLECT_LIST(v.n)) AS n
     expect:
       kind: rows
@@ -386,7 +386,7 @@ cases:
     fixture: numbers
     tags: [aggregate]
     query: |
-      MATCH (v:Value)
+      MATCH (v:Datum)
       RETURN PERCENTILE_DISC(v.n, 1) AS p
     expect:
       kind: rows
@@ -468,7 +468,7 @@ cases:
     tags: [temporal]
     query: |
       MATCH (e:Event)
-      WHERE e.on = DATE '2024-01-15'
+      WHERE e.happened = DATE '2024-01-15'
       RETURN e.name AS name
     expect:
       kind: rows
@@ -606,10 +606,10 @@ cases:
     query: |
       MATCH p = (a:Step)-[e:LINK]->(b:Step)
       WHERE a.step = 0
-      RETURN PATH [a, e, b] = p AS same
+      RETURN PATH [a, e, b] = p AS alike
     expect:
       kind: rows
-      columns: [same]
+      columns: [alike]
       rows: [[true]]
 
   - id: optional/ga09/comparing-two-paths
@@ -624,10 +624,10 @@ cases:
     query: |
       MATCH p = (a:Step)-[:LINK]->(b:Step), q = (c:Step)-[:LINK]->(d:Step)
       WHERE a.step = 0 AND c.step = 0
-      RETURN p = q AS same
+      RETURN p = q AS alike
     expect:
       kind: rows
-      columns: [same]
+      columns: [alike]
       rows: [[true]]
 
   - id: optional/gf04/path-length-function

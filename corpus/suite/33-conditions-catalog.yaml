@@ -148,13 +148,20 @@ cases:
     # An engine that will not hold two graphs open at once refuses earlier and
     # with 25G04, which is the condition for the thing it actually declined,
     # and both answers are counted.
+    #
+    # The first statement returns rather than trailing off after the match,
+    # because a <linear query statement> ends in a <primitive result statement>
+    # and a <linear data-modifying statement> is the only one where that part
+    # is optional (subclause 13.2). Without the RETURN the statement in front
+    # of the NEXT is not a statement, and the syntax error an engine raises for
+    # that is not the condition under test.
     setup:
       - "CREATE PROPERTY GRAPH gqlcompat_far_a ANY"
       - "CREATE PROPERTY GRAPH gqlcompat_far_b ANY"
       - "USE gqlcompat_far_a INSERT (:Person {name: 'Far'})"
       - "USE gqlcompat_far_b INSERT (:Person {name: 'Near'})"
     query: |
-      USE gqlcompat_far_a MATCH (far:Person {name: 'Far'})
+      USE gqlcompat_far_a MATCH (far:Person {name: 'Far'}) RETURN far
       NEXT USE gqlcompat_far_b MATCH (near:Person {name: 'Near'})
       INSERT (far)-[:KNOWS]->(near)
     expect:

@@ -197,7 +197,7 @@ cases:
     # because writing `2` as a comparand is mandatory and writing `2.0` is
     # feature GL04. What is under test is the comparison, not the notation.
     query: |
-      MATCH (v:Value)
+      MATCH (v:Datum)
       WHERE v.x > 2
       RETURN v.n AS n
     expect:
@@ -305,10 +305,10 @@ cases:
     productions: [case abbreviation]
     tags: [null]
     query: |
-      RETURN NULLIF(1, 1) AS same, NULLIF(1, 2) AS different
+      RETURN NULLIF(1, 1) AS alike, NULLIF(1, 2) AS unlike
     expect:
       kind: rows
-      columns: [same, different]
+      columns: [alike, unlike]
       rows: [[null, 1]]
 
   - id: mandatory/value/is-null-predicate

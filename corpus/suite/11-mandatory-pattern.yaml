@@ -108,11 +108,11 @@ cases:
     productions: [path concatenation, path term, path factor]
     query: |
       MATCH (p:Person)-[:KNOWS]->(q:Person)-[:KNOWS]->(r:Person)
-      RETURN p.name AS start, r.name AS finish
+      RETURN p.name AS origin, r.name AS target
     expect:
       kind: rows
       unordered: true
-      columns: [start, finish]
+      columns: [origin, target]
       rows:
         - [Alice, Carol]
         - [Bob, Dave]
@@ -125,11 +125,11 @@ cases:
     productions: [path pattern list, path pattern, graph pattern]
     query: |
       MATCH (p:Person)-[:KNOWS]->(q:Person), (q)-[:KNOWS]->(r:Person)
-      RETURN p.name AS start, r.name AS finish
+      RETURN p.name AS origin, r.name AS target
     expect:
       kind: rows
       unordered: true
-      columns: [start, finish]
+      columns: [origin, target]
       rows:
         - [Alice, Carol]
         - [Bob, Dave]

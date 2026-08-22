@@ -70,7 +70,7 @@ cases:
     # accepts it. A case whose text is merely unusual would be testing the
     # engine's parser recovery instead of the condition.
     query: |
-      MATCH (u:Unit) RETURN
+      MATCH (u:Solo) RETURN
     expect:
       kind: error
       gqlstatus: "42001"
@@ -82,7 +82,7 @@ cases:
     productions: [node pattern]
     fixture: unit
     query: |
-      MATCH (u:Unit
+      MATCH (u:Solo
       RETURN 1 AS v
     expect:
       kind: error
@@ -95,7 +95,7 @@ cases:
     productions: [binding variable reference, non-parenthesized value expression primary]
     fixture: unit
     query: |
-      MATCH (u:Unit)
+      MATCH (u:Solo)
       RETURN nothing AS v
     expect:
       kind: error

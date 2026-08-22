@@ -59,7 +59,7 @@ fixtures:
       the engine's pattern matching.
     nodes:
       - key: u
-        labels: [Unit]
+        labels: [Solo]
         props: {}
 
   - name: chain
@@ -130,10 +130,10 @@ fixtures:
       comparison and aggregate cases read. Values are chosen so that every
       expected total is exact in binary floating point as well as in decimal.
     nodes:
-      - {key: v1, labels: [Value], props: {n: 1, x: 0.5, flag: true, tag: alpha}}
-      - {key: v2, labels: [Value], props: {n: 2, x: 1.5, flag: false, tag: beta}}
-      - {key: v3, labels: [Value], props: {n: 3, x: 2.5, flag: true, tag: gamma}}
-      - {key: v4, labels: [Value], props: {n: 4, x: 3.5, flag: false, tag: delta}}
+      - {key: v1, labels: [Datum], props: {n: 1, x: 0.5, flag: true, tag: alpha}}
+      - {key: v2, labels: [Datum], props: {n: 2, x: 1.5, flag: false, tag: beta}}
+      - {key: v3, labels: [Datum], props: {n: 3, x: 2.5, flag: true, tag: gamma}}
+      - {key: v4, labels: [Datum], props: {n: 4, x: 3.5, flag: false, tag: delta}}
 
   - name: nullable
     description: >-
@@ -170,7 +170,7 @@ fixtures:
         labels: [Event]
         props:
           name: launch
-          on: {date: "2024-01-15"}
+          happened: {date: "2024-01-15"}
           takes: {duration: "P2D"}
 
   - name: multilabel
