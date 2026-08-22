@@ -962,6 +962,27 @@ cases:
       columns: [n]
       rows: [[5]]
 
+  - id: optional/g112/is-destination-of-predicate
+    name: IS DESTINATION OF relates a node to an edge it ends
+    features: [G112]
+    subclauses: ["19.10"]
+    productions:
+      [source/destination predicate, destination predicate part 2, node reference, edge reference]
+    fixture: social
+    # The other half of the feature, and the half that separates an engine
+    # answering the predicate from one answering whether the two elements touch
+    # at all. Every KNOWS edge in the fixture points one way, so the node that
+    # is its source is not its destination, and the negated spelling of the
+    # same query counts the same five.
+    query: |
+      MATCH (p:Person)-[k:KNOWS]->(q:Person)
+      WHERE q IS DESTINATION OF k AND p IS NOT DESTINATION OF k
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
   - id: optional/g113/all-different-predicate
     name: ALL_DIFFERENT is true when every named element is a distinct element
     features: [G113]

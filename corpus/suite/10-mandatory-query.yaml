@@ -309,6 +309,10 @@ cases:
       - path pattern list
       - graph pattern where clause
       - primitive result statement
+      - aggregating value expression
+      - non-parenthesized value expression primary special case
+      - property source
+      - node reference value expression
     query: |
       MATCH (p:Person)
       WHERE p.city = 'Lisbon'
@@ -319,12 +323,18 @@ cases:
       columns: [name]
       rows: [[Dave]]
     # Every other case in this file cites the two or three rules it is about.
-    # This one cites twenty two because that is what it is for: the rules
+    # This one cites twenty six because that is what it is for: the rules
     # between <GQL-program> and the pattern are the ones every case in the
     # corpus derives and none of them names, and a denominator of 814 that
     # never counts the spine of the grammar is measuring the wrong thing.
     # Every rule listed is on the single derivation of the query above, which
     # is checkable against Clause 6 and Clause 14 by reading down.
+    #
+    # The last four are the spine on the other side of RETURN. A return item
+    # is an <aggregating value expression> whether or not it aggregates, and
+    # p.name is a <property reference> whose source is the node p, so one
+    # projected property derives the four rules that every projected property
+    # in the corpus derives and that no case named.
 
   # The four cases below are the select statement, ISO 14.12. It is the second
   # way GQL spells a query and it is not an optional feature: no code in
