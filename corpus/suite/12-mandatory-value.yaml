@@ -187,7 +187,7 @@ cases:
   - id: mandatory/value/char-length
     name: CHAR_LENGTH counts the characters of a string
     subclauses: ["20.22"]
-    productions: [char length expression]
+    productions: [numeric value function, length expression, char length expression]
     tags: [string]
     query: |
       RETURN CHAR_LENGTH('abcd') AS n
@@ -335,10 +335,91 @@ cases:
       columns: [v]
       rows: [[false]]
 
+  - id: mandatory/value/parenthesized-boolean-value-expression
+    name: Parentheses around a boolean expression make it an operand again
+    subclauses: ["20.20"]
+    productions:
+      [
+        boolean test,
+        boolean primary,
+        boolean predicand,
+        parenthesized boolean value expression,
+        left paren,
+        right paren,
+      ]
+    # The grammar climbs from <boolean value expression> down to <boolean test>
+    # and <boolean primary>, and the only way back up is this rule. Without it
+    # OR could never appear inside AND, because AND takes a term and OR makes
+    # an expression. The case writes exactly that shape, so an engine whose
+    # precedence is wrong or whose parentheses are cosmetic answers something
+    # other than true.
+    query: |
+      RETURN (TRUE OR FALSE) AND TRUE AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: mandatory/value/boolean-test-is-true
+    name: IS TRUE asks a three-valued expression for a two-valued answer
+    subclauses: ["20.20", "4.4.5"]
+    productions: [boolean test, boolean primary, truth value]
+    # The optional half of <boolean test>, which is the one place GQL turns
+    # unknown into false. Every other boolean operator propagates unknown, so
+    # without this a query has no way to say "true, and not merely not false".
+    #
+    # zu has none of it. The parser stops at "expected NULL, found 'TRUE'",
+    # which says its IS takes the null predicate and nothing else.
+    query: |
+      RETURN (1 = 1) IS TRUE AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: mandatory/value/boolean-test-is-not-false
+    name: NOT inverts the truth value a boolean test compares against
+    subclauses: ["20.20", "4.4.5"]
+    productions: [boolean test, truth value]
+    # IS NOT FALSE is true of both true and unknown, which is a different
+    # question from IS TRUE and is why the NOT is in the rule rather than
+    # written outside it. The operand here is true, so the two agree; the case
+    # below is where they part.
+    query: |
+      RETURN (1 = 1) IS NOT FALSE AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: mandatory/value/boolean-test-is-unknown
+    name: UNKNOWN is a truth value a boolean test may compare against
+    subclauses: ["20.20", "4.4.5"]
+    productions: [boolean test, truth value]
+    tags: [null]
+    # The third truth value, and the only way to ask an engine directly whether
+    # a comparison came out unknown rather than false. A comparison with null
+    # is the standard way to reach one.
+    query: |
+      RETURN (NULL = 1) IS UNKNOWN AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
   - id: mandatory/value/case-searched
     name: A searched case expression returns the result of its first true when clause
     subclauses: ["20.7"]
-    productions: [case expression, searched case, case specification]
+    productions:
+      [
+        case expression,
+        case specification,
+        searched case,
+        searched when clause,
+        else clause,
+        result,
+        result expression,
+      ]
     query: |
       RETURN CASE WHEN 1 > 2 THEN 'no' WHEN 1 < 2 THEN 'yes' ELSE 'neither' END AS v
     expect:
@@ -349,13 +430,70 @@ cases:
   - id: mandatory/value/case-simple
     name: A simple case expression compares its operand against each when clause
     subclauses: ["20.7"]
-    productions: [simple case, case operand]
+    productions:
+      [simple case, case operand, simple when clause, when operand list, when operand, else clause, result]
     query: |
       RETURN CASE 2 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'other' END AS v
     expect:
       kind: rows
       columns: [v]
       rows: [[two]]
+
+  - id: mandatory/value/case-when-operand-list
+    name: One when clause may hold several operands separated by commas
+    subclauses: ["20.7"]
+    productions: [simple when clause, when operand list, when operand, comma]
+    # The when operand list is what makes the simple case worth having over a
+    # chain of comparisons: a clause may name several operands and any of them
+    # matching selects the result. Writing one operand exercises the rule and
+    # does not show whether an engine read the list or only the first item, so
+    # this case writes two and matches on the first, which fails an engine that
+    # takes the comma and ignores what follows it.
+    #
+    # zu declines it at the comma with "expected THEN, found ','", so it has
+    # the simple case and not the list.
+    query: |
+      RETURN CASE 1 WHEN 1, 2 THEN 'yes' ELSE 'no' END AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[yes]]
+
+  - id: mandatory/value/case-when-operand-is-a-comparison
+    name: A when operand may be the right half of a predicate rather than a value
+    subclauses: ["20.7", "19.4"]
+    productions: [when operand, comparison predicate part 2]
+    # The second thing a when operand may be. ISO lets the operand start with
+    # the operator, so the case operand is compared with the rest of the
+    # predicate rather than for equality, and the eight alternatives of <when
+    # operand> are the eight predicates that have a part 2. Without this a
+    # simple case can only ask whether its operand equals something.
+    #
+    # zu declines it with "expected an expression, found '>'", so its when
+    # operand is a value and nothing else.
+    query: |
+      RETURN CASE 3 WHEN > 1 THEN 'yes' ELSE 'no' END AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[yes]]
+
+  - id: mandatory/value/case-result-is-null
+    name: The result of a when clause may be the null literal
+    subclauses: ["20.7"]
+    productions: [result, null literal]
+    tags: [null]
+    # <result> is a value expression or the null literal, and the two are
+    # separate alternatives because a bare NULL is not a value expression
+    # anywhere else in this position. The else branch returns a string, so an
+    # engine that decided the whole expression was of the null type disagrees
+    # with the case rather than passing it by accident.
+    query: |
+      RETURN CASE 1 WHEN 1 THEN NULL ELSE 'other' END AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[null]]
 
   - id: mandatory/value/case-else-omitted
     name: A case expression with no matching when clause and no else is null
