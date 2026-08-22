@@ -1307,10 +1307,17 @@ func judge(c *corpus.Case, res *adapter.Result, err error, caps adapter.Capabili
 
 	case corpus.ExpectError:
 		if err == nil {
+			if c.Unless != "" {
+				r.Outcome, r.Skip = Skip, SkipFeaturePresent
+				r.Reason = fmt.Sprintf(
+					"the engine accepted it, which is what ISO requires of an engine with %s and it names this condition only for engines without it, so the acceptance is evidence about the feature and the code is unreachable here rather than untested",
+					c.Unless)
+				return
+			}
 			if c.Limit != "" {
 				r.Outcome, r.Skip = Skip, SkipWithinLimit
 				r.Reason = fmt.Sprintf(
-					"the engine accepted it, so the condition was not reachable here and its limit is at least what this case asked for; ISO leaves that to the implementation (%s)",
+					"the engine accepted it, so the condition was not reachable here and its limit is at least what this case asked for; ISO leaves %s to the implementation",
 					c.Limit)
 				return
 			}

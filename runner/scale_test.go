@@ -154,3 +154,84 @@ func TestTheDeclaredMaximumIsReadPerKind(t *testing.T) {
 		t.Fatalf("outcome %s skip %q, want a within-limit skip: the edge limit says nothing about nodes", r.Outcome, r.Skip)
 	}
 }
+
+// A condition ISO names only for engines lacking a feature is a different
+// thing from a condition behind a threshold, and reading one as the other
+// tells a maintainer to go and write a case that cannot exist.
+const unlessCorpus = `
+cases:
+  - id: condition/25g04/two-graphs
+    name: Reading a second graph raises accessing multiple graphs not supported
+    kind: condition
+    conditions: ["25G04"]
+    subclauses: ["8.1"]
+    unless: GT03
+    query: |
+      USE other MATCH (n) RETURN COUNT(*) AS n
+    expect:
+      kind: error
+      gqlstatus: "25G04"
+`
+
+func TestAConditionTheEngineHasTheFeatureForIsUnreachableNotUntested(t *testing.T) {
+	data := make(map[fixture.Capability]bool, len(fixture.AllCapabilities))
+	for _, c := range fixture.AllCapabilities {
+		data[c] = true
+	}
+	d := fake.New(fake.Config{Capabilities: adapter.Capabilities{Data: data, GQLStatus: true}})
+	std, err := gqlcompat.LoadFS(fstest.MapFS{"unless.yaml": &fstest.MapFile{Data: []byte(unlessCorpus)}})
+	if err != nil {
+		t.Fatalf("loading: %v", err)
+	}
+	rep, err := std.Run(t.Context(), d, runner.Config{Repeats: 1, WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	r := &rep.Cases[0]
+	if r.Outcome != runner.Skip || r.Skip != runner.SkipFeaturePresent {
+		t.Fatalf("outcome %s skip %q, want a feature-present skip", r.Outcome, r.Skip)
+	}
+	if !strings.Contains(r.Reason, "GT03") {
+		t.Errorf("the reason should name the feature that makes the code unreachable, got %q", r.Reason)
+	}
+	// The coverage row is what a reader looks at, and a code nothing can raise
+	// on this engine has to be told apart from one the run forgot to ask about.
+	st := rep.Coverage.Conditions["25G04"]
+	if st.Skip != 1 || st.Unreachable != 1 {
+		t.Errorf("coverage says skip %d unreachable %d, want 1 and 1", st.Skip, st.Unreachable)
+	}
+}
+
+// The other half of the same claim: an engine that does raise the code is
+// judged on it exactly as before, so unless is an excuse for acceptance and
+// never a licence to skip.
+func TestAConditionTheEngineDoesRaiseIsStillJudged(t *testing.T) {
+	data := make(map[fixture.Capability]bool, len(fixture.AllCapabilities))
+	for _, c := range fixture.AllCapabilities {
+		data[c] = true
+	}
+	d := fake.New(fake.Config{
+		Capabilities: adapter.Capabilities{Data: data, GQLStatus: true},
+		Respond: func(stmt string) (fake.Answer, bool) {
+			if !strings.Contains(stmt, "USE") {
+				return fake.Answer{}, false
+			}
+			return fake.Answer{Failure: &adapter.Failure{
+				GQLStatus: "25G04", Message: "one graph at a time"}}, true
+		},
+	})
+	std, err := gqlcompat.LoadFS(fstest.MapFS{"unless.yaml": &fstest.MapFile{Data: []byte(unlessCorpus)}})
+	if err != nil {
+		t.Fatalf("loading: %v", err)
+	}
+	rep, err := std.Run(t.Context(), d, runner.Config{Repeats: 1, WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if r := &rep.Cases[0]; r.Outcome != runner.Pass {
+		t.Fatalf("outcome %s (%s), want pass", r.Outcome, r.Reason)
+	}
+	if st := rep.Coverage.Conditions["25G04"]; st.Unreachable != 0 {
+		t.Errorf("a code the engine raised is not unreachable, got %d", st.Unreachable)
+	}
+}

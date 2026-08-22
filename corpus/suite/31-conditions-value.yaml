@@ -234,7 +234,7 @@ cases:
     conditions: ["22G04"]
     subclauses: ["19.3"]
     productions: [comparison predicate, comparison predicate part 2]
-    limit: GA04
+    unless: GA04
     # Universal comparison is an optional feature, and an engine that has it
     # can order a number against a string and must not raise anything. So an
     # engine that accepts this is not failed: what the acceptance establishes
@@ -458,7 +458,7 @@ cases:
     conditions: ["22G13"]
     subclauses: ["16.11", "20.11"]
     productions: [graph pattern quantifier, property reference]
-    limit: GQ17
+    unless: GQ17
     fixture: chain
     # `e` is bound by a quantified pattern, so it holds a group of edges rather
     # than an edge, and `e.step` asks a group for one property. An engine with

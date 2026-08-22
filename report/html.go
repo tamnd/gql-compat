@@ -439,6 +439,10 @@ func verdictClass(s runner.Status) string {
 	case s.Supported():
 		return "good"
 	case s.Pass+s.Fail == 0:
+		// Unreachable and untested share the neutral colour on purpose. The
+		// difference between them is a difference in what to do next, not in
+		// how well the engine did, and colouring one of them better than the
+		// other would put a thumb on that scale.
 		return "neutral"
 	case s.Fail > 0:
 		return "bad"

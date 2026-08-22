@@ -44,7 +44,7 @@ cases:
     subclauses: ["8.1", "12.4", "13.2"]
     productions: [create graph statement, insert statement]
     requires: [GT01, GC04, GD01]
-    limit: GP18
+    unless: GP18
     tags: [error, write, transaction, catalog]
     mutating: true
     # The transaction has already created a graph when the insert arrives, so
@@ -65,7 +65,7 @@ cases:
     subclauses: ["8.1", "16.2"]
     productions: [use graph clause, graph expression]
     requires: [GT01, GC04, GQ01]
-    limit: GT03
+    unless: GT03
     tags: [error, write, transaction, catalog]
     mutating: true
     # Both statements are reads and neither is unusual on its own. What the

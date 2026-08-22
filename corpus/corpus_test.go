@@ -443,3 +443,43 @@ func TestScaledCasesAgreeOnHowAnItemIsKeyed(t *testing.T) {
 		}
 	}
 }
+
+// limit and unless are excuses for an engine that accepted a statement, and
+// the two are excuses of different kinds. A limit says the number was the
+// engine's to choose, and an unless says ISO only ever asked engines without
+// the feature. Keeping them apart is the whole point, so a case carrying both
+// or carrying the wrong sort of code in either is refused at load.
+func TestALimitAndAnUnlessNameDifferentKindsOfThing(t *testing.T) {
+	suite, cat := load(t)
+	known := iso.Codes{Catalog: cat}
+	for _, c := range suite.Cases {
+		if c.Limit != "" && c.Unless != "" {
+			t.Errorf("%s names both a limit and an excusing feature", c.ID)
+		}
+		if c.Limit != "" && !known.Defined(c.Limit) {
+			t.Errorf("%s waives on %q, which ISO 24.5.2 does not oblige anyone to write down", c.ID, c.Limit)
+		}
+		if c.Unless != "" && !known.Feature(c.Unless) {
+			t.Errorf("%s is excused by %q, which is not a coded feature", c.ID, c.Unless)
+		}
+	}
+}
+
+// A condition excused by a feature is one ISO raises only on engines lacking
+// it, so the corpus must also be testing that the feature exists. Otherwise a
+// run can skip the condition for having the feature while nothing in the same
+// run establishes the engine has it.
+func TestEveryExcusingFeatureIsAlsoTestedAsAFeature(t *testing.T) {
+	suite, _ := load(t)
+	tested := map[string]bool{}
+	for _, c := range suite.Cases {
+		for _, f := range c.Features {
+			tested[f] = true
+		}
+	}
+	for _, c := range suite.Cases {
+		if c.Unless != "" && !tested[c.Unless] {
+			t.Errorf("%s is excused by %s and no case in the corpus claims that feature, so a skip here rests on nothing", c.ID, c.Unless)
+		}
+	}
+}
