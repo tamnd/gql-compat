@@ -32,7 +32,7 @@ cases:
   - id: mandatory/query/match-second-label
     name: A label in a node pattern selects only the nodes that carry it
     subclauses: ["14.4", "16.8"]
-    productions: [label expression, element pattern filler]
+    productions: [label expression, element pattern filler, is label expression]
     tags: [pattern]
     query: |
       MATCH (c:Company)
@@ -283,3 +283,45 @@ cases:
     # Bob and Dave share an age, so the case sorts on the name as well. An
     # ordered expectation with a tie in it would be testing which of two
     # correct answers an engine happens to give.
+
+  - id: mandatory/query/the-shape-of-a-program
+    name: The smallest useful GQL program is a query statement and the standard names every rule between the two
+    subclauses: ["6", "9", "9.1", "14", "14.1", "16.3"]
+    productions:
+      - GQL-program
+      - program activity
+      - transaction activity
+      - procedure specification
+      - query specification
+      - procedure body
+      - statement block
+      - statement
+      - composite query statement
+      - composite query expression
+      - composite query primary
+      - linear query statement
+      - ambient linear query statement
+      - simple linear query statement
+      - simple query statement
+      - match statement
+      - simple match statement
+      - graph pattern binding table
+      - path pattern list
+      - graph pattern where clause
+      - primitive result statement
+    query: |
+      MATCH (p:Person)
+      WHERE p.city = 'Lisbon'
+      RETURN p.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Dave]]
+    # Every other case in this file cites the two or three rules it is about.
+    # This one cites twenty two because that is what it is for: the rules
+    # between <GQL-program> and the pattern are the ones every case in the
+    # corpus derives and none of them names, and a denominator of 814 that
+    # never counts the spine of the grammar is measuring the wrong thing.
+    # Every rule listed is on the single derivation of the query above, which
+    # is checkable against Clause 6 and Clause 14 by reading down.
