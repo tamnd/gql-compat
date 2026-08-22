@@ -33,7 +33,7 @@ against the standard's own denominators.
 	var (
 		corpusIn = fs.String("corpus", "", "directory of case files; empty uses the embedded corpus")
 		asJSON   = fs.Bool("json", false, "emit JSON instead of a table")
-		missing  = fs.Bool("missing", false, "list the features, conditions and subclauses no case claims")
+		missing  = fs.Bool("missing", false, "list the features, conditions, subclauses and productions no case claims")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -147,7 +147,7 @@ against the standard's own denominators.
 			f, _ := std.Catalog.Feature(code)
 			fmt.Printf("  %-6s %s\n", code, f.Description)
 		}
-		// The other two denominators are worth the same treatment. A reader
+		// The other three denominators are worth the same treatment. A reader
 		// who wants to close the gap needs the names of what is open, and
 		// counting down from 68 or 317 by hand is how a corpus ends up with
 		// two cases for one code and none for the next.
@@ -166,6 +166,24 @@ against the standard's own denominators.
 			if !haveSubclause[s.Number] {
 				fmt.Printf("  %-8s %s\n", s.Number, s.Title)
 			}
+		}
+		// The grammar is the largest denominator and was the one this list
+		// did not print, which made it the one nobody could work through.
+		// A rule the grammar declines to expand is marked, because it is
+		// uncited for a reason no case can fix: the standard writes "!! See
+		// the Syntax Rules." where the alternatives would go, and a case
+		// spelling one would be spelling this project's invention.
+		haveProduction := set(std.Suite.CoveredProductions())
+		fmt.Println("\ngrammar productions no case cites:")
+		for _, p := range std.Catalog.Productions {
+			if haveProduction[p.Name] {
+				continue
+			}
+			note := ""
+			if p.SeeTheRules {
+				note = "   (the grammar declines to expand this one)"
+			}
+			fmt.Printf("  <%s>%s\n", p.Name, note)
 		}
 	}
 	return nil
