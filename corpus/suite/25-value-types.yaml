@@ -612,6 +612,137 @@ cases:
       columns: [v]
       rows: [[false]]
 
+  - id: optional/ga06/node-reference-value-type
+    name: ANY NODE is the open node reference value type
+    features: [GA06]
+    subclauses: ["4.16.7", "18.9", "19.6"]
+    fixture: social
+    productions:
+      [
+        reference value type,
+        node reference value type,
+        open node reference value type,
+        value type predicate,
+      ]
+    # A node reference value type is not an optional feature the way the graph
+    # and binding table reference types are: features.xml gives it no code,
+    # because a language whose values include nodes needs a type for them. The
+    # only optional thing in the query is the predicate that asks.
+    #
+    # ANY NODE and a bare VERTEX are both this rule, one with the quantifier
+    # written and one without, and NODE and VERTEX are the two spellings of the
+    # synonym. The pair of answers separates an engine that knows a node from
+    # an engine that answers true to any type it managed to parse.
+    query: |
+      MATCH (p:Person)
+      WHERE p.name = 'Alice'
+      RETURN (p IS TYPED ANY NODE) AS a, (1 IS TYPED VERTEX) AS b
+    expect:
+      kind: rows
+      columns: [a, b]
+      rows: [[true, false]]
+
+  - id: optional/ga06/edge-reference-value-type
+    name: ANY EDGE is the open edge reference value type
+    features: [GA06]
+    subclauses: ["4.16.7", "18.9", "19.6"]
+    productions:
+      [
+        edge reference value type,
+        open edge reference value type,
+        value type predicate,
+      ]
+    fixture: social
+    tags: [read, value-type, pattern]
+    query: |
+      MATCH (:Person)-[r:KNOWS]->(:Person)
+      WHERE r.since = 2015
+      RETURN (r IS TYPED ANY EDGE) AS a, (1 IS TYPED RELATIONSHIP) AS b
+    expect:
+      kind: rows
+      columns: [a, b]
+      rows: [[true, false]]
+
+  - id: optional/ga06/closed-edge-reference-value-type
+    name: An edge type pattern is a closed edge reference value type
+    features: [GA06]
+    subclauses: ["4.16.7", "18.3", "18.9", "19.6"]
+    productions:
+      [
+        closed edge reference value type,
+        edge type specification,
+        edge type pattern,
+        edge type pattern directed,
+        edge type pattern pointing right,
+      ]
+    # The closed form of the type is an edge type, and an edge type is never
+    # written without its endpoints, so the type reads like the pattern that
+    # would match an edge of it. The case asks about an integer rather than
+    # about an edge on purpose: whether a particular edge in an untyped graph
+    # satisfies a structural edge type is a reading of Clause 4 this corpus is
+    # not in a position to settle, and whether an integer does is not.
+    query: |
+      RETURN (1 IS TYPED (:Person)-[:KNOWS]->(:Person)) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  - id: optional/gv60/closed-graph-reference-value-type
+    name: A graph type written out is a closed graph reference value type
+    features: [GV60]
+    requires: [GA06]
+    subclauses: ["4.16.7", "18.1", "18.9", "19.6"]
+    productions: [closed graph reference value type, nested graph type specification]
+    # The open form, ANY GRAPH, is the case above. The closed form names the
+    # graph type the graph has to have, written inline between braces, which is
+    # the same nested graph type specification a CREATE PROPERTY GRAPH TYPE
+    # statement takes. An integer is not a graph under either form.
+    query: |
+      RETURN (1 IS TYPED PROPERTY GRAPH { (:Person) }) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[false]]
+
+  - id: optional/ga06/boolean-type
+    name: BOOL and BOOLEAN are the two spellings of the boolean type
+    features: [GA06]
+    subclauses: ["4.16.2", "18.9", "19.6"]
+    productions: [boolean type, predefined type, value type predicate]
+    tags: [read, value-type]
+    query: |
+      RETURN (TRUE IS TYPED BOOL) AS a, (1 IS TYPED BOOLEAN) AS b
+    expect:
+      kind: rows
+      columns: [a, b]
+      rows: [[true, false]]
+
+  - id: optional/gv50/list-value-type
+    name: A list value type is written either with angle brackets or with the element type in front
+    features: [GV50]
+    requires: [GA06]
+    subclauses: ["4.15.3", "18.9", "19.6"]
+    productions:
+      [
+        list value type,
+        list value type name,
+        list value type name synonym,
+        value type predicate,
+      ]
+    tags: [read, value-type, list]
+    # ISO gives the type two shapes, LIST<INT> and INT LIST, and they mean the
+    # same thing. LIST and ARRAY are the two spellings of the name, so the
+    # three columns are the two shapes and the two names between them.
+    query: |
+      RETURN ([1, 2] IS TYPED LIST<INT>) AS a,
+             ([1, 2] IS TYPED INT ARRAY) AS b,
+             (1 IS TYPED LIST<INT>) AS c
+    expect:
+      kind: rows
+      columns: [a, b, c]
+      rows: [[true, true, false]]
+
   # ------------------------------------------------------------- union types
 
   - id: optional/gv66/open-dynamic-union
@@ -634,7 +765,7 @@ cases:
     features: [GV67]
     requires: [GA06]
     subclauses: ["4.14.3", "18.9", "19.6"]
-    productions: [closed dynamic union type, component type list, value type predicate]
+    productions: [closed dynamic union type, component type list, component type, value type predicate]
     # Whether an integer belongs to INT|STRING depends on whether the predicate
     # reads the value or the value's declared type, and ISO's answer to that is
     # not something this corpus can settle from the outside. So the case asserts

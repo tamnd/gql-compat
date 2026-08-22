@@ -445,6 +445,31 @@ cases:
       }
     expect:
       kind: accept
+  - id: optional/gg22/edge-type-with-property-types
+    name: An edge type may declare properties of its own
+    features: [GG22, GG23]
+    subclauses: ["12.6", "18.3", "18.5", "18.6"]
+    productions:
+      [
+        edge type property types,
+        edge type implied content,
+        edge type label set,
+        edge type filler,
+        property types specification,
+      ]
+    mutating: true
+    # A node type carries properties in every case above it and an edge type
+    # carries them under a rule of its own, which is the one thing about the
+    # two that is not symmetric in the grammar. The key label set is left to be
+    # inferred from the label, so the edge type's content is a label set and a
+    # property type list and nothing else.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_edge_props {
+        (:Person {name :: STRING}),
+        (:Person)-[:KNOWS {since :: INT}]->(:Person)
+      }
+    expect:
+      kind: accept
   - id: optional/gg26/one-property-name-two-types
     name: Relaxed property value type consistency lets one property name take two types
     features: [GG26]
