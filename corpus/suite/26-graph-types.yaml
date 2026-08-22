@@ -29,8 +29,23 @@ cases:
   - id: optional/gg20/named-element-types
     name: An element type in a graph type may carry its own name
     features: [GG20]
-    subclauses: ["12.6", "18.1", "18.2", "4.13.2.2", "4.13.2.3"]
-    productions: [nested graph type specification, node type pattern, node type name]
+    subclauses: ["12.6", "18.1", "18.2", "18.5", "18.6", "4.13.2.2", "4.13.2.3"]
+    productions:
+      [
+        nested graph type specification,
+        graph type specification body,
+        element type list,
+        element type specification,
+        node type specification,
+        node type pattern,
+        node synonym,
+        node type name,
+        graph type name,
+        node type filler,
+        node type property types,
+        property type list,
+        property name,
+      ]
     mutating: true
     # Without GG20 the node type is anonymous and can only be referred to by
     # its labels. With it the type has a name of its own, which is what lets a
@@ -41,16 +56,191 @@ cases:
       }
     expect:
       kind: accept
-
+  - id: optional/gg20/named-edge-type-written-right-to-left
+    name: A named edge type may be written with the arrow pointing left
+    features: [GG20]
+    subclauses: ["12.6", "18.3", "4.13.2.4"]
+    productions:
+      [
+        edge type pattern,
+        edge type pattern directed,
+        edge type pattern pointing left,
+        arc type pointing left,
+        edge synonym,
+        edge type name,
+        local node type alias,
+        source node type alias,
+        destination node type alias,
+      ]
+    mutating: true
+    # ISO writes the left pointing edge type with the destination first,
+    # so the endpoints keep their roles and only the page order changes.
+    # The two node types are named here so the edge can point at them by
+    # alias instead of repeating their patterns.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg20_left {
+        (a :Person),
+        (b :Company),
+        EDGE TYPE WorksAt (b)<-[:WORKS]-(a)
+      }
+    expect:
+      kind: accept
+  - id: optional/gg20/named-edge-type-written-undirected
+    name: A named edge type may be written with no direction at all
+    features: [GG20]
+    subclauses: ["12.6", "18.3", "4.13.2.4"]
+    productions:
+      [
+        edge type pattern undirected,
+        arc type undirected,
+        edge synonym,
+        edge type name,
+        source node type alias,
+        destination node type alias,
+      ]
+    mutating: true
+    # RELATIONSHIP is the other spelling of the edge synonym, and the
+    # tilde brackets are the undirected arc. ISO still calls one endpoint
+    # the source and the other the destination even when the type says
+    # nothing about which way an edge of it runs.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg20_undirected {
+        (a :Person),
+        (b :Company),
+        RELATIONSHIP TYPE NearTo (a)~[:NEAR]~(b)
+      }
+    expect:
+      kind: accept
+  - id: optional/gg20/node-type-written-as-a-phrase
+    name: A node type may be written as a phrase rather than as a pattern
+    features: [GG20]
+    subclauses: ["12.6", "18.2", "18.4", "4.13.2.3"]
+    productions:
+      [
+        node type specification,
+        node type phrase,
+        node type phrase filler,
+        node type filler,
+        node type implied content,
+        node type label set,
+        label set phrase,
+        node synonym,
+        node type name,
+      ]
+    mutating: true
+    # ISO gives a node type two spellings. The pattern spelling puts the
+    # content in parentheses and the phrase spelling does not, so this
+    # says the same thing as `NODE TYPE PT (:Person)` with no parens and
+    # with LABEL in place of the colon. zu wants the parentheses and
+    # reports "expected '(', found 'LABEL'", so it has the pattern half
+    # of 18.2 and not the phrase half.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg20_phrase {
+        NODE TYPE PersonType LABEL Person
+      }
+    expect:
+      kind: accept
+  - id: optional/gg20/edge-type-written-as-a-phrase-with-endpoints
+    name: An edge type may name its endpoints in a CONNECTING clause
+    features: [GG20]
+    subclauses: ["12.6", "18.3", "18.4", "4.13.2.4"]
+    productions:
+      [
+        edge type specification,
+        edge type phrase,
+        edge type phrase filler,
+        edge type filler,
+        edge type implied content,
+        edge type label set,
+        edge kind,
+        edge synonym,
+        endpoint pair phrase,
+        endpoint pair,
+        endpoint pair directed,
+        endpoint pair pointing right,
+        connector pointing right,
+        source node type alias,
+        destination node type alias,
+      ]
+    mutating: true
+    # The phrase spelling of an edge type says the direction with a
+    # keyword instead of with brackets, and names its endpoints after
+    # CONNECTING rather than around an arc. TO is the word form of the
+    # right pointing connector. zu stops at DIRECTED, so it has neither
+    # the edge kind keywords nor the endpoint pair phrase.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg20_connecting {
+        (a :Person),
+        (b :Company),
+        DIRECTED EDGE TYPE WorksAt LABEL WORKS CONNECTING (a TO b)
+      }
+    expect:
+      kind: accept
+  - id: optional/gg20/endpoint-pair-written-right-to-left
+    name: A CONNECTING clause may name its endpoints destination first
+    features: [GG20]
+    subclauses: ["12.6", "18.3", "4.13.2.4"]
+    productions:
+      [
+        endpoint pair phrase,
+        endpoint pair directed,
+        endpoint pair pointing left,
+        edge kind,
+        edge synonym,
+        left arrow,
+        source node type alias,
+        destination node type alias,
+      ]
+    mutating: true
+    # The left pointing endpoint pair has no word form. ISO spells it
+    # with the arrow only, which is why this case exists apart from the
+    # TO one rather than as another row of it.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg20_connecting_left {
+        (a :Person),
+        (b :Company),
+        DIRECTED EDGE TYPE WorksAt LABEL WORKS CONNECTING (b <- a)
+      }
+    expect:
+      kind: accept
+  - id: optional/gg20/endpoint-pair-written-undirected
+    name: A CONNECTING clause may name two endpoints with no direction
+    features: [GG20]
+    subclauses: ["12.6", "18.3", "4.13.2.4"]
+    productions:
+      [
+        endpoint pair phrase,
+        endpoint pair,
+        endpoint pair undirected,
+        connector undirected,
+        edge kind,
+        edge synonym,
+        tilde,
+        source node type alias,
+        destination node type alias,
+      ]
+    mutating: true
+    # TO serves both the right pointing connector and the undirected
+    # one, so the tilde is the spelling that can only be read one way and
+    # is the one written here. UNDIRECTED is the other edge kind.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg20_connecting_undirected {
+        (a :Person),
+        (b :Company),
+        UNDIRECTED EDGE TYPE NearTo LABEL NEAR CONNECTING (a ~ b)
+      }
+    expect:
+      kind: accept
   - id: optional/gg21/explicit-key-label-set
     name: An element type may declare which of its labels identify it
     features: [GG21]
-    subclauses: ["12.6", "18.2", "4.13.2.6"]
+    subclauses: ["12.6", "18.2", "18.4", "4.13.2.6"]
     productions:
       [
         node type pattern,
         node type key label set,
         node type implied content,
+        label set phrase,
         implies,
         right double arrow,
       ]
@@ -63,7 +253,6 @@ cases:
       }
     expect:
       kind: accept
-
   - id: optional/gg22/inferred-key-label-set
     name: An element type with no declared key label set gets one anyway
     features: [GG22, GG23]
@@ -80,7 +269,138 @@ cases:
       }
     expect:
       kind: accept
-
+  - id: optional/gg23/property-typed-as-a-sized-integer
+    name: A property type may name the width of its integer
+    features: [GG22, GG23]
+    subclauses: ["12.6", "18.5", "18.6", "18.7", "18.9"]
+    productions:
+      [
+        property type list,
+        property value type,
+        predefined type,
+        numeric type,
+        exact numeric type,
+        binary exact numeric type,
+        signed binary exact numeric type,
+        unsigned binary exact numeric type,
+      ]
+    mutating: true
+    # ISO's exact numeric types come in a signed and an unsigned half and
+    # every width in each half has its own keyword. An engine that stores
+    # every integer in 64 bits can still take these as declarations and
+    # widen, so accepting the statement is not a claim about storage.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg23_ints {
+        (:Person {
+          a :: INT8, b :: INT16, c :: INT32, d :: INT64,
+          e :: SMALLINT, f :: BIGINT,
+          g :: UINT8, h :: UINT16, i :: UINT32, j :: UINT64,
+          k :: USMALLINT, l :: UBIGINT
+        })
+      }
+    expect:
+      kind: accept
+  - id: optional/gg23/property-typed-as-a-verbose-integer
+    name: A property type may spell INTEGER out in full
+    features: [GG22, GG23]
+    subclauses: ["12.6", "18.7", "18.9"]
+    productions: [property value type, predefined type, numeric type, verbose binary exact numeric type]
+    mutating: true
+    # INTEGER32 and INT32 are the same type under two names, and ISO
+    # calls the long one the verbose spelling. zu takes bare INTEGER and
+    # reports "unknown value type 'INTEGER8'" for the sized forms, so it
+    # has one row of this production and not the rest.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg23_verbose {
+        (:Person {
+          a :: INTEGER8, b :: INTEGER16, c :: INTEGER32, d :: INTEGER64,
+          e :: SMALL INTEGER, f :: INTEGER, g :: BIG INTEGER
+        })
+      }
+    expect:
+      kind: accept
+  - id: optional/gg23/property-typed-as-a-temporal-instant
+    name: A property type may name a date, a local time or a local datetime
+    features: [GG22, GG23]
+    subclauses: ["12.6", "18.7", "18.9"]
+    productions:
+      [
+        property value type,
+        predefined type,
+        temporal type,
+        temporal instant type,
+        date type,
+        localtime type,
+        localdatetime type,
+      ]
+    mutating: true
+    # The three instants that carry no zone. These are the ones an engine
+    # can hold as a day count and a nanosecond count with nothing else
+    # beside them, which is why they are separated here from the zoned
+    # pair below.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg23_instants {
+        (:Person {a :: DATE, b :: LOCAL TIME, c :: LOCAL DATETIME})
+      }
+    expect:
+      kind: accept
+  - id: optional/gg23/property-typed-as-a-zoned-instant
+    name: A property type may name an instant that carries a zone
+    features: [GG22, GG23]
+    subclauses: ["12.6", "18.7", "18.9"]
+    productions: [property value type, predefined type, temporal instant type, datetime type, time type]
+    mutating: true
+    # The other two instants keep an offset beside the moment. zu parses
+    # both and then refuses to record them, reporting "declares 'a' with
+    # a type this file cannot write", so the gap is in what the catalog
+    # file can hold rather than in the grammar it reads.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg23_zoned {
+        (:Person {a :: ZONED DATETIME, b :: ZONED TIME})
+      }
+    expect:
+      kind: accept
+  - id: optional/gg23/property-typed-as-a-qualified-duration
+    name: A duration property type says which fields the duration spans
+    features: [GG22, GG23]
+    subclauses: ["12.6", "18.7", "18.9"]
+    productions:
+      [
+        property value type,
+        predefined type,
+        temporal type,
+        temporal duration type,
+        temporal duration qualifier,
+      ]
+    mutating: true
+    # ISO has no unqualified duration type: the parenthesis is required
+    # and holds one of exactly two qualifiers, because a year to month
+    # duration and a day to second duration are not comparable. zu takes
+    # a bare DURATION and reads the parenthesis as a length, reporting
+    # "expected a count, found 'YEAR'". It already keeps the two kinds
+    # apart internally, so this is the spelling and not the model.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg23_duration {
+        (:Person {a :: DURATION(YEAR TO MONTH), b :: DURATION(DAY TO SECOND)})
+      }
+    expect:
+      kind: accept
+  - id: optional/gg23/property-typed-as-a-bounded-string
+    name: A string property type may carry a length bound
+    features: [GG22, GG23]
+    subclauses: ["12.6", "18.7", "18.9"]
+    productions: [property value type, predefined type, character string type, min length, max length, fixed length]
+    mutating: true
+    # STRING takes a bound pair, CHAR takes a fixed length and VARCHAR
+    # takes a maximum. zu parses all three and then refuses to record
+    # them for the same reason as the zoned instants: the catalog writes
+    # a property type as one byte and has no byte for a bounded string.
+    query: |
+      CREATE PROPERTY GRAPH TYPE gqlcompat_gg23_bounded {
+        (:Person {a :: STRING(1,5), b :: CHAR(3), c :: VARCHAR(10)})
+      }
+    expect:
+      kind: accept
   - id: optional/gg24/two-node-types-with-one-label
     name: Relaxed structural consistency lets one label appear in two node types
     features: [GG24]
@@ -98,12 +418,22 @@ cases:
       }
     expect:
       kind: accept
-
   - id: optional/gg25/two-edge-types-with-one-key-label
     name: Relaxed key label uniqueness lets two edge types share a key label set
     features: [GG25]
     subclauses: ["12.6", "18.3", "4.13.2.4"]
-    productions: [edge type pattern pointing right, edge type key label set, arc type pointing right]
+    productions:
+      [
+        edge type specification,
+        edge type pattern,
+        edge type pattern directed,
+        edge type pattern pointing right,
+        edge type key label set,
+        edge type filler,
+        arc type pointing right,
+        source node type reference,
+        destination node type reference,
+      ]
     mutating: true
     # The same key label on two edge types between different endpoints. Without
     # the relaxation a key label set identifies exactly one edge type, and this
@@ -115,12 +445,20 @@ cases:
       }
     expect:
       kind: accept
-
   - id: optional/gg26/one-property-name-two-types
     name: Relaxed property value type consistency lets one property name take two types
     features: [GG26]
     subclauses: ["12.6", "18.5", "18.6", "18.7", "4.13.2.5", "22.17"]
-    productions: [property types specification, property type, property value type]
+    productions:
+      [
+        property types specification,
+        property type,
+        property value type,
+        predefined type,
+        numeric type,
+        exact numeric type,
+        binary exact numeric type,
+      ]
     mutating: true
     # `code` is a string on one node type and an integer on the other. ISO's
     # default is that a property name has one value type across the graph type,
