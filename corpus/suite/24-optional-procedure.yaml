@@ -28,7 +28,7 @@ cases:
   - id: optional/gp01/inline-procedure
     name: An inline procedure runs a nested query and yields its table
     features: [GP01]
-    subclauses: ["15.1", "15.2", "14.5", "9.2"]
+    subclauses: ["15.1", "15.2", "14.5", "9.2", "4.7.6", "4.10.2.3"]
     productions:
       [
         call query statement,
@@ -41,6 +41,12 @@ cases:
     # depending on what the called body does. This body only reads, so the rule
     # above it is <call query statement>, and the other two are the cases
     # further down that call a body which writes.
+    #
+    # This is also the first case in the corpus where anything is called at all,
+    # so it carries the two concepts a call brings with it. Subclause 4.10.2.3
+    # is procedure execution, and 4.7.6 is the execution stack, which is where
+    # the called body goes and the reason the outer statement still has its own
+    # variables when the body is finished.
     query: |
       CALL { MATCH (p:Person) RETURN p.name AS name }
       RETURN name AS name
@@ -114,8 +120,11 @@ cases:
   - id: optional/gp05/value-variable-definition
     name: A procedure body may open by defining a value variable
     features: [GP01, GP05, GP06, GP17]
-    subclauses: ["9.2", "10.3"]
+    subclauses: ["9.2", "10.3", "4.10.4.2"]
     productions: [binding variable definition block, binding variable definition, value variable definition]
+    # Subclause 4.10.4.2 is binding variables and general parameters, which is
+    # the concept a definition block is the syntax for: a name the whole body
+    # can read that no clause in the body bound.
     query: |
       CALL {
         VALUE threshold = 40
@@ -133,8 +142,12 @@ cases:
   - id: optional/gp05/typed-value-variable-definition
     name: A value variable may declare its type
     features: [GP01, GP05, GP06, GP17]
-    subclauses: ["10.3"]
+    subclauses: ["10.3", "4.12.3"]
     productions: [value variable definition, opt typed value initializer, typed, double colon]
+    # Subclause 4.12.3 is data type descriptors, and this is where the corpus
+    # can point at one: writing the type beside the name is how a program asks
+    # for a descriptor rather than leaving the engine to infer one from the
+    # value. The case above is the same definition without it.
     query: |
       CALL {
         VALUE threshold :: INT = 40
@@ -219,7 +232,7 @@ cases:
   - id: optional/gp08/binding-table-variable-from-a-subquery
     name: A procedure body may bind a nested query's table to a variable
     features: [GP01, GP08, GP10, GP17]
-    subclauses: ["10.2", "11.2"]
+    subclauses: ["10.2", "11.2", "4.3.6"]
     productions: [binding table variable definition, opt typed binding table initializer, binding table initializer, nested binding table query specification]
     requires: [GQ23]
     # The nested query is the only initializer a portable case can write that
@@ -228,7 +241,9 @@ cases:
     # the child is what the definition was given. Reading the table back is a
     # FOR over it, which is the one statement that takes a binding table and
     # makes rows of it, so the field read is the evidence that the variable
-    # holds the table and not a copy of the query.
+    # holds the table and not a copy of the query. Subclause 4.3.6 is binding
+    # tables, and this is the only case in the corpus where one is a thing with
+    # a name rather than what a statement happens to hand to the next one.
     query: |
       CALL {
         BINDING TABLE t = { MATCH (q:Person) WHERE q.age > 40 RETURN q.name AS name }
@@ -361,7 +376,7 @@ cases:
   - id: optional/gp01/call-a-body-that-writes
     name: A call whose body writes is a data-modifying statement and not a query
     features: [GP01, GD01]
-    subclauses: ["13.6", "15.1"]
+    subclauses: ["13.6", "15.1", "4.10.2.4"]
     productions: [call data-modifying procedure statement]
     tags: [write, procedure]
     fixture: blank
@@ -371,7 +386,9 @@ cases:
     # the file are the same words over a different body and take different
     # paths through Clause 13 and Clause 14. The MATCH after it is what makes
     # the case evidence rather than an accept: the node the called body wrote
-    # is there to be found.
+    # is there to be found. That settling is subclause 4.10.2.4, procedures
+    # classified by kind of side effects, which is the concept the three rules
+    # of Clause 15 are the syntax for.
     query: |
       CALL { INSERT (:Note {t: 'x'}) }
       MATCH (n:Note)

@@ -221,7 +221,7 @@ cases:
   - id: optional/gd01/set-property
     name: SET assigns a property on a bound element
     features: [GD01]
-    subclauses: ["13.3", "22.10"]
+    subclauses: ["13.3", "22.10", "4.17.2", "4.17.3"]
     productions: [set statement, set item, set property item]
     # 22.10 is store assignment, which is the rule that says what happens when
     # a value goes into a property rather than into a record: the value has to
@@ -229,6 +229,14 @@ cases:
     # that types its properties would refuse. Reading the property back in the
     # same statement is what makes the case measure the assignment and not the
     # parse.
+    #
+    # The two Clause 4 citations are the concepts the rule is written in.
+    # Subclause 4.17.3 is assignment and store assignment, the distinction
+    # between putting a value in a record and putting one in the graph, and this
+    # statement is the second kind. Subclause 4.17.2 is what makes them
+    # different: a property of a bound element is a dynamic site, one the engine
+    # locates while the statement runs rather than one fixed when it was
+    # analysed.
     fixture: pair
     mutating: true
     query: |
@@ -406,7 +414,7 @@ cases:
   - id: optional/gc04/create-graph
     name: CREATE GRAPH adds a graph with an open graph type to the catalog
     features: [GC04, GG01]
-    subclauses: ["12.4"]
+    subclauses: ["12.4", "4.3.5.2"]
     productions:
       [
         linear catalog-modifying statement,
@@ -423,6 +431,11 @@ cases:
     # spine of a query went uncited until one case said so. They are cited
     # here rather than everywhere, because a citation is a claim that the case
     # exercises the rule and repeating the claim adds nothing to it.
+    #
+    # Subclause 4.3.5.2 is the graph descriptor, which is what the catalog holds
+    # when this statement has run: the graph is not the nodes and edges in it,
+    # it is an entry naming a graph type and a content, and an open graph type
+    # is the emptiest descriptor a program can ask for.
     query: |
       CREATE GRAPH gqlcompat_create ANY
     expect:
@@ -475,10 +488,12 @@ cases:
   - id: optional/gc01/create-schema
     name: CREATE SCHEMA adds a schema at an absolute directory path
     features: [GC01]
-    subclauses: ["12.2"]
+    subclauses: ["12.2", "4.2.5.3"]
     productions: [create schema statement, catalog schema parent and name, absolute directory path, schema name]
     tags: [write, catalog]
     mutating: true
+    # Subclause 4.2.5.3 is what a GQL-schema is, and this statement is the only
+    # way a program puts one in the catalog.
     query: |
       CREATE SCHEMA /gqlcompat_schema
     expect:
@@ -487,7 +502,7 @@ cases:
   - id: optional/gc01/create-schema-under-another-schema
     name: A schema may be created at a path with a directory in it
     features: [GC01]
-    subclauses: ["12.2", "17.1", "22.9"]
+    subclauses: ["12.2", "17.1", "22.9", "4.2.5.2"]
     productions:
       [
         create schema statement,
@@ -502,8 +517,12 @@ cases:
     # The case above writes the shortest absolute path there is, a solidus and
     # a name, and in that path the simple directory path between them is empty.
     # This one has a directory in it, which is what a simple directory path is
-    # and is the difference between a flat catalog and a tree. Writing the path
-    # is one thing and resolving it is another: subclause 22.9 says the engine
+    # and is the difference between a flat catalog and a tree. That parent is a
+    # GQL-directory, which is subclause 4.2.5.2, and a directory is the one
+    # thing in the catalog that holds other things.
+    #
+    # Writing the path is one thing and resolving it is another. Subclause 22.9
+    # says the engine
     # walks the names from a start directory, which for an absolute path is the
     # root, and fails if a name on the way is not a directory that is there. So
     # the setup statement is not scaffolding, it is the half of the case that
@@ -608,7 +627,7 @@ cases:
   - id: optional/gg03/graph-typed-by-a-reference
     name: A graph may take its type from a graph type already in the catalog
     features: [GC01, GC04, GG02, GG03]
-    subclauses: ["12.4", "12.6", "17.3"]
+    subclauses: ["12.4", "12.6", "17.3", "4.3.3"]
     productions:
       [
         of graph type,
@@ -625,6 +644,12 @@ cases:
     # a catalog object and not just a clause. The double colon is the shorter
     # spelling of TYPED and is written here because nothing else in this file
     # spells it outside a property type.
+    #
+    # That is also the one case in the corpus that puts subclause 4.3.3 to work.
+    # A graph is a primary object and a graph type is a secondary one, meaning
+    # it exists to describe a primary object rather than to hold data, and the
+    # two statements here are the two kinds in that order: the secondary object
+    # first, because the primary one is created by naming it.
     setup:
       - "CREATE PROPERTY GRAPH TYPE gqlcompat_named_type { (:Person {name :: STRING}) }"
     query: |
@@ -721,10 +746,14 @@ cases:
   - id: optional/gt01/start-transaction-and-commit
     name: An explicit transaction can be opened and committed
     features: [GT01]
-    subclauses: ["8.1", "8.4"]
+    subclauses: ["8.1", "8.4", "4.6.2"]
     productions: [start transaction command, commit command, end transaction command, transaction activity]
     tags: [write, transaction]
     mutating: true
+    # Subclause 4.6.2 is transaction demarcation, which is the concept these two
+    # commands are the syntax of: a transaction begins where a program says it
+    # begins and ends where a program says it ends, rather than around whatever
+    # the engine decided a unit of work was.
     setup:
       - "START TRANSACTION"
     query: |
@@ -758,10 +787,17 @@ cases:
   - id: optional/gt02/read-only-transaction
     name: A transaction can be opened with a declared access mode
     features: [GT01, GT02]
-    subclauses: ["8.1", "8.2"]
+    subclauses: ["8.1", "8.2", "4.6.3"]
     productions: [transaction characteristics, transaction mode, transaction access mode]
     tags: [write, transaction]
     mutating: true
+    # The access mode is where a program reaches subclause 4.6.3, transaction
+    # isolation, and the standard says as much from the other direction: the
+    # implementation-defined item about isolation is written as the levels of
+    # isolation and the rules for the implementation-defined access mode used to
+    # select them. READ ONLY is the one access mode of the three that every
+    # engine can be asked for portably, so this is the whole of 4.6.3 a case can
+    # reach without two connections.
     setup:
       - "START TRANSACTION READ ONLY"
     query: |

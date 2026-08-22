@@ -19,12 +19,17 @@ cases:
   - id: optional/gq01/use-current-graph
     name: A use graph clause selects the graph a linear query statement runs against
     features: [GQ01]
-    subclauses: ["16.2"]
+    subclauses: ["16.2", "4.10.4.4"]
     productions: [use graph clause, focused linear query statement, current graph]
     tags: [composition]
     # CURRENT_PROPERTY_GRAPH rather than a name: the working graph's name is
     # the adapter's business, and a case that hard-coded one would be measuring
     # the harness's naming convention instead of the clause.
+    #
+    # Subclause 4.10.4.4 classifies statements by their use of working graph
+    # sites, which is the difference between this statement and the same query
+    # without the clause in front of it: one is focused and one is ambient, and
+    # the grammar has a separate rule for each because the concept does.
     query: |
       USE CURRENT_PROPERTY_GRAPH
       MATCH (p:Person)
@@ -189,7 +194,7 @@ cases:
   - id: optional/gq03/union-all-of-a-value-and-a-null
     name: A union column filled from an integer and from a null is one column
     features: [GQ03]
-    subclauses: ["14.2", "22.19"]
+    subclauses: ["14.2", "22.19", "4.17.4.3"]
     productions: [set operator, set quantifier]
     tags: [composition, "null"]
     # The two operands give the one column two types, and the union has to
@@ -199,6 +204,9 @@ cases:
     # is an integer column that admits nulls. An engine that never takes the
     # step has nothing to widen and reports the two branches as a type mismatch,
     # which is a fair reading of a union of unlike things and is not this one.
+    # The column coming out nullable when one branch of it can be null is
+    # subclause 4.17.4.3, nullability inference, which is the half of the
+    # answer 22.19 leaves to the site the value lands in.
     query: |
       RETURN 1 AS v
       UNION ALL
