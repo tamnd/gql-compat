@@ -133,13 +133,44 @@ cases:
   - id: mandatory/value/string-concatenation
     name: The concatenation operator joins two character strings
     subclauses: ["20.23"]
-    productions: [string value expression, character string concatenation]
+    productions:
+      [
+        string value expression,
+        character string concatenation,
+        character string value expression,
+        character string primary,
+        concatenation operator,
+      ]
     query: |
       RETURN 'ab' || 'cd' AS v
     expect:
       kind: rows
       columns: [v]
       rows: [[abcd]]
+
+  - id: mandatory/value/list-concatenation
+    name: The concatenation operator joins two lists
+    subclauses: ["20.15"]
+    productions:
+      [
+        list value expression,
+        list concatenation,
+        list value expression 1,
+        list primary,
+        concatenation operator,
+      ]
+    tags: [list]
+    # ISO gives one operator four jobs: strings, byte strings, lists and paths
+    # all concatenate with the same two bars, and each is a rule of its own
+    # rather than one polymorphic rule. An engine that wired the operator to
+    # strings alone answers a type error here, which is what zu does: "|| joins
+    # strings, got LIST<INT> and LIST<INT>". Engine finding.
+    query: |
+      RETURN [1, 2] || [3] AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[[1, 2, 3]]]
 
   - id: mandatory/value/fold
     name: UPPER and LOWER change the case of a character string
@@ -212,13 +243,32 @@ cases:
   - id: mandatory/value/comparison-yields-boolean
     name: A comparison predicate is a value expression and projects a boolean
     subclauses: ["19.3"]
-    productions: [comparison predicate, comparison predicate part 2]
+    productions:
+      [
+        comparison predicate,
+        comparison predicate part 2,
+        comparison predicand,
+        comp op,
+        equals operator,
+        less than operator,
+        left angle bracket,
+        less than or equals operator,
+        not equals operator,
+        greater than operator,
+        right angle bracket,
+        greater than or equals operator,
+      ]
+    # All six comparison operators in one row, because the ones an engine gets
+    # wrong are the compound spellings rather than the plain ones: `<=` read as
+    # a less than followed by an equals, or `<>` read as an empty pair of
+    # brackets. Each answers true, so a reader of a failing run sees which
+    # operator moved rather than which direction it moved in.
     query: |
-      RETURN 1 < 2 AS lt, 2 <= 2 AS le, 3 <> 4 AS ne
+      RETURN 1 < 2 AS lt, 2 <= 2 AS le, 3 <> 4 AS ne, 4 > 3 AS gt, 4 >= 4 AS ge, 5 = 5 AS eq
     expect:
       kind: rows
-      columns: [lt, le, ne]
-      rows: [[true, true, true]]
+      columns: [lt, le, ne, gt, ge, eq]
+      rows: [[true, true, true, true, true, true]]
 
   - id: mandatory/value/numeric-comparison-across-types
     name: A number with a fractional part compares against an integer without a cast

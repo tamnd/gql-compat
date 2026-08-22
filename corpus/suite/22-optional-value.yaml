@@ -17,7 +17,7 @@ cases:
     name: A line starting with two minus signs is a comment
     features: [GB02]
     subclauses: ["21.3"]
-    productions: [comment, simple comment, simple comment introducer]
+    productions: [comment, simple comment, simple comment introducer, double minus sign]
     tags: [lexical]
     query: |
       -- this line is a comment
@@ -31,7 +31,7 @@ cases:
     name: A line starting with two solidi is a comment
     features: [GB03]
     subclauses: ["21.3"]
-    productions: [simple comment, simple comment introducer]
+    productions: [simple comment, simple comment introducer, double solidus]
     tags: [lexical]
     query: |
       // this line is a comment
@@ -313,7 +313,16 @@ cases:
     name: POWER, SQRT and MOD are numeric value functions
     features: [GF01]
     subclauses: ["20.22"]
-    productions: [power function, square root, modulus expression]
+    productions:
+      [
+        power function,
+        square root,
+        modulus expression,
+        numeric value expression base,
+        numeric value expression exponent,
+        numeric value expression dividend,
+        numeric value expression divisor,
+      ]
     query: |
       RETURN POWER(2, 3) AS p, SQRT(16) AS r, MOD(7, 3) AS m
     expect:
@@ -407,7 +416,16 @@ cases:
     name: A list value constructor builds a list from an enumeration
     features: [GV50]
     subclauses: ["20.17"]
-    productions: [list value constructor, list value constructor by enumeration, list element list]
+    productions:
+      [
+        list value constructor,
+        list value constructor by enumeration,
+        list element list,
+        list element,
+        left bracket,
+        right bracket,
+        comma,
+      ]
     tags: [list]
     query: |
       RETURN [1, 2, 3] AS v

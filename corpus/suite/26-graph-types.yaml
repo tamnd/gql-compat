@@ -46,7 +46,14 @@ cases:
     name: An element type may declare which of its labels identify it
     features: [GG21]
     subclauses: ["12.6", "18.2", "4.13.2.6"]
-    productions: [node type pattern, node type key label set, node type implied content]
+    productions:
+      [
+        node type pattern,
+        node type key label set,
+        node type implied content,
+        implies,
+        right double arrow,
+      ]
     mutating: true
     # The labels before the double arrow are the key: a node of this type is
     # identified as a Person, and Employee is a label it also carries.

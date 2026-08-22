@@ -123,7 +123,7 @@ cases:
     name: A value variable may declare its type
     features: [GP01, GP05, GP06, GP17]
     subclauses: ["10.3"]
-    productions: [value variable definition, opt typed value initializer, typed]
+    productions: [value variable definition, opt typed value initializer, typed, double colon]
     query: |
       CALL {
         VALUE threshold :: INT = 40

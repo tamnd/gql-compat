@@ -295,6 +295,10 @@ cases:
         asterisk,
         solidus,
         comma,
+        value expression,
+        common value expression,
+        parenthesized value expression,
+        numeric primary,
       ]
     # A value is projected rather than an acceptance asserted, because the
     # question about punctuation is whether the engine grouped it the way the
