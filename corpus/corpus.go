@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -157,6 +158,70 @@ type ExpectDiagnostic struct {
 // the list ISO 39075 subclause 23.2 draws its subject fields from.
 var SubjectKinds = []string{"graph", "schema", "label", "property", "variable", "type", "function"}
 
+// Scale is how a limit case is sized from the engine's declaration.
+//
+// The query holds the placeholder "<<scale>>" once, and it is replaced by Each
+// repeated as many times as it takes to pass the declared maximum, joined by
+// Between, with "<<n>>" inside Each standing for the one-based number of the
+// repetition. Nothing in GQL is spelled with a doubled angle bracket, so the
+// placeholders cannot collide with the statement around them.
+//
+// A statement built this way is large, tens of thousands of characters against
+// an engine with a generous limit, which is exactly why the corpus writes the
+// template and not the statement. It also means the report records the
+// template and the count rather than the text, since the two reproduce it
+// exactly and the text would be most of the report.
+type Scale struct {
+	// Kind is which kind of graph element the limit belongs to, for the
+	// implementation-defined items ISO writes "for each kind of graph
+	// element". Empty for an item that has one value.
+	Kind string `yaml:"kind" json:"kind,omitempty"`
+	// Each is the text of one repetition, with "<<n>>" for its number.
+	Each string `yaml:"each" json:"each"`
+	// Between joins two repetitions. Empty is allowed: a repeated label is
+	// written straight onto the one before it.
+	Between string `yaml:"between" json:"between,omitempty"`
+	// Over is how far past the declared maximum the statement goes. It
+	// defaults to one, which is the number that tests the limit rather than
+	// something comfortably beyond it, and a case only writes it out where an
+	// engine needs more than one unit to notice.
+	Over int `yaml:"over" json:"over,omitempty"`
+}
+
+// Key is the name an adapter declares this case's limit under: the
+// implementation-defined item, and the kind of element where ISO gives the
+// item a value per kind.
+func (s *Scale) Key(item string) string {
+	if s.Kind == "" {
+		return item
+	}
+	return item + "/" + s.Kind
+}
+
+// Units is how many repetitions a declared maximum of max calls for.
+func (s *Scale) Units(max int) int {
+	over := s.Over
+	if over < 1 {
+		over = 1
+	}
+	return max + over
+}
+
+// Expand builds the replacement text for a declared maximum of max.
+func (s *Scale) Expand(max int) string {
+	var b strings.Builder
+	for i := 1; i <= s.Units(max); i++ {
+		if i > 1 {
+			b.WriteString(s.Between)
+		}
+		b.WriteString(strings.ReplaceAll(s.Each, "<<n>>", strconv.Itoa(i)))
+	}
+	return b.String()
+}
+
+// Placeholder is what a scaled query holds where the repetitions go.
+const Placeholder = "<<scale>>"
+
 // Case is one conformance test.
 type Case struct {
 	// ID is stable and hierarchical: kind/family/feature/name. Reports,
@@ -227,6 +292,23 @@ type Case struct {
 	// what the case asked for, which is a measurement of the item and the only
 	// one available. The code is still asserted when the engine does refuse.
 	Limit string `yaml:"limit" json:"limit,omitempty"`
+	// Scale builds the statement at the size the engine's own declared limit
+	// makes it, instead of at a size the corpus guessed.
+	//
+	// A limit case without this is a case that can only ever be skipped once
+	// the engine's maximum is above whatever number the case wrote down. That
+	// is the whole reason zu skipped four property limit codes for months: the
+	// case asked for sixty-four properties, zu holds four thousand and ninety
+	// six, and the run recorded that the condition was not reachable when what
+	// it had actually measured was that the guess was low.
+	//
+	// So the number comes from the engine. An adapter that declares a value
+	// for this case's Limit gets a statement one unit past it and is expected
+	// to raise the code; an adapter that declares none is skipped as before,
+	// because an engine with no maximum genuinely cannot raise the condition
+	// and failing it would be scoring it against a number the standard never
+	// set.
+	Scale *Scale `yaml:"scale" json:"scale,omitempty"`
 	// Unprovokable says, in prose, why no statement a client can send raises
 	// this case's condition, and takes the case out of every run.
 	//
@@ -411,6 +493,35 @@ func (c *Case) Validate(known KnownCodes) error {
 		// only on engines that lack the feature.
 		if !known.Defined(c.Limit) && !known.Feature(c.Limit) {
 			return fmt.Errorf("%s: %q is neither an implementation-defined item nor a feature of ISO/IEC 39075", where, c.Limit)
+		}
+	}
+	if s := c.Scale; s != nil {
+		// The size comes from the engine's declaration of this case's limit,
+		// so a case that names no limit has nothing to scale from.
+		if c.Limit == "" {
+			return fmt.Errorf("%s: scale sizes a statement from a declared limit, and this case names none", where)
+		}
+		if !known.Defined(c.Limit) {
+			return fmt.Errorf("%s: scale sizes a statement from %q, which is not an implementation-defined item of ISO 24.5.2 and so is not a number any engine declares",
+				where, c.Limit)
+		}
+		if !strings.Contains(c.Query, Placeholder) {
+			return fmt.Errorf("%s: the query has no %s for the repetitions to go in", where, Placeholder)
+		}
+		if s.Each == "" {
+			return fmt.Errorf("%s: scale repeats nothing", where)
+		}
+		// Without the counter every repetition is the same text, which for a
+		// property set or a label set is one item written many times rather
+		// than many items.
+		if !strings.Contains(s.Each, "<<n>>") {
+			return fmt.Errorf("%s: scale repeats %q, which has no <<n>> and so writes one thing over and over", where, s.Each)
+		}
+		if s.Kind != "" && s.Kind != "node" && s.Kind != "edge" {
+			return fmt.Errorf("%s: %q is not a kind of graph element", where, s.Kind)
+		}
+		if s.Over < 0 {
+			return fmt.Errorf("%s: scale of %d units past the maximum is under it", where, s.Over)
 		}
 	}
 	if c.Unprovokable != "" && (c.Kind != KindCondition || c.Expect.Kind != ExpectError) {

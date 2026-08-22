@@ -70,7 +70,12 @@ type declaration struct {
 	} `json:"engine"`
 	Data         map[string]bool `json:"data"`
 	Capabilities map[string]bool `json:"capabilities"`
-	Notes        []string        `json:"notes"`
+	// Limits is the implementation-defined maxima zu sets a finite value on,
+	// keyed the way adapter.Capabilities.Limits is keyed. Absent for a zu
+	// built before it published them, which reads as an engine that declares
+	// no maxima and skips the limit cases the way the corpus always did.
+	Limits map[string]int `json:"limits"`
+	Notes  []string       `json:"notes"`
 }
 
 // New builds a zu driver. The binary defaults to whatever `zu` resolves to on
@@ -165,6 +170,23 @@ func parseDeclaration(raw []byte) (adapter.Capabilities, error) {
 		if _, ok := flags[name]; !ok {
 			return adapter.Capabilities{}, fmt.Errorf("declares an engine flag %q this harness does not read", name)
 		}
+	}
+	// A limit is checked for shape and not for membership of the ISO list.
+	// Which items exist is the corpus's business, and a case naming one the
+	// standard does not define is refused when the corpus loads. What this
+	// has to catch is a value that would silently mis-size a statement.
+	for name, max := range d.Limits {
+		if max <= 0 {
+			return adapter.Capabilities{}, fmt.Errorf("declares a maximum of %d for %q, and a limit nothing can satisfy is not a limit", max, name)
+		}
+		item, kind, split := strings.Cut(name, "/")
+		if item == "" || (split && kind != "node" && kind != "edge") {
+			return adapter.Capabilities{}, fmt.Errorf("declares a limit under %q, which names no item or no kind of graph element", name)
+		}
+		if caps.Limits == nil {
+			caps.Limits = make(map[string]int, len(d.Limits))
+		}
+		caps.Limits[name] = max
 	}
 	return caps, nil
 }
