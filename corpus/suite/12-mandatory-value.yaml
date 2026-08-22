@@ -208,10 +208,27 @@ cases:
   - id: mandatory/value/trim-default
     name: TRIM with only a source removes spaces from both ends
     subclauses: ["20.24"]
-    productions: [trim function, single-character trim function, trim source]
+    productions:
+      [
+        trim function,
+        single-character trim function,
+        trim source,
+        truncating whitespace,
+      ]
     tags: [string]
     # The forms that name a trim character or an end are features GF06 and
     # GF05; this one-argument form is not, so every engine must have it.
+    #
+    # <truncating whitespace> is what this form removes, and it is one of the
+    # grammar's roots: no rule names it, because the Syntax Rules of the trim
+    # function refer to it rather than deriving it. Which characters are in the
+    # set is implementation-defined, item IV023, and that is not a reason the
+    # rule cannot be cited any more than it is for <newline>, whose character
+    # IA023 leaves open in the same way. The space is in every implementer's
+    # answer and this source is padded with them. The part that is genuinely
+    # open, whether a tab counts, is measured by the impdef probe for IV023
+    # rather than asserted here, which is the division of labour: the corpus
+    # asserts what the standard fixes and the probe reports what it does not.
     query: |
       RETURN TRIM('  ab  ') AS v
     expect:
