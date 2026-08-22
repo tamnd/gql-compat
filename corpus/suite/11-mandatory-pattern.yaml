@@ -57,7 +57,10 @@ cases:
   - id: mandatory/pattern/edge-property-predicate
     name: A property of an edge variable is readable in a where clause
     subclauses: ["16.7", "16.13", "20.11"]
-    productions: [property reference, element variable reference, period]
+    productions: [property reference, element variable reference, period, edge reference value expression]
+    # The source of a property reference is a node, an edge or a record, and
+    # the grammar has a rule for each. This is the corpus case where the source
+    # is an edge.
     query: |
       MATCH (p:Person)-[k:KNOWS]->(q:Person)
       WHERE k.since > 2018

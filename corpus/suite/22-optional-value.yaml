@@ -413,9 +413,19 @@ cases:
     name: PERCENTILE_DISC is a binary set function over a column and a fraction
     features: [GF11]
     subclauses: ["20.9"]
-    productions: [binary set function, binary set function type]
+    productions:
+      [
+        binary set function,
+        binary set function type,
+        dependent value expression,
+        independent value expression,
+      ]
     fixture: numbers
     tags: [aggregate]
+    # The two arguments have rules of their own because they are not the same
+    # kind of thing. The first is read once per binding and the second once for
+    # the whole group, which is what dependent and independent name, and it is
+    # the only place in the grammar the distinction is written down.
     query: |
       MATCH (v:Datum)
       RETURN PERCENTILE_DISC(v.n, 1) AS p
@@ -567,6 +577,23 @@ cases:
       kind: rows
       columns: [r]
       rows: [[{a: 1, b: x}]]
+
+  - id: optional/gv45/record-field-read
+    name: A field of a record is read with the period a property is read with
+    features: [GV45]
+    subclauses: ["20.11", "20.18"]
+    productions: [record expression, property source, property reference]
+    # A property reference has three kinds of source and the other two are a
+    # node and an edge. This is the third, and it is the only one that needs
+    # no graph, because the record is written in the query. The grammar spells
+    # the reference the same way for all three, which is the point the case
+    # is making: the period is not about elements.
+    query: |
+      RETURN {a: 1, b: 'x'}.a AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[1]]
 
   - id: optional/gl09/float-number-suffix
     name: An F suffix writes a literal as single precision
@@ -880,7 +907,7 @@ cases:
     name: A binding table passed in as a parameter is a binding table
     features: [GE05]
     subclauses: ["11.2", "17.7", "19.6"]
-    productions: [binding table expression, reference parameter specification, substituted parameter reference, value type predicate]
+    productions: [binding table expression, reference parameter specification, substituted parameter reference, value type predicate, double dollar sign]
     tags: [read, expression, parameters]
     # A binding table is a result that has already been read, so the only way
     # one reaches a statement is from outside it, which is what this feature
@@ -898,6 +925,47 @@ cases:
       kind: rows
       columns: [v]
       rows: [[true]]
+
+  - id: optional/ge01/graph-value-written-with-graph
+    name: A graph is a value, and the graph the query reads is one
+    features: [GE01]
+    requires: [GA06, GV60]
+    subclauses: ["20.1", "20.2", "19.6"]
+    productions: [reference value expression, graph reference value expression]
+    tags: [read, expression]
+    # GRAPH in front of a graph expression is what turns a name for a graph
+    # into a value of graph type, and it is the only place a reference value
+    # expression is written out rather than reached through a variable. The
+    # parentheses are load bearing: the type predicate takes a value
+    # expression primary, so the spelled form has to be parenthesized before
+    # it can be asked what it is. CURRENT_PROPERTY_GRAPH is the graph the
+    # query is already reading, so the case needs no catalog object.
+    query: |
+      RETURN ((PROPERTY GRAPH CURRENT_PROPERTY_GRAPH) IS TYPED ANY PROPERTY GRAPH) AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/ge02/binding-table-value-from-a-subquery
+    name: A subquery written as a binding table value has rows to count
+    features: [GE02]
+    requires: [GF12]
+    subclauses: ["20.1", "11.2"]
+    productions: [binding table reference value expression]
+    fixture: social
+    tags: [read, expression]
+    # The case below this one reaches the same rule through a parameter, which
+    # is the form an engine can support without having the expression at all.
+    # This is the written form, TABLE in front of a nested query, and counting
+    # the rows is the one question about a table that needs no column of it to
+    # be projected.
+    query: |
+      RETURN CARDINALITY(BINDING TABLE { MATCH (p:Person) RETURN p.name AS name }) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
 
   - id: optional/ge02/binding-table-reference-value-expression
     name: A binding table reference is a value, and one table equals itself

@@ -240,6 +240,41 @@ cases:
       columns: [v]
       rows: [[ab]]
 
+  - id: mandatory/value/normalized-predicate
+    name: IS NORMALIZED asks of a string what NORMALIZE would do to it
+    subclauses: ["19.7"]
+    productions: [normalized predicate, normalized predicate part 2]
+    tags: [string]
+    # The predicate and the function are the two halves of one subclause and
+    # the corpus had only the function. A string that NORMALIZE returns
+    # unchanged is a string the predicate answers true for, and writing both
+    # spellings in one row is what makes that a claim rather than a
+    # coincidence: the form with a normal form named asks about NFC, the form
+    # without one asks about the default, and ASCII is in every normal form so
+    # both answers are fixed without a normalization table.
+    query: |
+      RETURN ('ab' IS NFC NORMALIZED) AS a, ('ab' IS NOT NORMALIZED) AS b
+    expect:
+      kind: rows
+      columns: [a, b]
+      rows: [[true, false]]
+
+  - id: mandatory/value/session-user
+    name: SESSION_USER is a value specification every session can write
+    subclauses: ["20.3"]
+    productions: [general value specification]
+    # The other half of <general value specification> is a dynamic parameter,
+    # which is optional GE features, so SESSION_USER is the only spelling of
+    # this rule a mandatory case can reach. What it evaluates to names the
+    # user the session was opened for and the standard fixes nothing about it,
+    # so the case asks only that it is a value the engine can project. An
+    # engine that has no notion of a user has an answer available, the null
+    # value, and the case accepts that too.
+    query: |
+      RETURN SESSION_USER AS u
+    expect:
+      kind: accept
+
   - id: mandatory/value/comparison-yields-boolean
     name: A comparison predicate is a value expression and projects a boolean
     subclauses: ["19.3"]
