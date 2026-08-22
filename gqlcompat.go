@@ -26,6 +26,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"regexp"
 
 	"github.com/tamnd/gql-compat/adapter"
 	"github.com/tamnd/gql-compat/corpus"
@@ -86,7 +87,72 @@ func Load() (*Standard, error) {
 			return nil, fmt.Errorf("a shipped probe names unknown fixture %q", name)
 		}
 	}
+	if err := checkProbeLabels(std.Probes, fixtures); err != nil {
+		return nil, err
+	}
 	return std, nil
+}
+
+// patternLabel finds the labels a statement writes inside a node or an edge
+// pattern.
+//
+// The colon is anchored to the bracket that opens the pattern so that a
+// property map cannot be read as a label: `(v:Datum {n: 1})` names one label
+// and the `n:` inside the braces names a property key. Everything else a colon
+// can introduce is out of reach of this regexp for the same reason.
+var patternLabel = regexp.MustCompile(`[(\[]\s*\w*\s*:\s*([A-Za-z_]\w*)`)
+
+// checkProbeLabels rejects a shipped probe that matches a label its fixture
+// does not declare.
+//
+// A probe has no expectation, so nothing about it fails: a statement that
+// matches nothing observes nothing and the report says the engine returned no
+// records, which reads exactly like an engine that has no answer to give. Three
+// probes shipped in that state after a fixture was renamed, and two of them
+// were reported as refusals against every engine measured. Silence is the only
+// failure this package has, so the one kind of silence that is our own fault is
+// worth refusing to load with.
+//
+// The check is on the shipped pair only, the way the fixture name check above
+// is. A caller running the shipped probes against their own corpus may well
+// have a fixture of the same name holding different labels, and that is their
+// business rather than a defect in this module.
+func checkProbeLabels(probes *impdef.Set, fixtures *fixture.Set) error {
+	for _, p := range probes.Probes {
+		if p.Fixture == "" {
+			continue
+		}
+		f, ok := fixtures.Get(p.Fixture)
+		if !ok {
+			continue
+		}
+		have := declaredLabels(f)
+		for _, m := range patternLabel.FindAllStringSubmatch(p.Statement, -1) {
+			if !have[m[1]] {
+				return fmt.Errorf("probe %s matches label %q, which fixture %q does not declare", p.ID, m[1], f.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// declaredLabels is every label and edge type a fixture holds, including the
+// two a generated graph carries rather than writing out.
+func declaredLabels(f *fixture.Fixture) map[string]bool {
+	have := map[string]bool{}
+	for _, n := range f.Nodes {
+		for _, l := range n.Labels {
+			have[l] = true
+		}
+	}
+	for _, e := range f.Edges {
+		have[e.Type] = true
+	}
+	if f.Generated != nil {
+		have[f.Generated.Label] = true
+		have[f.Generated.EdgeType] = true
+	}
+	return have
 }
 
 // LoadFS returns a corpus read from root, checked against the same vendored

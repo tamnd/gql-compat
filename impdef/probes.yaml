@@ -51,7 +51,7 @@ probes:
       decimal expansion, so the digits show where the engine stopped.
     fixture: numbers
     statement: |
-      MATCH (v:Value)
+      MATCH (v:Datum)
       WHERE v.n = 1
       RETURN v.x / 3 AS v
     read: cell
@@ -218,7 +218,7 @@ probes:
       evaluate raises anything, or the count comes back.
     fixture: numbers
     statement: |
-      MATCH (v:Value)
+      MATCH (v:Datum)
       WHERE v.n > 0 OR v.n / 0 = 1
       RETURN COUNT(*) AS n
     read: answer
@@ -262,7 +262,7 @@ probes:
     question: The identifier this engine gave the single node of the unit graph.
     fixture: unit
     statement: |
-      MATCH (u:Unit)
+      MATCH (u:Solo)
       RETURN ELEMENT_ID(u) AS v
     read: cell
     note: >-
