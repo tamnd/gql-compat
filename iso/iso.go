@@ -154,6 +154,7 @@ type Catalog struct {
 	bySubclause  map[string]Subclause
 	byBehaviour  map[string]Behaviour
 	statuses     map[string]string
+	reserved     map[string]bool
 }
 
 // Load decodes the embedded artifacts. It is deterministic and does no I/O,
@@ -220,6 +221,7 @@ func (c *Catalog) index() {
 	for _, b := range c.ImplementationDependent {
 		c.byBehaviour[b.Code] = b
 	}
+	c.indexReserved()
 }
 
 // Feature returns the feature with the given code.
@@ -406,6 +408,39 @@ func (c *Catalog) Keywords() []string {
 		}
 	}
 	return sortedKeys(seen)
+}
+
+// Reserved reports whether the word may not be spelled as a
+// <regular identifier>, comparing without regard to case.
+//
+// Subclause 21.3 puts this rule in the Syntax Rules rather than in the
+// productions, so a harness that generates or checks statements has to apply
+// it itself: the grammar alone will happily let a case call a column `start`,
+// and every conforming engine will refuse the statement.
+//
+// The <reserved word> production names <pre-reserved word> rather than
+// repeating its forty words, so both are read. ISO has given those forty no
+// meaning yet and an engine may well admit them; a case in this corpus still
+// avoids them, because a case is not the place to find out which engines do.
+func (c *Catalog) Reserved(word string) bool {
+	return c.reserved[strings.ToUpper(strings.TrimSpace(word))]
+}
+
+// ReservedWords returns every word Reserved answers true for, sorted and
+// upper cased.
+func (c *Catalog) ReservedWords() []string { return sortedKeys(c.reserved) }
+
+func (c *Catalog) indexReserved() {
+	c.reserved = map[string]bool{}
+	for _, name := range []string{"reserved word", "pre-reserved word"} {
+		p, ok := c.Production(name)
+		if !ok {
+			continue
+		}
+		for _, k := range p.Keywords {
+			c.reserved[strings.ToUpper(k)] = true
+		}
+	}
 }
 
 // --- decoding -------------------------------------------------------------

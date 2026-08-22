@@ -103,7 +103,7 @@ cases:
     # statement asks the catalog to hold two of them under one key.
     query: |
       CREATE PROPERTY GRAPH TYPE gqlcompat_gg25 {
-        (:Person)-[:KNOWS => :Close]->(:Person),
+        (:Person)-[:KNOWS => :Nearby]->(:Person),
         (:Person)-[:KNOWS => :Distant]->(:Company)
       }
     expect:

@@ -22,7 +22,7 @@ cases:
     subclauses: ["21.3"]
     productions: [GQL terminal character, token]
     query: |
-      match (u:Unit) return 1 as v
+      match (u:Solo) return 1 as v
     expect:
       kind: accept
 
@@ -31,7 +31,7 @@ cases:
     subclauses: ["21.3"]
     productions: [token]
     query: |
-      MaTcH (u:Unit) ReTuRn 1 AS v
+      MaTcH (u:Solo) ReTuRn 1 AS v
     expect:
       kind: accept
 
@@ -41,7 +41,7 @@ cases:
     productions: [separator, whitespace]
     query: |
       MATCH
-          (u:Unit)
+          (u:Solo)
 
       RETURN
           1     AS     v
@@ -53,7 +53,7 @@ cases:
     subclauses: ["21.3"]
     productions: [separator, comment, bracketed comment]
     query: |
-      MATCH /* here */ (u:Unit) /* and here */ RETURN 1 AS v
+      MATCH /* here */ (u:Solo) /* and here */ RETURN 1 AS v
     expect:
       kind: accept
 
@@ -81,7 +81,7 @@ cases:
     # case exists to prevent. The identifier now sits in a label name, where
     # <identifier> really does reach <delimited identifier>.
     query: |
-      MATCH (u:`Unit`)
+      MATCH (u:`Solo`)
       RETURN 1 AS v
     expect:
       kind: accept
@@ -99,7 +99,7 @@ cases:
     # example of GQL that Cypher will not take. Engine finding, vendor
     # acknowledged.
     query: |
-      MATCH (u:"Unit")
+      MATCH (u:"Solo")
       RETURN 1 AS v
     expect:
       kind: accept
@@ -115,7 +115,7 @@ cases:
     # is expected to fail on Neo4j and on anything else that grew out of
     # Cypher. That is the divergence being reported.
     query: |
-      MATCH (`odd name`:Unit)
+      MATCH (`odd name`:Solo)
       RETURN 1 AS v
     expect:
       kind: reject
@@ -166,7 +166,7 @@ cases:
     subclauses: ["16.7"]
     productions: [path pattern expression, path concatenation]
     query: |
-      MATCH (u:Unit)-[e:LINK]->
+      MATCH (u:Solo)-[e:LINK]->
       RETURN 1 AS v
     expect:
       kind: reject
@@ -186,7 +186,7 @@ cases:
     subclauses: ["16.8"]
     productions: [label expression, label term]
     query: |
-      MATCH (x:Unit Other)
+      MATCH (x:Solo Other)
       RETURN 1 AS v
     expect:
       kind: reject
@@ -196,7 +196,7 @@ cases:
     subclauses: ["19.3"]
     productions: [comparison predicate, equals operator]
     query: |
-      MATCH (u:Unit)
+      MATCH (u:Solo)
       WHERE 1 == 1
       RETURN 1 AS v
     expect:
@@ -226,7 +226,7 @@ cases:
     productions: [simple linear query statement, primitive result statement]
     query: |
       RETURN 1 AS v
-      MATCH (u:Unit)
+      MATCH (u:Solo)
     expect:
       kind: reject
 
