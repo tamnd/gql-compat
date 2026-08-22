@@ -36,7 +36,7 @@ cases:
   - id: condition/22012/division-by-zero
     name: Dividing by zero raises data exception, division by zero
     conditions: ["22012"]
-    subclauses: ["20.21", "4.8.4", "4.9.2"]
+    subclauses: ["20.21", "4.8.4", "4.9.1", "4.9.2"]
     productions: [numeric value expression, term]
     fixture: unit
     # This is the plainest condition in the corpus, so it is where the two
@@ -46,7 +46,9 @@ cases:
     # and 4.9.2 is the GQL-status object, which is the thing carrying the five
     # characters this case matches on. An engine that refuses the division but
     # names no code has the first and not the second, and the runner records
-    # that difference.
+    # that difference. Subclause 4.9.1 is diagnostic information itself, which
+    # is what makes a refusal something a program can read rather than something
+    # a person has to.
     query: |
       RETURN 1 / 0 AS v
     expect:

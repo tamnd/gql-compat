@@ -46,8 +46,11 @@ cases:
     name: INT8 is the 8 bit signed integer type
     features: [GV02]
     requires: [GA05]
-    subclauses: ["4.16.5.1", "4.16.5.3", "18.9", "20.8"]
+    subclauses: ["4.16.1", "4.16.5.1", "4.16.5.3", "18.9", "20.8"]
     productions: [signed binary exact numeric type, value type, cast specification]
+    # First case in the file, so it carries 4.16.1 as well: the subclause that
+    # says which value types the standard predefines and what a base type is,
+    # which is the list every other case here picks one entry out of.
     query: |
       RETURN CAST(127 AS INT8) AS v
     expect:

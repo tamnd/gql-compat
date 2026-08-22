@@ -33,7 +33,7 @@ defaults:
 cases:
   - id: mandatory/session/set-schema-at-the-root
     name: A session may be pointed at the root of the catalog
-    subclauses: ["7", "7.1", "4.5.2.3", "4.7.4", "4.10.3"]
+    subclauses: ["7", "7.1", "4.5.1", "4.5.2.1", "4.5.2.3", "4.7.4", "4.10.1", "4.10.3"]
     productions:
       [
         session set command,
@@ -55,7 +55,11 @@ cases:
     # which is where a request looks when a name in it is not qualified, and the
     # session schema is what that starts out as. Subclause 4.10.3 is commands as
     # against procedures: this is a whole program with no query in it, which is
-    # the distinction that subclause draws.
+    # the distinction that subclause draws, and 4.10.1 is where the standard
+    # draws it. The other two are what the clause acts on. Subclause 4.5.1 is
+    # the GQL-session, which is the only thing in GQL that outlives a statement
+    # and the reason this command has anything to change, and 4.5.2.1 is the
+    # session context, the record of that session a SESSION SET writes into.
     query: |
       SESSION SET SCHEMA /
     expect:

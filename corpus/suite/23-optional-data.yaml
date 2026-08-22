@@ -221,7 +221,7 @@ cases:
   - id: optional/gd01/set-property
     name: SET assigns a property on a bound element
     features: [GD01]
-    subclauses: ["13.3", "22.10", "4.17.2", "4.17.3"]
+    subclauses: ["13.3", "22.10", "4.17.1", "4.17.2", "4.17.3"]
     productions: [set statement, set item, set property item]
     # 22.10 is store assignment, which is the rule that says what happens when
     # a value goes into a property rather than into a record: the value has to
@@ -236,7 +236,9 @@ cases:
     # statement is the second kind. Subclause 4.17.2 is what makes them
     # different: a property of a bound element is a dynamic site, one the engine
     # locates while the statement runs rather than one fixed when it was
-    # analysed.
+    # analysed. Behind both of them is 4.17.1, which is where the standard says
+    # what a site is at all, and a property being a place a value can be put is
+    # the whole of what this statement asks for.
     fixture: pair
     mutating: true
     query: |
@@ -414,7 +416,7 @@ cases:
   - id: optional/gc04/create-graph
     name: CREATE GRAPH adds a graph with an open graph type to the catalog
     features: [GC04, GG01]
-    subclauses: ["12.4", "4.3.5.2"]
+    subclauses: ["12.4", "4.3.1", "4.3.5.1", "4.3.5.2"]
     productions:
       [
         linear catalog-modifying statement,
@@ -435,7 +437,10 @@ cases:
     # Subclause 4.3.5.2 is the graph descriptor, which is what the catalog holds
     # when this statement has run: the graph is not the nodes and edges in it,
     # it is an entry naming a graph type and a content, and an open graph type
-    # is the emptiest descriptor a program can ask for.
+    # is the emptiest descriptor a program can ask for. The two subclauses above
+    # it are what the descriptor describes. Subclause 4.3.5.1 is a graph, and
+    # 4.3.1 is a GQL-object, which is the thing this statement adds to the
+    # catalog and the reason the statement is catalog-modifying and not data.
     query: |
       CREATE GRAPH gqlcompat_create ANY
     expect:
@@ -488,12 +493,14 @@ cases:
   - id: optional/gc01/create-schema
     name: CREATE SCHEMA adds a schema at an absolute directory path
     features: [GC01]
-    subclauses: ["12.2", "4.2.5.3"]
+    subclauses: ["12.2", "4.2.5.1", "4.2.5.3"]
     productions: [create schema statement, catalog schema parent and name, absolute directory path, schema name]
     tags: [write, catalog]
     mutating: true
     # Subclause 4.2.5.3 is what a GQL-schema is, and this statement is the only
-    # way a program puts one in the catalog.
+    # way a program puts one in the catalog. Subclause 4.2.5.1 is the catalog
+    # that schema goes into, the tree of directories and objects the reference
+    # in this statement is a path through.
     query: |
       CREATE SCHEMA /gqlcompat_schema
     expect:
@@ -746,14 +753,16 @@ cases:
   - id: optional/gt01/start-transaction-and-commit
     name: An explicit transaction can be opened and committed
     features: [GT01]
-    subclauses: ["8.1", "8.4", "4.6.2"]
+    subclauses: ["8.1", "8.4", "4.6.1", "4.6.2"]
     productions: [start transaction command, commit command, end transaction command, transaction activity]
     tags: [write, transaction]
     mutating: true
     # Subclause 4.6.2 is transaction demarcation, which is the concept these two
     # commands are the syntax of: a transaction begins where a program says it
     # begins and ends where a program says it ends, rather than around whatever
-    # the engine decided a unit of work was.
+    # the engine decided a unit of work was. Subclause 4.6.1 is the description
+    # of a GQL-transaction itself, which is what the pair of commands brackets
+    # and what an engine with no transactions of its own has nothing to open.
     setup:
       - "START TRANSACTION"
     query: |

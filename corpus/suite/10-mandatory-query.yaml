@@ -318,7 +318,7 @@ cases:
 
   - id: mandatory/query/the-shape-of-a-program
     name: The smallest useful GQL program is a query statement and the standard names every rule between the two
-    subclauses: ["6", "9", "9.1", "14", "14.1", "16.3", "22.8", "4.7.3", "4.10.4.3", "4.10.4.5"]
+    subclauses: ["6", "9", "9.1", "14", "14.1", "16.3", "22.8", "4.7.1", "4.7.3", "4.10.4.1", "4.10.4.3", "4.10.4.5"]
     productions:
       - GQL-program
       - program activity
@@ -373,7 +373,10 @@ cases:
     # is what happens to every query this corpus sends and what no case has said
     # out loud. Subclause 4.10.4.3 is statements, the thing a GQL-procedure is
     # made of, and 4.10.4.5 classifies them by function, which is what makes
-    # this one a query statement rather than a catalog or data statement.
+    # this one a query statement rather than a catalog or data statement. The
+    # other two are the top of that same stack: 4.7.1 is the GQL-request and the
+    # GQL-program, which is what an adapter sends and what this case is named
+    # for, and 4.10.4.1 is the GQL-procedure the program is one of.
 
   # The four cases below are the select statement, ISO 14.12. It is the second
   # way GQL spells a query and it is not an optional feature: no code in

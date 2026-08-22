@@ -24,8 +24,12 @@ defaults:
 cases:
   - id: mandatory/value/literal-integer
     name: An unsigned integer literal is returned as the number it spells
-    subclauses: ["21.2"]
+    subclauses: ["21.2", "4.4.1"]
     productions: [unsigned integer, exact numeric literal, literal]
+    # The smallest thing a GQL engine can be asked to do, and so the place to
+    # cite 4.4.1, which is where the standard says what a value is. Writing a
+    # literal and reading it back is the one query that asks for a value and
+    # nothing else.
     query: |
       RETURN 42 AS v
     expect:
