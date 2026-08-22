@@ -318,17 +318,22 @@ cases:
         power function,
         square root,
         modulus expression,
+        exponential function,
         numeric value expression base,
         numeric value expression exponent,
         numeric value expression dividend,
         numeric value expression divisor,
       ]
+    # EXP is here rather than with the logarithms because GF03 names the
+    # logarithmic functions and EXP is not one, which leaves it in the
+    # unnamed remainder this corpus reads as GF01. Its argument is zero, the
+    # one input whose answer every implementation must agree on exactly.
     query: |
-      RETURN POWER(2, 3) AS p, SQRT(16) AS r, MOD(7, 3) AS m
+      RETURN POWER(2, 3) AS p, SQRT(16) AS r, MOD(7, 3) AS m, EXP(0) AS e
     expect:
       kind: rows
-      columns: [p, r, m]
-      rows: [[8, 4, 1]]
+      columns: [p, r, m, e]
+      rows: [[8, 4, 1, 1]]
 
   - id: optional/gf02/trigonometric-functions
     name: SIN and COS are trigonometric functions of a numeric expression
@@ -348,7 +353,14 @@ cases:
     name: LN, LOG10 and LOG compute logarithms
     features: [GF03]
     subclauses: ["20.22"]
-    productions: [natural logarithm, common logarithm, general logarithm function]
+    productions:
+      [
+        natural logarithm,
+        common logarithm,
+        general logarithm function,
+        general logarithm base,
+        general logarithm argument,
+      ]
     query: |
       RETURN LN(1) AS n, LOG10(100) AS c, LOG(2, 8) AS g
     expect:
@@ -738,7 +750,16 @@ cases:
     name: TRIM removes leading and trailing bytes from a byte string
     features: [GF07]
     subclauses: ["20.25", "4.16.4"]
-    productions: [byte string function, byte string trim function, byte string trim operands]
+    productions:
+      [
+        byte string function,
+        byte string trim function,
+        byte string trim operands,
+        byte string trim source,
+        trim byte string,
+        byte string value expression,
+        byte string primary,
+      ]
     tags: [read, expression, bytes]
     # Three bytes in, one byte out. The length is taken so that the row is an
     # integer: a byte string in a result would have the harness comparing
@@ -750,6 +771,110 @@ cases:
       kind: rows
       columns: [n]
       rows: [[1]]
+
+  - id: optional/gv35/byte-length
+    name: BYTE_LENGTH and OCTET_LENGTH both count the bytes of a byte string
+    features: [GV35]
+    subclauses: ["20.22", "4.16.4"]
+    productions:
+      [
+        numeric value function,
+        length expression,
+        byte length expression,
+        byte string value expression,
+        byte string primary,
+      ]
+    tags: [read, expression, bytes]
+    # The two names are alternatives of one rule and mean the same thing, so a
+    # case that wrote only one would leave an engine free to have half the rule
+    # and still pass. The corpus already writes OCTET_LENGTH in several places
+    # and had never written BYTE_LENGTH, and this is where the two are asked to
+    # agree.
+    #
+    # ISO names no feature for the length of a byte string, only for having
+    # byte strings at all, so the case claims GV35 the way the elements
+    # function case claims GF04. It cannot be a mandatory case that requires
+    # GV35, because an engine may lawfully decline GV35 and a mandatory case it
+    # then failed would be reporting a defect where the standard permits a
+    # choice.
+    #
+    # zu has OCTET_LENGTH and answers "unknown function 'BYTE_LENGTH'" to the
+    # other name.
+    query: |
+      RETURN BYTE_LENGTH(X'00AB00') = OCTET_LENGTH(X'00AB00') AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv35/byte-string-concatenation
+    name: The concatenation operator joins two byte strings
+    features: [GV35]
+    subclauses: ["20.25", "4.16.4"]
+    productions:
+      [byte string value expression, byte string concatenation, byte string primary, concatenation operator]
+    tags: [read, expression, bytes]
+    # The same two vertical bars that join character strings, and a separate
+    # rule in the grammar because the operands are of a different type. The
+    # length is taken so the row is an integer: a byte string in a result would
+    # have the harness comparing whatever spelling the driver chose for it.
+    #
+    # zu refuses with "|| joins strings, got BYTES and BYTES", which is the
+    # same shape as its answer to the mandatory list concatenation case. One
+    # operator with four jobs, wired to one of them.
+    query: |
+      RETURN OCTET_LENGTH(X'0102' || X'0304') = 4 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv35/byte-string-substring
+    name: LEFT and RIGHT take bytes off the ends of a byte string
+    features: [GV35]
+    subclauses: ["20.25", "4.16.4"]
+    productions: [byte string function, byte string substring function, string length]
+    tags: [read, expression, bytes]
+    # LEFT and RIGHT are one rule with two alternatives, so both are written
+    # here. Taking two bytes from each end of a four byte string and adding the
+    # lengths gives four, which an engine that counted hexits rather than bytes
+    # would answer eight to.
+    #
+    # zu refuses both with "left() needs a string and a count of characters,
+    # got BYTES", so it has the character string form of the function and not
+    # the byte string one.
+    query: |
+      RETURN OCTET_LENGTH(LEFT(X'01020304', 2)) + OCTET_LENGTH(RIGHT(X'01020304', 2)) = 4 AS v
+    expect:
+      kind: rows
+      columns: [v]
+      rows: [[true]]
+
+  - id: optional/gv50/trim-list-function
+    name: TRIM over a list and a number is a list value function
+    features: [GV50]
+    subclauses: ["20.16"]
+    productions: [trim list function]
+    tags: [read, expression, list]
+    # The third spelling of TRIM. The first two take a character string and a
+    # byte string, and this one takes a list and a count, which makes TRIM the
+    # only name in the grammar that reaches three different rules depending on
+    # the type of its first argument.
+    #
+    # The case asserts that the engine accepted the call and asserts nothing
+    # about the list that came back. Which end the count applies to is settled
+    # by the Syntax Rules of subclause 20.16, and the artifacts this project
+    # vendors are the grammar and the feature, condition and subclause lists
+    # rather than the prose. A row expectation here would be this project's
+    # reading of a rule it cannot quote, and a corpus that guessed would be
+    # publishing the guess as a conformance result.
+    #
+    # zu declines the two argument form at the comma with "expected ')', found
+    # ','", so its TRIM is the string one only.
+    query: |
+      RETURN TRIM([1, 2, 3], 2) AS v
+    expect:
+      kind: accept
 
   - id: optional/ge05/binding-table-parameter
     name: A binding table passed in as a parameter is a binding table
