@@ -257,3 +257,50 @@ func TestReferrersReadsTheGrammarBackwards(t *testing.T) {
 			roots, len(c.Productions))
 	}
 }
+
+// The table of contents read as a tree. A clause heading specifies nothing on
+// its own, so a report that wants to say Clause 19 is covered because a case
+// covers 19.3 needs to know that 19 contains 19.3, and the numbering is the
+// only place that is written down.
+func TestAncestorsReadTheNumberingAsATree(t *testing.T) {
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("loading: %v", err)
+	}
+	for _, tc := range []struct {
+		number string
+		want   []string
+	}{
+		{"4.2.3.1", []string{"4.2.3", "4.2", "4"}},
+		{"19.3", []string{"19"}},
+		{"19", nil},
+		// A number the standard does not spell out has no ancestors of its own,
+		// but the clauses above it are still real and are still returned.
+		{"19.3.99", []string{"19.3", "19"}},
+		{"99.1", nil},
+		{"", nil},
+	} {
+		got := c.Ancestors(tc.number)
+		if len(got) != len(tc.want) {
+			t.Errorf("%q is inside %v, want %v", tc.number, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("%q is inside %v, want %v", tc.number, got, tc.want)
+				break
+			}
+		}
+	}
+	// Nearest first, and every subclause is inside a clause that exists, which
+	// is what makes the rollup safe to run over the whole corpus.
+	for _, s := range c.Subclauses {
+		up := c.Ancestors(s.Number)
+		if s.Depth > 1 && len(up) == 0 {
+			t.Errorf("%s is at depth %d and is inside nothing", s.Number, s.Depth)
+		}
+		if len(up) > 0 && len(up[0]) <= len(up[len(up)-1]) && len(up) > 1 {
+			t.Errorf("%s reads its ancestors %v outermost first, which is backwards", s.Number, up)
+		}
+	}
+}
