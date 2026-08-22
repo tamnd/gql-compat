@@ -481,6 +481,14 @@ type EngineInfo struct {
 	// which is the floor under every latency in the report. It belongs to the
 	// engine and the route to it, not to any case.
 	RoundTrip metrics.RoundTrip `json:"round_trip"`
+	// SchemaFloors is what each fixture's shape costs this engine before any of
+	// its rows, one entry per fixture the run loaded. It is here beside the
+	// empty store because it is the same measurement asked per schema instead of
+	// once, and it is what the density figures are actually divided against
+	// wherever the adapter could be asked for it. An engine whose adapter cannot
+	// be asked has an entry saying so rather than no entry, because the reader
+	// comparing two engines needs to see which of them answered.
+	SchemaFloors []metrics.SchemaFloor `json:"schema_floors,omitempty"`
 }
 
 // HostInfo is the machine, because a latency table without one is a rumour.

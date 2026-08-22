@@ -41,6 +41,7 @@ var csvColumns = []string{
 	"load_wall_ns", "load_engine_wall_ns", "load_nodes", "load_edges",
 	"load_nodes_per_sec", "load_edges_per_sec",
 	"load_disk_growth_bytes", "load_empty_store_bytes", "load_floor_ratio",
+	"load_floor_from", "load_schema_floor_bytes",
 	"load_schema_bytes", "load_graph_bytes", "load_alloc_unit_bytes",
 	"load_bits_per_edge", "load_bytes_per_node", "load_density_note",
 	"load_rss_peak_bytes", "load_cpu_user_ns", "load_cpu_sys_ns",
@@ -126,7 +127,11 @@ func csvRow(c *runner.CaseResult) []string {
 			ftoa(l.NodesPerSec), ftoa(l.EdgesPerSec),
 			when(l.Disk.OK, i64(l.Disk.Growth())),
 			when(l.EmptyBytes > 0, i64(l.EmptyBytes)), when(l.FloorRatio > 0, ftoa(l.FloorRatio)),
-			when(l.SchemaBytes > 0, i64(l.SchemaBytes)), when(l.SchemaBytes > 0, i64(l.GraphBytes)),
+			// Which of the three the ratio and the graph column came off. A
+			// density read out of this file without it is a number whose
+			// denominator the reader has guessed.
+			string(l.Floor), when(l.SchemaFloorBytes > 0, i64(l.SchemaFloorBytes)),
+			when(l.SchemaBytes > 0, i64(l.SchemaBytes)), when(l.GraphBytes > 0, i64(l.GraphBytes)),
 			when(l.AllocUnit > 0, i64(l.AllocUnit)),
 			// Blank rather than zero where the floor check refused: a zero here
 			// would be read as a density of nothing rather than as no density.
@@ -139,7 +144,7 @@ func csvRow(c *runner.CaseResult) []string {
 	} else {
 		// This case reused a fixture another case loaded. Blank is right:
 		// zero would say the load was free.
-		row = append(row, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
+		row = append(row, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 
 	row = append(row,

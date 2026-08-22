@@ -54,6 +54,27 @@ const (
 // Nothing here works around any of that; a fixture needing it is filtered by
 // Capabilities before Load is ever called.
 func writeFixtureDB(ctx context.Context, path string, fx *fixture.Fixture) error {
+	return stageFixtureDB(ctx, path, fx, true)
+}
+
+// writeFixtureSchemaDB writes the fixture's shape into path and none of its
+// rows: every node table, every rel table, every property column with the type
+// it would have carried, and not one row in any of them.
+//
+// It is the same plan the fixture itself is staged from, which is what makes it
+// worth measuring. The tables are named by the same labels, the columns are
+// named and typed by the same rule, and the file is claimed for zu the same
+// way, so what `zu convert` writes out of it is the store this fixture would
+// have been loaded into rather than a store that resembles it. The harness
+// weighs that store and calls it this fixture's floor.
+func writeFixtureSchemaDB(ctx context.Context, path string, fx *fixture.Fixture) error {
+	return stageFixtureDB(ctx, path, fx, false)
+}
+
+// stageFixtureDB is both of the above. rows says whether the tables are filled
+// after they are created, and nothing else differs: a floor measured from a
+// file built any other way would be a floor for a different database.
+func stageFixtureDB(ctx context.Context, path string, fx *fixture.Fixture, rows bool) error {
 	plan, err := planFixture(fx)
 	if err != nil {
 		return err
@@ -96,6 +117,12 @@ func writeFixtureDB(ctx context.Context, path string, fx *fixture.Fixture) error
 		if err := t.create(ctx, tx); err != nil {
 			return err
 		}
+	}
+	if !rows {
+		// The shape and nothing else, which is what a floor measurement wants.
+		// The count check below is skipped rather than inverted: what it guards
+		// against is a graph written short, and here there is no graph.
+		return tx.Commit()
 	}
 	for _, t := range plan.nodeTables {
 		if err := t.fill(ctx, tx); err != nil {

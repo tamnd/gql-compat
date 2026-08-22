@@ -308,6 +308,45 @@ type Explainer interface {
 	Explain(ctx context.Context, stmt string, params map[string]any) (string, error)
 }
 
+// SchemaLoader is a session whose engine can be given a fixture's shape with
+// none of its contents: the labels, the edge types, the property names and the
+// types those properties hold, and not one node or edge. It is optional; the
+// runner asks for it with a type assertion and falls back to what the engine
+// says about its own store, and then to the run's empty load, when a session
+// does not have it.
+//
+// It exists because the floor a density figure has to be measured against is
+// schema dependent and the harness was treating it as though it were not. An
+// engine that keeps a file per label writes more for a fixture with six labels
+// than for one with two, before either holds a row, so weighing one empty store
+// at the start of the run and subtracting it from every fixture charges the
+// six-label graph for five files it was always going to pay for. The run of
+// 2026-08-12 published nine densities computed against a single 256 KiB
+// measurement, and the fixture that looked densest was the one whose schema was
+// cheapest.
+//
+// It also beats asking the engine, which is why it is tried first. An engine
+// that reports a schema size reports the bytes it attributes to schema, and a
+// store that allocates in whole blocks holds slack it attributes to neither
+// schema nor graph. Subtracting that subtotal from the size of a directory
+// hands the whole of the slack to the graph: the run of 2026-08-22 published
+// 5 570 560 bits per edge for a seven-node fixture that way, from a store whose
+// blocks were almost entirely empty. A load of the schema on its own is weighed
+// the same way the loaded store is weighed, so the slack is on both sides of
+// the subtraction and cancels.
+//
+// What the harness does with it is subtract: this fixture's store, minus this
+// fixture's schema, over this fixture's graph. So the contract is that the
+// store left behind is one the fixture could be loaded into without any further
+// shape being created, and an adapter that cannot promise that should not
+// implement this rather than approximate it.
+type SchemaLoader interface {
+	// LoadSchema puts the fixture's shape into the store and nothing else. It
+	// returns what that cost, with Nodes and Edges zero; an adapter that cannot
+	// do it for a particular fixture returns an error and the run falls back.
+	LoadSchema(ctx context.Context, fx *fixture.Fixture) (LoadStats, error)
+}
+
 // LoadStats is what an adapter can say about an ingest beyond what the
 // harness times from outside.
 type LoadStats struct {

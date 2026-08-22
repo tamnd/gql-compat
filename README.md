@@ -217,6 +217,14 @@ Every case, not just the performance ones, carries a full measurement:
   query because the two are optimised against each other: an engine can buy a
   fast scan with a slow, wide write, and a report that timed only queries would
   call that free.
+- **Density floors** — a store size divided by a graph is mostly the engine's
+  preallocation unless the fixed part comes off first, so the run measures that
+  fixed part per fixture: before each fixture is loaded, the same engine is
+  given that fixture's shape with none of its rows and the store is weighed.
+  Where an adapter cannot be asked for a shape the run falls back to what the
+  engine says about its own store, and then to one load of an empty graph, and
+  every density says in a **floor from** column which of the three it was
+  divided against.
 
 > **Unavailable is never zero.** Page-fault counters are Linux-only, a server
 > engine's data directory is not on this machine, and a sampler that got no

@@ -614,12 +614,15 @@ func (h *htmlWriter) loads(rep *runner.Report) {
 	h.p(`<p>One row per fixture load. Cases that reused a graph another case had already loaded contribute nothing here, which is why these times must not be summed into a per-case cost.</p>`)
 	h.p(`<p><b>Wall</b> is everything the harness waited for; <b>engine</b> is the part of it the engine itself spent, where the adapter can separate the two, and is what the rates are computed against. The gap between them is this harness's cost of getting the fixture in &mdash; a staging file, an encoded batch, a process start &mdash; and belongs to the route rather than to the store.</p>`)
 	h.p(`<p>%s</p>`, e(floorSentence(rep)))
+	if s := schemaFloorSentence(rep); s != "" {
+		h.p(`<p>%s</p>`, e(s))
+	}
 	if s := schemaSentence(loadsOf(rep.Cases)); s != "" {
 		h.p(`<p>%s</p>`, e(s))
 	}
 	h.p(`<table class="grid wide"><thead><tr>`)
 	for _, col := range []string{"Fixture", "Triggered by", "Nodes", "Edges", "Wall", "Engine", "nodes/s", "edges/s",
-		"Apparent Δ", "Allocated Δ", "× floor", "graph", "bits/edge", "bytes/node", "RSS peak", "CPU"} {
+		"Apparent Δ", "Allocated Δ", "× floor", "floor from", "graph", "bits/edge", "bytes/node", "RSS peak", "CPU"} {
 		h.p(`<th class="n">%s</th>`, e(col))
 	}
 	h.p(`</tr></thead><tbody>`)
@@ -637,7 +640,7 @@ func (h *htmlWriter) loads(rep *runner.Report) {
 			strconv.Itoa(l.Nodes), strconv.Itoa(l.Edges), metrics.Format(l.Wall), engine,
 			num(l.NodesPerSec), num(l.EdgesPerSec),
 			dashSigned(l.Disk.OK, l.Disk.Growth()), dashSigned(l.Disk.OK, l.Disk.AllocGrowth()),
-			floorCell(l), dashBytes(l.SchemaBytes > 0, l.GraphBytes),
+			floorCell(l), floorFromCell(l), dashBytes(l.GraphBytes > 0, l.GraphBytes),
 			dashFloat(l.DensityOK, l.BitsPerEdge), dashFloat(l.DensityOK, l.BytesPerNode),
 			dashBytes(l.Process.MemoryOK, l.Process.RSSPeak), cpu,
 		}

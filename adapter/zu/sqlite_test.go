@@ -385,3 +385,94 @@ func TestAnExtraLabelIsHeldToTheSameShapeAsATable(t *testing.T) {
 		t.Error("planned a label that is not a name")
 	}
 }
+
+// The floor a density is divided against is a store holding the fixture's shape
+// and none of its rows, so the file staged for it has to be the same file minus
+// the rows: same tables, same columns, same declared types, nothing selectable
+// out of any of them. A shape written from a different plan would be a floor for
+// a different database, and subtracting it would leave a number about neither.
+func TestAShapeIsStagedWithEveryTableAndNoRows(t *testing.T) {
+	fx := &fixture.Fixture{
+		Name: "shape",
+		Nodes: []fixture.Node{
+			{Key: "a", Labels: []string{"Person", "Employee"}, Props: map[string]any{"name": "Ada", "age": 36}},
+			{Key: "b", Labels: []string{"Person"}, Props: map[string]any{"name": "Bob", "age": 41}},
+			{Key: "c", Labels: []string{"City"}, Props: map[string]any{"name": "Turin"}},
+		},
+		Edges: []fixture.Edge{
+			{Type: "KNOWS", From: "a", To: "b", Props: map[string]any{"since": 2019}},
+			{Type: "LIVES_IN", From: "a", To: "c"},
+		},
+	}
+	dir := t.TempDir()
+	full := filepath.Join(dir, "full.db")
+	if err := writeFixtureDB(context.Background(), full, fx); err != nil {
+		t.Fatal(err)
+	}
+	shape := filepath.Join(dir, "shape.db")
+	if err := writeFixtureSchemaDB(context.Background(), shape, fx); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := ddl(t, shape), ddl(t, full); !slices.Equal(got, want) {
+		t.Errorf("the shape declares\n%v\nand the fixture declares\n%v", got, want)
+	}
+	for _, table := range []string{"n_Person", "n_City", "r_KNOWS", "r_LIVES_IN", "zu_labels"} {
+		if n := count(t, shape, table); n != 0 {
+			t.Errorf("%s holds %d rows in a database that is meant to hold none", table, n)
+		}
+	}
+	// And the fixture's own staging still carries the graph, which is the half
+	// of this that a shared code path could break silently: the count check
+	// inside the loader compares the plan against the fixture and would pass on
+	// a file where every insert had been skipped.
+	if n := count(t, full, "n_Person"); n != 2 {
+		t.Errorf("the fixture staged %d people, want 2", n)
+	}
+	if n := count(t, full, "r_KNOWS"); n != 1 {
+		t.Errorf("the fixture staged %d KNOWS edges, want 1", n)
+	}
+}
+
+// ddl is every table and index statement in a staged database, in a fixed
+// order, which is the whole of what a shape is.
+func ddl(t *testing.T, path string) []string {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	rows, err := db.QueryContext(context.Background(),
+		"SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func count(t *testing.T, path, table string) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var n int
+	if err := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+table).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
