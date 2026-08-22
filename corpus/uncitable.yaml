@@ -38,6 +38,13 @@
 #                       added behind an entry that earned its place some other
 #                       way, and it cannot creep outward into rules that are in
 #                       fact reachable.
+#   unnameable          The rule is the name of a kind of catalog object, or is
+#                       written out of one, and the grammar spells no statement
+#                       that creates one. ISO names its create statements after
+#                       what they make, so the loader answers this by looking
+#                       for a create statement of that kind and finding none.
+#                       This is the feature register's second reason seen from
+#                       the grammar rather than from the feature list.
 #
 # Nothing here changes a denominator. There are still 814 productions and a
 # corpus citing 429 of them still reads as 429 of 814. What changes is that
@@ -119,6 +126,36 @@ uncitable:
       list is where GP14 and GP15 live, a binding table and a graph passed to a
       procedure, and both features are registered as unwritable for the same
       reason the call is: there is no procedure to pass anything to.
+
+  - production: binding table name
+    why: unnameable
+    object: binding table
+    note: >-
+      A binding table reference is a catalog path ending in one of these, and
+      the catalog holds a binding table only if something outside GQL put it
+      there. The grammar has a create schema statement, a create graph
+      statement and a create graph type statement, and no create binding table
+      statement, so there is no name a portable case could write. The corpus
+      does read binding tables as values: it is handed one as a parameter and
+      it writes one as a nested query, and neither of those is a name.
+
+  - production: delimited binding table name
+    why: unnameable
+    object: binding table
+    note: >-
+      The same name in accent quotes, and the alternative of binding table
+      reference that takes no catalog path in front of it. Quoting a name does
+      not bring the table it names into existence.
+
+  - production: catalog binding table parent and name
+    why: unnameable
+    object: binding table
+    note: >-
+      Subclause 17.4 defines this rule beside binding table reference and no
+      rule in the grammar names it, which makes it the rarest thing in here: a
+      rule that is unreachable twice over. Even read as the parent and name
+      half of a binding table reference, it ends in a binding table name, and
+      that is the name no statement creates.
 
   - production: procedure argument
     why: orphaned

@@ -49,6 +49,13 @@ func TestShippedGrammarRegisterHoldsUp(t *testing.T) {
 					t.Errorf("<%s> is reachable from <%s>, which is not registered", u.Production, r)
 				}
 			}
+		case corpus.UnnameableRule:
+			if u.Object == "" {
+				t.Errorf("<%s> names no kind of catalog object", u.Production)
+			}
+			if known.Creates(u.Object) {
+				t.Errorf("<%s> names %s, which the grammar has a create statement for", u.Production, u.Object)
+			}
 		default:
 			t.Errorf("<%s> claims reason %q, which no check in this test covers", u.Production, u.Why)
 		}
@@ -212,6 +219,26 @@ func TestTheGrammarRegisterRefusesAnEntryItCannotCheck(t *testing.T) {
 			name: "an orphan that names a feature it has no business naming",
 			doc:  entry("  - production: procedure name\n    why: orphaned\n    feature: GP04\n    note: one\n"),
 			want: "names no feature",
+		},
+		{
+			name: "an unnameable entry with no object",
+			doc:  entry("  - production: binding table name\n    why: unnameable\n    note: one\n"),
+			want: "no object",
+		},
+		{
+			name: "an unnameable entry for a kind the grammar creates",
+			doc:  entry("  - production: graph name\n    why: unnameable\n    object: graph\n    note: one\n"),
+			want: "create graph statement",
+		},
+		{
+			name: "an unnameable entry for a rule that spells no such name",
+			doc:  entry("  - production: match statement\n    why: unnameable\n    object: binding table\n    note: one\n"),
+			want: "neither is the name of a binding table nor names one",
+		},
+		{
+			name: "an orphan that names an object it has no business naming",
+			doc:  entry("  - production: procedure name\n    why: orphaned\n    object: procedure\n    note: one\n"),
+			want: "names no kind of catalog object",
 		},
 		{
 			name: "a schema this build does not read",

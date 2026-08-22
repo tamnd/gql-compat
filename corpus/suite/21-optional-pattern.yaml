@@ -390,10 +390,44 @@ cases:
     name: A path variable declaration binds the whole path as a value
     features: [G004]
     subclauses: ["16.4", "20.13"]
-    productions: [path variable declaration, path variable, path value expression]
+    productions:
+      [
+        path variable declaration,
+        path variable,
+        path value expression,
+        graph pattern variable,
+        path or subpath variable,
+      ]
+    # The last two are the standard's own name for what a pattern declares.
+    # Nothing in the grammar names either rule, the way nothing names <token>:
+    # they are there so the clauses about scope and about degree of reference
+    # have a word for the variables a pattern brings into being. A path
+    # variable is one of the two things a graph pattern variable can be, and
+    # this is the case that declares one, so this is where the two rules are
+    # cited rather than nowhere.
     query: |
       MATCH pv = (a:Step)-[:LINK]->(b:Step)
       RETURN COUNT(pv) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/g004/path-variable-in-a-yield-clause
+    name: A yield clause may export a path variable and not the elements
+    features: [G004, GQ19]
+    subclauses: ["16.14", "16.4"]
+    productions: [path variable reference]
+    fixture: chain
+    # A yield item is an element variable reference or a path variable
+    # reference, and the corpus had only ever yielded elements. Naming the
+    # path and not the nodes is the case that tells the two apart, and
+    # counting what comes out says the pattern still matched the same five
+    # paths it matches without the clause.
+    query: |
+      MATCH pv = (a:Step)-[:LINK]->(b:Step)
+      YIELD pv
+      RETURN COUNT(*) AS n
     expect:
       kind: rows
       columns: [n]
