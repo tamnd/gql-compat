@@ -313,7 +313,7 @@ cases:
     name: A for statement turns each element of a list into a record
     features: [GQ10]
     subclauses: ["14.8"]
-    productions: [for statement, for item, list value constructor]
+    productions: [for statement, for item, for item alias, list value constructor]
     fixture: unit
     query: |
       FOR x IN [1, 2, 3]
@@ -564,6 +564,45 @@ cases:
     query: |
       MATCH (p:Person)-[:KNOWS]->(q:Person)
       YIELD q
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/gq19/graph-pattern-yield-two-items
+    name: A yield clause naming two variables is a list of yield items
+    features: [GQ19]
+    subclauses: ["16.14"]
+    productions: [graph pattern yield item list]
+    tags: [pattern]
+    # One item is a list of one and the comma is never read, so the case above
+    # cannot tell an engine that has the list from an engine that has a single
+    # item after YIELD.
+    query: |
+      MATCH (p:Person)-[:KNOWS]->(q:Person)
+      YIELD p, q
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
+  - id: optional/gq19/graph-pattern-yield-no-bindings
+    name: NO BINDINGS exports nothing from a pattern and keeps its rows
+    features: [GQ19]
+    subclauses: ["16.14"]
+    productions: [graph pattern yield item list]
+    tags: [pattern]
+    # NO BINDINGS is the other alternative of the yield item list and the one
+    # that says what the clause is for: the pattern still matches and the
+    # binding table still has a row per match, and what changes is that no
+    # variable is in scope after it. A binding table is a multiset of records,
+    # so a record with no fields is still a record and five of them are five
+    # rows to count.
+    query: |
+      MATCH (p:Person)-[:KNOWS]->(q:Person)
+      YIELD NO BINDINGS
       RETURN COUNT(*) AS n
     expect:
       kind: rows
