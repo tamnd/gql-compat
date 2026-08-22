@@ -697,7 +697,7 @@ cases:
     name: PATH builds a path value out of nodes and edges
     features: [GE06]
     subclauses: ["20.14", "4.11.2"]
-    productions: [path value constructor, path value constructor by enumeration, path element list]
+    productions: [path value constructor, path value constructor by enumeration, path element list, path element list start]
     requires: [GA09]
     fixture: chain
     tags: [read, expression, path]
@@ -736,7 +736,7 @@ cases:
     name: PATH_LENGTH counts the edges of a path
     features: [GF04]
     subclauses: ["20.13", "4.11.2"]
-    productions: [path length expression, path value expression]
+    productions: [path length expression, path value expression, path value primary]
     fixture: chain
     tags: [read, expression, path]
     # Length is edges, not nodes: this path has two nodes and one edge.
@@ -748,6 +748,32 @@ cases:
       kind: rows
       columns: [len]
       rows: [[1]]
+
+  - id: optional/g004/path-value-concatenation
+    name: Two paths that meet at a node concatenate into one
+    features: [G004]
+    requires: [GF04]
+    subclauses: ["20.13", "4.11.2"]
+    productions: [path value concatenation, path value expression 1]
+    fixture: chain
+    tags: [read, expression, path]
+    # The two operand rules of the concatenation exist because the operator is
+    # not symmetric in what it accepts: the left side is a path value
+    # expression, so concatenations chain leftward, and the right side is a
+    # primary, so they do not chain rightward without parentheses. The second
+    # pattern starts at the node the first one ended at, which is what makes
+    # the two paths joinable at all, and the result is the two hop path from
+    # step 0 to step 2. Its length is the sum of the two lengths, which is the
+    # cheapest question that distinguishes a concatenation from an engine
+    # returning either operand.
+    query: |
+      MATCH p = (a:Step)-[:LINK]->(b:Step), q = (b)-[:LINK]->(c:Step)
+      WHERE a.step = 0
+      RETURN PATH_LENGTH(p || q) AS len
+    expect:
+      kind: rows
+      columns: [len]
+      rows: [[2]]
 
   - id: optional/gf04/elements-function
     name: ELEMENTS answers the nodes and edges of a path as a list

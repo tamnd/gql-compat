@@ -191,6 +191,31 @@ cases:
       columns: [n]
       rows: [[5]]
 
+  - id: optional/gp11/graph-variable-named-as-a-variable
+    name: VARIABLE in front of a name says it is a variable and not a catalog object
+    features: [GP01, GP11, GP12, GP17]
+    subclauses: ["11.1", "10.1"]
+    productions: [object expression primary]
+    requires: [GQ01]
+    # A graph expression is a catalog reference, a name that could be either,
+    # or one of these. The case above writes the bare name, which the engine
+    # has to resolve by looking for a variable and then for a catalog object;
+    # this writes the form that says which one it is before the engine looks.
+    # An engine that reads only the bare name passes the case above and fails
+    # this one, which is the difference the two cases are here to measure.
+    query: |
+      CALL {
+        PROPERTY GRAPH g = CURRENT_PROPERTY_GRAPH
+        USE VARIABLE g
+        MATCH (p:Person)
+        RETURN COUNT(*) AS n
+      }
+      RETURN n AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
   - id: optional/gp08/binding-table-variable-from-a-subquery
     name: A procedure body may bind a nested query's table to a variable
     features: [GP01, GP08, GP10, GP17]

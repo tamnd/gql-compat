@@ -13,8 +13,8 @@ import (
 //go:embed uncitable.yaml
 var uncitableYAML []byte
 
-// Why is why no case can cite a grammar production. There are three, each with
-// a check a machine can make, and a fourth means finding another fact about the
+// Why is why no case can cite a grammar production. There are four, each with a
+// check a machine can make, and a fifth means finding another fact about the
 // grammar a program can verify rather than another way of saying nobody has got
 // to it yet.
 type Why string
@@ -33,6 +33,12 @@ const (
 	// no path through the grammar that reaches it without going through
 	// something already known to be out of reach.
 	Orphaned Why = "orphaned"
+	// Unnameable is a rule that spells the name of a catalog object no GQL
+	// statement creates. The same fact the feature register calls unnameable,
+	// seen from the grammar: a case reaching the rule has to write a name, and
+	// the only names there are are ones something outside the language put
+	// there.
+	UnnameableRule Why = "unnameable"
 )
 
 // Because is the sentence a report writes about a group of entries sharing this
@@ -46,6 +52,8 @@ func (w Why) Because() string {
 		return "the rule spells an optional feature the feature register already says no portable case can be written for, so the only way to reach it is to write the case that cannot be written"
 	case Orphaned:
 		return "every rule that names this one is itself registered, so there is no path through the grammar that reaches it without going through something already out of reach"
+	case UnnameableRule:
+		return "the rule spells the name of a kind of catalog object no GQL statement creates, so a case reaching it would have to invent a name the standard does not supply and every engine would fail it for the same uninteresting reason"
 	}
 	return string(w)
 }
@@ -74,8 +82,13 @@ type Uncitable struct {
 	Why Why `yaml:"why" json:"why"`
 	// Feature is the optional feature code the rule spells. Required by
 	// BehindAnUnwritableFeature, which checks it against the feature register,
-	// and refused by the other two.
+	// and refused by the other three.
 	Feature string `yaml:"feature,omitempty" json:"feature,omitempty"`
+	// Object is the kind of catalog object the rule names, written as the
+	// grammar writes the thing rather than the rule: "binding table", not
+	// "binding table name". Required by UnnameableRule, which checks that the
+	// grammar spells no statement creating one, and refused by the other three.
+	Object string `yaml:"object,omitempty" json:"object,omitempty"`
 	// Note is why this is the end of it rather than a gap. Required: an entry
 	// without one is a production somebody gave up on.
 	Note string `yaml:"note" json:"note"`
@@ -138,6 +151,10 @@ func ReadUncitable(data []byte, known KnownGrammar, features []Unwritable) ([]Un
 			return nil, fmt.Errorf("%s: a %s entry names no feature, its claim being about the grammar rather than about one feature",
 				where, u.Why)
 		}
+		if u.Why != UnnameableRule && u.Object != "" {
+			return nil, fmt.Errorf("%s: a %s entry names no kind of catalog object, its claim not being about what a name can be written for",
+				where, u.Why)
+		}
 		switch u.Why {
 		case Implementers:
 			if !known.LeftToTheImplementation(u.Production) {
@@ -163,6 +180,17 @@ func ReadUncitable(data []byte, known KnownGrammar, features []Unwritable) ([]Un
 						where, r, r)
 				}
 			}
+		case UnnameableRule:
+			switch {
+			case u.Object == "":
+				return nil, fmt.Errorf("%s: no object, so there is no kind of thing to ask whether a statement creates", where)
+			case known.Creates(u.Object):
+				return nil, fmt.Errorf("%s: the grammar spells a create %s statement, so a case can bring one into existence and name it",
+					where, u.Object)
+			case !spellsTheNameOf(known, u.Production, u.Object):
+				return nil, fmt.Errorf("%s: the rule neither is the name of a %s nor names one, so what it spells is reachable some other way",
+					where, u.Object)
+			}
 		case "":
 			return nil, fmt.Errorf("%s: no reason, so the entry claims nothing a machine can check", where)
 		default:
@@ -172,6 +200,16 @@ func ReadUncitable(data []byte, known KnownGrammar, features []Unwritable) ([]Un
 	out := append([]Uncitable(nil), f.Uncitable...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Production < out[j].Production })
 	return out, nil
+}
+
+// spellsTheNameOf reports whether the rule is a name of this kind of object or
+// is written out of one. The three shapes are the rule that is the name, the
+// delimited spelling of the same name, and a rule whose right-hand side names
+// one, which is how a catalog reference reaches it.
+func spellsTheNameOf(known KnownGrammar, production, object string) bool {
+	return production == object+" name" ||
+		production == "delimited "+object+" name" ||
+		known.Names(production, object)
 }
 
 // Uncitables returns the register that ships with this package, checked against
