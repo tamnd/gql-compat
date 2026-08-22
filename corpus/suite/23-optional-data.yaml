@@ -24,7 +24,7 @@ cases:
     name: INSERT adds a node and the same statement can return its properties
     features: [GD01]
     subclauses: ["13.2"]
-    productions: [insert statement, insert graph pattern, insert node pattern, insert element pattern filler]
+    productions: [insert statement, insert graph pattern, insert node pattern, insert element pattern filler, property key value pair]
     fixture: blank
     mutating: true
     query: |
@@ -34,6 +34,37 @@ cases:
       kind: rows
       columns: [name, age]
       rows: [[Zoe, 30]]
+
+  - id: optional/gd01/the-shape-of-a-writing-program
+    name: A program that writes takes a different path through the standard than one that only reads, and every rule on it has a name
+    features: [GD01]
+    subclauses: ["9", "9.1", "13", "13.1"]
+    productions:
+      - data-modifying procedure specification
+      - statement
+      - linear data-modifying statement
+      - ambient linear data-modifying statement
+      - ambient linear data-modifying statement body
+      - simple linear data-accessing statement
+      - simple data-accessing statement
+      - simple data-modifying statement
+      - primitive data-modifying statement
+      - insert statement
+    fixture: blank
+    mutating: true
+    query: |
+      INSERT (x:Person {name: 'Zoe'})
+      RETURN x.name AS name
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[Zoe]]
+    # The companion of mandatory/query/the-shape-of-a-program, and the reason
+    # there are two. A reading program goes <procedure specification> to
+    # <query specification>; a writing one goes to <data-modifying procedure
+    # specification> and then down a chain of its own that ends at <insert
+    # statement>. Nine rules apart, one statement apart, and the corpus cited
+    # none of them until this case.
 
   - id: optional/gd01/insert-is-visible-to-a-later-match
     name: A node inserted by one statement is matched by the next
@@ -426,7 +457,7 @@ cases:
     name: An explicit transaction can be opened and committed
     features: [GT01]
     subclauses: ["8.1", "8.4"]
-    productions: [start transaction command, commit command]
+    productions: [start transaction command, commit command, end transaction command, transaction activity]
     tags: [write, transaction]
     mutating: true
     setup:
@@ -509,7 +540,7 @@ cases:
     name: SESSION SET VALUE defines a parameter the session can then read
     features: [GS03]
     subclauses: ["7.1", "7.4"]
-    productions: [session set command, session set value parameter clause, session set parameter name]
+    productions: [session activity, session set command, session set parameter clause, session set value parameter clause, session set parameter name]
     tags: [write, session]
     mutating: true
     setup:

@@ -30,7 +30,7 @@ cases:
   - id: mandatory/pattern/edge-pattern-directed
     name: A right-pointing full edge pattern binds edges of a type in their direction
     subclauses: ["16.7"]
-    productions: [edge pattern, full edge pattern, full edge pointing right, path pattern expression]
+    productions: [element pattern, edge pattern, full edge pattern, full edge pointing right, path pattern expression]
     query: |
       MATCH (p:Person)-[k:KNOWS]->(q:Person)
       RETURN p.name AS knower, q.name AS known
@@ -139,7 +139,7 @@ cases:
   - id: mandatory/pattern/property-specification
     name: A property key-value pair in a pattern filters as an equality would
     subclauses: ["16.4"]
-    productions: [element property specification, property key value pair list]
+    productions: [element property specification, property key value pair list, property key value pair]
     query: |
       MATCH (p:Person {name: 'Alice'})
       RETURN p.age AS age
