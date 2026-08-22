@@ -149,8 +149,18 @@ cases:
     name: An at sign before a quoted string turns off escape processing
     features: [GL11]
     subclauses: ["21.2", "21.3"]
-    productions: [character string literal, no escape]
+    productions:
+      [
+        character string literal,
+        no escape,
+        single quoted character sequence,
+        commercial at,
+      ]
     tags: [lexical]
+    # <single quoted character sequence> ::= [ <no escape> ] <unbroken single
+    # quoted character sequence>, so the at sign is inside the sequence rule
+    # rather than in front of it, and this is the only case in the corpus that
+    # takes the optional half of that rule.
     query: |
       RETURN @'a\nb' AS v
     expect:

@@ -73,7 +73,15 @@ cases:
   - id: grammar/delimited-identifier-accent
     name: An accent-quoted identifier may stand where the grammar writes an identifier
     subclauses: ["21.3"]
-    productions: [label name, delimited identifier, accent quoted character sequence]
+    productions:
+      [
+        label name,
+        delimited identifier,
+        accent quoted character sequence,
+        unbroken accent quoted character sequence,
+        accent quoted character representation,
+        grave accent,
+      ]
     # This case used to put the accent-quoted identifier in the variable slot,
     # where the grammar does not admit one, and every engine tested accepted it
     # because Cypher allows backticked variables. It was scoring a pass for a
@@ -89,7 +97,15 @@ cases:
   - id: grammar/delimited-identifier-double-quoted
     name: A double-quoted identifier is the other delimited form
     subclauses: ["21.3"]
-    productions: [label name, delimited identifier, double quoted character sequence]
+    productions:
+      [
+        label name,
+        delimited identifier,
+        double quoted character sequence,
+        unbroken double quoted character sequence,
+        double quoted character representation,
+        double quote,
+      ]
     # <delimited identifier> ::= <double quoted character sequence> | <accent
     # quoted character sequence>, so the two forms are interchangeable and an
     # engine that takes one and refuses the other is reading double quotes as a
