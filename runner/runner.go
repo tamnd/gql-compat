@@ -749,7 +749,11 @@ func (e *executor) run(ctx context.Context, c *corpus.Case) (r CaseResult) {
 	// can be repeated depends on what putting its fixture back costs, and this
 	// is the first moment the run knows.
 	e.plan(c, &r)
-	e.execute(ctx, sess, c, fx, stmt, &r)
+	if c.Fault != "" {
+		e.executeFault(ctx, sess, c, stmt, &r)
+	} else {
+		e.execute(ctx, sess, c, fx, stmt, &r)
+	}
 	if c.Mutating {
 		e.dirty = true
 	}
@@ -1224,6 +1228,92 @@ func (e *executor) execute(ctx context.Context, sess adapter.Session, c *corpus.
 	r.Plan = e.explain(ctx, sess, stmt, c.Params, timeout, last)
 	judge(c, last, lastErr, e.caps, r)
 	e.checkParses(ctx, sess, c, timeout, r)
+}
+
+// executeFault runs a case whose condition is raised by the channel dying under
+// the statement rather than by anything the statement says.
+//
+// It is a separate path from execute because almost nothing execute does
+// applies. There are no warm-ups, because the channel exists once. There are no
+// repetitions, because the first execution destroys the session and a second
+// would be measuring a different one. There is no plan, because there is
+// nothing left to ask. There is no disk measurement, because the case is about
+// what a client knows and not about what a store weighs, and a directory read
+// after a process was killed mid-transaction would be a number nobody could
+// interpret.
+//
+// What it does have is the same judge as every other case, on purpose. The
+// case names a GQLSTATUS, something came back, and the comparison is the same
+// comparison. What differs is who is being graded, which is why the record
+// says so and the reason ends with a sentence naming the client.
+func (e *executor) executeFault(ctx context.Context, sess adapter.Session, c *corpus.Case, stmt string, r *CaseResult) {
+	timeout := e.cfg.Timeout
+	if c.TimeoutMS > 0 {
+		timeout = time.Duration(c.TimeoutMS) * time.Millisecond
+	}
+	r.Repeats, r.Warmups, r.Timing = 1, 0, TimingSeries
+	r.TimingNote = "one execution: the fault ends the session, so there is no second one to compare it with"
+
+	inj, ok := sess.(adapter.FaultInjector)
+	if !ok {
+		r.Outcome, r.Skip = Skip, SkipNoFaultInjection
+		r.WantStatus = c.Expect.GQLStatus
+		r.Reason = fmt.Sprintf(
+			"the condition is reached by destroying the channel with the statement in flight, and the %s adapter has no way to destroy one, so this is a gap in the adapter rather than in the engine",
+			e.cfg.Driver.Name())
+		return
+	}
+	if c.Fault != corpus.FaultCutAfterSend {
+		r.Outcome = Error
+		r.Reason = fmt.Sprintf("the case asks for the %s fault and this runner injects only %s",
+			c.Fault, corpus.FaultCutAfterSend)
+		return
+	}
+
+	// The setup is what makes the fault mean anything: a commit whose outcome
+	// is unknown is only interesting when there was a transaction to commit.
+	if !e.setup(ctx, sess, c, timeout, r) {
+		return
+	}
+
+	t := inj.FaultTransport()
+	r.Fault = &FaultRecord{Kind: c.Fault, Channel: t.Channel, Client: t.Client, Harness: t.Harness}
+
+	fctx, cancel := context.WithTimeout(ctx, timeout)
+	start := time.Now()
+	err := inj.CutAfter(fctx, stmt, c.Params)
+	wall := time.Since(start)
+	cancel()
+
+	// Gone either way. That is what this case did to it, and holding on to the
+	// handle would put the next case on a channel this one destroyed.
+	e.discard()
+
+	series := &metrics.Series{Samples: []metrics.Sample{{Wall: wall, Err: err}}}
+	r.Stats = series.Summarize()
+
+	judge(c, nil, err, e.caps, r)
+	if note := faultNote(t); r.Reason == "" {
+		r.Reason = note
+	} else {
+		r.Reason = strings.TrimSuffix(r.Reason, ".") + "; " + note
+	}
+}
+
+// faultNote is the sentence a fault case's verdict is qualified by.
+//
+// Every one of them says the same two things, because every one of them has
+// the same two limits: the engine was never asked, and the answer came from
+// whatever was left holding the broken end. A reader who takes a pass here for
+// a statement about the engine has read it wrong, and the only defence against
+// that is to write it down beside the pass.
+func faultNote(t adapter.FaultTransport) string {
+	who := t.Client
+	if t.Harness {
+		who += ", which is code in this repository and not the engine's own driver"
+	}
+	return fmt.Sprintf("the harness destroyed %s with the statement in flight, so what named the code was %s",
+		t.Channel, who)
 }
 
 // explain asks the engine how it ran the statement, for the report to print

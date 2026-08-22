@@ -222,6 +222,19 @@ func (s *Scale) Expand(max int) string {
 // Placeholder is what a scaled query holds where the repetitions go.
 const Placeholder = "<<scale>>"
 
+// FaultCutAfterSend is the one fault this harness knows how to inject: the
+// statement goes onto the channel and the channel is destroyed before any
+// answer can come back over it.
+//
+// It is a named constant rather than free text because an adapter has to
+// implement it, and a case naming a fault no adapter recognises would be
+// skipped everywhere with nobody able to say why. Faults are added here first
+// and in the adapters second.
+const FaultCutAfterSend = "cut-after-send"
+
+// Faults lists every fault a case may ask for.
+var Faults = []string{FaultCutAfterSend}
+
 // Case is one conformance test.
 type Case struct {
 	// ID is stable and hierarchical: kind/family/feature/name. Reports,
@@ -325,22 +338,41 @@ type Case struct {
 	// Unprovokable says, in prose, why no statement a client can send raises
 	// this case's condition, and takes the case out of every run.
 	//
-	// Two of ISO's sixty-eight codes are about what the client does not know.
-	// 08007 is the connection dying while a transaction is being resolved, and
-	// 40003 is a statement whose completion is unknown after a rollback. Both
-	// are raised by the loss of the channel the answer would have come back on,
-	// so provoking one means killing the engine or the socket at a chosen
-	// instant, and observing it means trusting whatever the driver reports
-	// about a connection that is gone.
-	//
 	// The case is still written, still names its code, and still counts toward
 	// the corpus's coverage of the condition surface, because the alternative is
-	// a corpus that is silent about two codes and a reader who cannot tell
-	// silence from an oversight. What it never does is produce a verdict: the
-	// runner skips it before the engine is touched, and the skip carries this
-	// text. A code nobody can raise from a client is a fact about the code, and
-	// the honest report of it is a skip that says so.
+	// a corpus that is silent about a code and a reader who cannot tell silence
+	// from an oversight. What it never does is produce a verdict: the runner
+	// skips it before the engine is touched, and the skip carries this text. A
+	// code nobody can raise from a client is a fact about the code, and the
+	// honest report of it is a skip that says so.
+	//
+	// It is the last resort and not the first. Two codes were written out this
+	// way for months on the argument that provoking them means killing a socket
+	// at a chosen instant, which was true and was not a reason: the harness owns
+	// the socket. They are Fault cases now. Before writing this on a case, ask
+	// whether the condition is unreachable from a client or merely unreachable
+	// from a statement, because the second is an adapter's work and not a fact
+	// about the standard.
 	Unprovokable string `yaml:"unprovokable" json:"unprovokable,omitempty"`
+	// Fault names the damage the harness must do to the channel for this case's
+	// condition to be raised at all, in place of a statement that could raise
+	// it on its own.
+	//
+	// Two of ISO's sixty-eight codes are about what the client does not know.
+	// 08007 is the connection dying while a transaction is being resolved, and
+	// 40003 is a statement whose completion is unknown after a rollback. No
+	// statement provokes either, because neither is about the statement: they
+	// are about the channel the answer would have come back on, and the way to
+	// reach them is to send an ordinary commit or rollback and then destroy the
+	// channel before anything comes back over it.
+	//
+	// A case with this set runs against an adapter whose session can do the
+	// damage and is skipped against one whose session cannot, with the skip
+	// naming the adapter rather than the engine. What answers is the engine's
+	// client rather than the engine, so the verdict is about the client's
+	// account of a channel that is gone, and the report says whose account it
+	// was reading.
+	Fault string `yaml:"fault" json:"fault,omitempty"`
 	// Params binds named parameters, for the cases about parameters. A value
 	// is whatever YAML wrote, and the adapter hands it to the engine in the
 	// engine's own encoding.
@@ -559,6 +591,28 @@ func (c *Case) Validate(known KnownCodes) error {
 	if c.Unprovokable != "" && (c.Kind != KindCondition || c.Expect.Kind != ExpectError) {
 		return fmt.Errorf("%s: unprovokable withdraws a condition case from the run, and this is %s expecting %s",
 			where, c.Kind, c.Expect.Kind)
+	}
+	if c.Fault != "" {
+		if c.Kind != KindCondition || c.Expect.Kind != ExpectError {
+			return fmt.Errorf("%s: a fault is injected to raise a condition, and this is %s expecting %s",
+				where, c.Kind, c.Expect.Kind)
+		}
+		if !slices.Contains(Faults, c.Fault) {
+			return fmt.Errorf("%s: %q is not a fault any adapter knows how to inject; the ones that are: %s",
+				where, c.Fault, strings.Join(Faults, ", "))
+		}
+		// The two say opposite things about the same case. One asks every run
+		// to reach the condition and the other tells every run not to try, and
+		// a case carrying both would be withdrawn while claiming to be tested.
+		if c.Unprovokable != "" {
+			return fmt.Errorf("%s: the case is withdrawn as unprovokable and also asks for the %s fault, so a reader cannot be told whether it ran",
+				where, c.Fault)
+		}
+		// A fault destroys the channel, which takes the session with it. There
+		// is nothing left to put a control statement to.
+		if c.Parses != "" {
+			return fmt.Errorf("%s: a fault case ends with no session, and the control statement would be sent to a channel this case destroyed", where)
+		}
 	}
 	if d := c.Expect.Diagnostic; d != nil {
 		if c.Expect.Kind != ExpectError {

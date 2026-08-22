@@ -147,6 +147,17 @@ const (
 	// and it is a fact about ISO's condition rather than about the engine, which
 	// is why the case's own prose is carried through as the reason.
 	SkipNotProvokable SkipReason = "not-provokable"
+	// SkipNoFaultInjection is a case that reaches its condition by having the
+	// channel destroyed under it, run against an adapter whose session cannot
+	// destroy one. It is a gap in the adapter and not in the engine, and the
+	// reason says which adapter, because the engine named in the report has
+	// done nothing to earn it.
+	//
+	// It is not counted as unreachable. A code nothing can raise stays out of
+	// the coverage arithmetic forever; this one is a morning's work in an
+	// adapter away from producing a verdict, and filing the two under the same
+	// word would retire a gap that is still open.
+	SkipNoFaultInjection SkipReason = "no-fault-injection"
 	// SkipSelected is a case excluded by the run's selector, recorded only
 	// when the caller asked for the full list.
 	SkipSelected SkipReason = "not-selected"
@@ -211,6 +222,11 @@ type CaseResult struct {
 	// a control to run. It is what turns "wrong code" into either "wrong code"
 	// or "no parser for this shape".
 	Parse *ParseCheck `json:"parse_check,omitempty"`
+	// Fault is the damage the harness did to the channel to reach this case's
+	// condition, present only on a case that asked for one and got it. A
+	// reader who does not look at it is reading a verdict on a client as
+	// though it were a verdict on an engine.
+	Fault *FaultRecord `json:"fault,omitempty"`
 
 	// Plan is how the engine says it ran this statement, for an engine that can
 	// say so without running it a second time. It is recorded and never scored:
@@ -344,6 +360,25 @@ type ParseCheck struct {
 	Message   string `json:"message,omitempty"`
 }
 
+// FaultRecord is what the harness broke to reach a condition no statement
+// raises, and who spoke for the wreckage.
+//
+// It is kept per case rather than per run because the answer to "whose account
+// is this" belongs beside the verdict it justifies. A pass here is a client
+// naming the right code for a channel that is gone, which is a real thing to
+// have measured and is not the same thing as an engine raising a condition.
+type FaultRecord struct {
+	// Kind is the fault the case asked for, one of corpus.Faults.
+	Kind string `json:"kind"`
+	// Channel is what the adapter destroyed, in its own words.
+	Channel string `json:"channel,omitempty"`
+	// Client is what reported the failure the case was then judged on.
+	Client string `json:"client,omitempty"`
+	// Harness is true when that client is code in this repository, which makes
+	// the row a self-assessment and not a measurement of a third party.
+	Harness bool `json:"harness_client,omitempty"`
+}
+
 // Passed reports whether the case is a verdict in the engine's favour.
 func (r *CaseResult) Passed() bool { return r.Outcome == Pass }
 
@@ -430,12 +465,16 @@ type Status struct {
 	// Unreachable is how many of the skipped cases were skipped because
 	// nothing a client can send raises the code on this engine, rather than
 	// because the case was never put to it. A condition ISO names only for
-	// engines lacking a feature, and a condition that needs the connection to
-	// die at a particular instant, are both in this state, and both read as an
-	// ordinary gap in coverage without it. The distinction matters because the
-	// work implied is different: an untested code wants a case, and an
-	// unreachable one wants a sentence in the report saying why, which it now
-	// has.
+	// engines lacking a feature is in that state, and reads as an ordinary gap
+	// in coverage without this. The distinction matters because the work
+	// implied is different: an untested code wants a case, and an unreachable
+	// one wants a sentence in the report saying why, which it now has.
+	//
+	// A condition that needs the channel to die at a particular instant used to
+	// be counted here and is not any more. The harness can break its own
+	// channel, so those two codes are reachable wherever an adapter has been
+	// taught to, and an adapter that has not been taught yet is a gap that is
+	// open rather than one that is closed.
 	Unreachable int `json:"unreachable,omitempty"`
 	// Description is the standard's own words for the item, where the
 	// catalogue has them.
