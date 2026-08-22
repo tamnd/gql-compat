@@ -1,0 +1,59 @@
+# The normative subclauses no case can cite.
+#
+# This is the third register and it is the smallest, which is the point. A
+# subclause is a piece of the standard's own table of contents, and nearly every
+# one of them specifies something a query can be written against, so the honest
+# answer to an uncited subclause is almost always a case. Two things make an
+# exception, and only one of them is here.
+#
+# The first is a clause heading. Clause 19 is titled Predicates and specifies
+# nothing on its own: what it specifies is 19.1 to 19.13. A corpus with a case
+# for the comparison predicate has covered part of Clause 19 whether or not any
+# case writes the bare number, so `validate` counts a heading as covered when a
+# case cites something beneath it, and reports that as its own number rather
+# than as a citation. Those subclauses are not in this file, because nothing
+# about them is a claim: the counter can see it.
+#
+# The second is a subclause whose whole subject is a grammar rule the grammar
+# register already says no case can cite. Subclause 15.3 defines
+# <named procedure call>, the rule that bottoms out in a procedure name no GQL
+# statement creates, and a case that cannot write the call cannot cite the
+# subclause that defines it. That is what this file holds, and it is checked
+# against the other register rather than repeated from it: an entry names a
+# subclause, the loader reads ISO's own title, pulls out every rule the title
+# spells in angle brackets, and refuses the entry unless the grammar register
+# already holds all of them.
+#
+# The bar is the one the other two registers set. An entry is not "no engine
+# implements this" or "the subclause is hard to write a case for": both of those
+# are cases somebody has not written. Nothing here changes a denominator. There
+# are still 317 normative subclauses and a corpus citing 198 of them still reads
+# as 198 of 317.
+
+version: 1
+uncitable:
+  - subclause: "15.3"
+    why: registered-rule
+    note: >-
+      The subclause is titled <named procedure call> and defines nothing else.
+      The grammar register holds that rule, because the reference in it bottoms
+      out in a procedure name the standard supplies no statement to bring into
+      existence, so every callee a case could write is one an engine happened to
+      ship. A case that cannot write the call has nothing to cite this with.
+
+  - subclause: "17.5"
+    why: registered-rule
+    note: >-
+      Both rules in the title, <procedure reference> and
+      <catalog procedure parent and name>, are registered as orphans of the
+      named procedure call, and the subclause is the two of them and nothing
+      more. It is the reference half of the same fact 15.3 is the call half of.
+
+  - subclause: "17.8"
+    why: registered-rule
+    note: >-
+      The subclause is titled <external object reference> and defines that rule
+      as see the Syntax Rules with nothing beneath it, which is the reason GH01
+      is in the feature register and the rule is in the grammar register. The
+      standard supplies no words here, so a case citing the subclause would be
+      citing this project's invention of them.

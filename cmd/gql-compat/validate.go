@@ -76,6 +76,20 @@ against the standard's own denominators.
 			return fmt.Errorf("<%s> is cited by a case and listed as uncitable; one of the two is wrong", name)
 		}
 	}
+	// And the third register, for the standard's own structure. It is checked
+	// against the grammar register above, so an entry that stands behind a rule
+	// nobody registered fails here too.
+	uncitableSub, err := corpus.UncitableSubclauses(iso.Codes{Catalog: std.Catalog})
+	if err != nil {
+		return err
+	}
+	unciteable := corpus.UncitableSubclauseNumbers(uncitableSub)
+	citedSubclause := set(std.Suite.CoveredSubclauses())
+	for number := range unciteable {
+		if citedSubclause[number] {
+			return fmt.Errorf("subclause %s is cited by a case and listed as uncitable; one of the two is wrong", number)
+		}
+	}
 	byKind := map[corpus.Kind]int{}
 	for _, c := range std.Suite.Cases {
 		byKind[c.Kind]++
@@ -83,6 +97,11 @@ against the standard's own denominators.
 	conditions := len(std.Suite.CoveredConditions())
 	productions := len(std.Suite.CoveredProductions())
 	subclauses := len(std.Suite.CoveredSubclauses())
+	// A clause heading specifies nothing on its own, so a case cites 19.3 and
+	// never 19. Counting the heading as open leaves it open forever and counting
+	// it as cited would be a citation nobody wrote, so it is counted apart: a
+	// heading is covered when a case cites something beneath it.
+	beneath := containing(std.Catalog, citedSubclause, unciteable)
 
 	totalConditions := 0
 	for _, c := range std.Catalog.Classes {
@@ -103,10 +122,14 @@ against the standard's own denominators.
 			ProductionsTotal int                 `json:"productions_total"`
 			Subclauses       int                 `json:"subclauses_claimed"`
 			SubclausesTotal  int                 `json:"normative_subclauses_total"`
+			Beneath          []string            `json:"subclauses_covered_beneath"`
 			Unclaimed        []string            `json:"unclaimed_features,omitempty"`
 			Unwritable       []corpus.Unwritable `json:"unwritable_features,omitempty"`
 			Uncited          []string            `json:"uncited_productions,omitempty"`
 			Uncitable        []corpus.Uncitable  `json:"uncitable_productions,omitempty"`
+
+			UncitableSub     []corpus.UncitableSubclause `json:"uncitable_subclauses,omitempty"`
+			UncitedSubclause []string                    `json:"uncited_subclauses,omitempty"`
 		}
 		o := out{
 			Cases: std.Suite.Len(), ByKind: byKind, Fixtures: std.Fixtures.Len(),
@@ -114,11 +137,13 @@ against the standard's own denominators.
 			Conditions: conditions, ConditionsTotal: totalConditions,
 			Productions: productions, ProductionsTotal: len(std.Catalog.Productions),
 			Subclauses: subclauses, SubclausesTotal: normative,
-			Unwritable: unwritable, Uncitable: uncitable,
+			Beneath:    sortedNumbers(std.Catalog, beneath),
+			Unwritable: unwritable, Uncitable: uncitable, UncitableSub: uncitableSub,
 		}
 		if *missing {
 			o.Unclaimed = unclaimed(std.Catalog, claimed, cannot)
 			o.Uncited = uncited(std.Catalog, citedProduction, unreachable)
+			o.UncitedSubclause = openSubclauses(std.Catalog, citedSubclause, unciteable, beneath)
 		}
 		return writeJSON(o)
 	}
@@ -130,14 +155,29 @@ against the standard's own denominators.
 	}
 	fmt.Fprintf(w, "fixtures\t%d\n", std.Fixtures.Len())
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "COVERAGE\tCLAIMED\tISO TOTAL")
-	fmt.Fprintf(w, "optional features\t%d\t%d\n", len(claimed), len(std.Catalog.Features))
-	fmt.Fprintf(w, "GQLSTATUS codes\t%d\t%d\n", conditions, totalConditions)
-	fmt.Fprintf(w, "grammar productions\t%d\t%d\n", productions, len(std.Catalog.Productions))
-	fmt.Fprintf(w, "normative subclauses\t%d\t%d\n", subclauses, normative)
+	fmt.Fprintln(w, "COVERAGE\tCLAIMED\tREGISTERED\tBENEATH\tOPEN\tISO TOTAL")
+	row := func(name string, claimed, registered, beneath, total int) {
+		under := "-"
+		if beneath > 0 {
+			under = fmt.Sprint(beneath)
+		}
+		fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%d\t%d\n",
+			name, claimed, registered, under, total-claimed-registered-beneath, total)
+	}
+	row("optional features", len(claimed), len(unwritable), 0, len(std.Catalog.Features))
+	row("GQLSTATUS codes", conditions, 0, 0, totalConditions)
+	row("grammar productions", productions, len(uncitable), 0, len(std.Catalog.Productions))
+	row("normative subclauses", subclauses, len(uncitableSub), len(beneath), normative)
 	fmt.Fprintf(w, "\nThe totals are ISO's, not the corpus's. A corpus that tested twelve\n"+
 		"features should read as twelve of 228, and a claim of full coverage\n"+
-		"would mean 228 cases' worth of evidence that does not exist.\n")
+		"would mean 228 cases' worth of evidence that does not exist.\n"+
+		"\n"+
+		"CLAIMED is a case saying it exercises the thing. REGISTERED is the\n"+
+		"three registers below, each entry a checked claim that no portable\n"+
+		"case can reach it. BENEATH is the clause headings a case cites\n"+
+		"something inside: Clause 19 specifies nothing on its own and 19.3 is\n"+
+		"one of the things it specifies. OPEN is the work left, and it is the\n"+
+		"only one of the four a case can move.\n")
 	if err := w.Flush(); err != nil {
 		return err
 	}
@@ -170,6 +210,21 @@ against the standard's own denominators.
 		}
 	}
 
+	if len(uncitableSub) > 0 {
+		fmt.Printf("\nno case can cite %d of the %d normative subclauses:\n",
+			len(uncitableSub), normative)
+		for _, why := range corpus.SubclauseWhys(uncitableSub) {
+			fmt.Printf("\n  because %s:\n", why.Because())
+			for _, u := range uncitableSub {
+				if u.Why != why {
+					continue
+				}
+				title, _ := iso.Codes{Catalog: std.Catalog}.SubclauseTitle(u.Subclause)
+				fmt.Printf("    %-8s %s\n", u.Subclause, title)
+			}
+		}
+	}
+
 	if *missing {
 		fmt.Println("\nfeature codes no case claims:")
 		for _, code := range unclaimed(std.Catalog, claimed, cannot) {
@@ -189,12 +244,19 @@ against the standard's own denominators.
 				}
 			}
 		}
-		haveSubclause := set(std.Suite.CoveredSubclauses())
 		fmt.Println("\nnormative subclauses no case cites:")
-		for _, s := range std.Catalog.NormativeSubclauses() {
-			if !haveSubclause[s.Number] {
-				fmt.Printf("  %-8s %s\n", s.Number, s.Title)
-			}
+		for _, number := range openSubclauses(std.Catalog, citedSubclause, unciteable, beneath) {
+			s, _ := std.Catalog.Subclause(number)
+			fmt.Printf("  %-8s %s\n", s.Number, s.Title)
+		}
+		// The headings are printed apart rather than left out, because a
+		// heading that is covered only from underneath is worth seeing: if a
+		// clause is here with one case beneath it, the clause is barely tested
+		// and the number alone would not say so.
+		fmt.Println("\nclause headings no case cites and every case beneath covers:")
+		for _, number := range sortedNumbers(std.Catalog, beneath) {
+			s, _ := std.Catalog.Subclause(number)
+			fmt.Printf("  %-8s %s\n", s.Number, s.Title)
 		}
 		// The grammar is the largest denominator and was the one this list
 		// did not print, which made it the one nobody could work through.
@@ -222,6 +284,56 @@ func set(codes []string) map[string]bool {
 		m[c] = true
 	}
 	return m
+}
+
+// containing is the clause headings a case cites something beneath, as a set.
+// A heading no case cites directly and the register does not hold is covered
+// when any clause inside it is cited, which is what a heading is: 19 Predicates
+// specifies nothing itself, and 19.3 is one of the things it specifies.
+//
+// A registered subclause does not roll up. The register says no case can cite
+// it, and a heading closed by something out of reach would be closed by
+// nothing.
+func containing(cat *iso.Catalog, cited, registered map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for number := range cited {
+		for _, at := range cat.Ancestors(number) {
+			// The denominator is the normative subclauses, so an ancestor
+			// outside it is not a gap being closed and is not counted.
+			if s, ok := cat.Subclause(at); !ok || !s.Normative {
+				continue
+			}
+			if !cited[at] && !registered[at] {
+				out[at] = true
+			}
+		}
+	}
+	return out
+}
+
+// sortedNumbers puts a set of subclause numbers into the standard's own order,
+// which is document order and not string order: 4.10 comes after 4.9.
+func sortedNumbers(cat *iso.Catalog, in map[string]bool) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range cat.Subclauses {
+		if in[s.Number] {
+			out = append(out, s.Number)
+		}
+	}
+	return out
+}
+
+// openSubclauses is the normative subclauses no case cites, the register does
+// not hold, and no case cites anything beneath. It is the work left, and it is
+// the list somebody closing M10 reads.
+func openSubclauses(cat *iso.Catalog, cited, registered, beneath map[string]bool) []string {
+	var out []string
+	for _, s := range cat.NormativeSubclauses() {
+		if !cited[s.Number] && !registered[s.Number] && !beneath[s.Number] {
+			out = append(out, s.Number)
+		}
+	}
+	return out
 }
 
 // unclaimed is the feature codes no case claims and somebody could still

@@ -329,6 +329,29 @@ func (c *Catalog) Subclause(number string) (Subclause, bool) {
 	return s, ok
 }
 
+// Ancestors returns the numbers of the clauses that contain this one, nearest
+// first: 4.2.3.1 is inside 4.2.3, which is inside 4.2, which is inside 4. A
+// number the catalog does not spell out contributes nothing, so a caller gets
+// back only clauses that exist.
+//
+// The standard's numbering is its own table of contents, and this is what makes
+// it usable as one. A clause heading like "19 Predicates" specifies nothing on
+// its own: what it specifies is 19.1 to 19.13, and a corpus with a case for the
+// comparison predicate has covered part of Clause 19 whether or not any case
+// cites the bare number. A report that cannot say so has to either leave the
+// headings open forever or invite a citation nobody means.
+func (c *Catalog) Ancestors(number string) []string {
+	parts := strings.Split(strings.TrimSpace(number), ".")
+	var out []string
+	for i := len(parts) - 1; i > 0; i-- {
+		at := strings.Join(parts[:i], ".")
+		if _, ok := c.bySubclause[at]; ok {
+			out = append(out, at)
+		}
+	}
+	return out
+}
+
 // NormativeSubclauses returns the subclauses a conformance case can sensibly
 // cite: the ones that specify behaviour, not the front matter. It is the
 // denominator the report divides mandatory coverage by.
@@ -446,6 +469,13 @@ func (c Codes) Status(code string) bool {
 func (c Codes) Subclause(number string) bool {
 	s, ok := c.Catalog.Subclause(number)
 	return ok && s.Normative
+}
+
+// SubclauseTitle returns the standard's own heading for the number, which is
+// where a register that reasons about what a subclause is for reads it from.
+func (c Codes) SubclauseTitle(number string) (string, bool) {
+	s, ok := c.Catalog.Subclause(number)
+	return s.Title, ok
 }
 
 // Item returns the standard's own description of an implementation-defined or

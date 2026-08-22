@@ -56,18 +56,28 @@ grammar does not define, or a GQLSTATUS the standard does not, will not load.
 
 ```
 $ gql-compat validate
-263 cases loaded; every ISO reference in them resolves.
+579 cases loaded; every ISO reference in them resolves.
 
-COVERAGE              CLAIMED  ISO TOTAL
-optional features     117      228
-GQLSTATUS codes       15       68
-grammar productions   300      814
-normative subclauses  94       317
+COVERAGE              CLAIMED  REGISTERED  BENEATH  OPEN  ISO TOTAL
+optional features     224      4           -        0     228
+GQLSTATUS codes       68       0           -        0     68
+grammar productions   799      14          -        1     814
+normative subclauses  198      3           30       86    317
 ```
 
-The denominators are ISO's, never the corpus's. 117 of 228 reads as 117 of 228.
+The denominators are ISO's, never the corpus's. 224 of 228 reads as 224 of 228.
 A tool that divided by its own corpus size would report full coverage for
 testing twelve things.
+
+The four columns in front of the denominator are four different things and the
+point of splitting them is that only one of them is work. CLAIMED is a case
+saying it exercises the thing. REGISTERED is the three register files described
+below, each entry a checked claim that no portable case can reach it. BENEATH
+applies to the subclauses alone: a clause heading specifies nothing on its own,
+Clause 19 is titled Predicates and what it specifies is 19.1 to 19.13, so a
+heading counts as covered when a case cites something inside it and is counted
+apart from a citation somebody wrote. OPEN is what is left, and it is the only
+one of the four a new case moves.
 
 Four of the 228 are gaps nobody can close, and there are two ways that
 happens. A handful of grammar rules are written as `!! See the Syntax Rules.`
@@ -89,14 +99,27 @@ number: they are still four of the 228 and still not supported.
 The grammar has the same split and a register of its own,
 [`corpus/uncitable.yaml`](corpus/uncitable.yaml). A citation is a claim that the
 case exercises the rule, so the uncited productions have to be told apart into
-the ones nobody has written a case for and the nine no case can reach: two whose
-spelling ISO hands to the implementer, two the feature register already
-accounts for, and five reachable only through those. The obvious rule is the
-wrong one and the file says so. A production the grammar declines to expand is
-not by itself out of reach, because a query with a space in it exercises
-`<whitespace>` and one with `1e6` in it exercises `<unsigned decimal in
-scientific notation>`; the test is that the grammar declines to expand it *and*
-ISO's own list of implementation-defined items names it.
+the ones nobody has written a case for and the fourteen no case can reach: two
+whose spelling ISO hands to the implementer, two the feature register already
+accounts for, five reachable only through those, and five that spell the name of
+a kind of catalog object no GQL statement creates. The obvious rule is the wrong
+one and the file says so. A production the grammar declines to expand is not by
+itself out of reach, because a query with a space in it exercises `<whitespace>`
+and one with `1e6` in it exercises `<unsigned decimal in scientific notation>`;
+the test is that the grammar declines to expand it *and* ISO's own list of
+implementation-defined items names it.
+
+The standard's own structure has the third and smallest register,
+[`corpus/uncitable-subclause.yaml`](corpus/uncitable-subclause.yaml), and it is
+meant to stay smallest. Nearly every subclause specifies something a query can
+be written against, so the honest answer to an uncited one is almost always a
+case. What it holds is the subclauses ISO titles with grammar rules the register
+above already accounts for: 15.3 is titled `<named procedure call>` and defines
+nothing else, so a case that cannot write the call has nothing to cite it with.
+An entry names a subclause, the loader reads ISO's own title, pulls out every
+rule the title spells, and refuses the entry unless the grammar register holds
+all of them, which is why an entry here can only ever stand behind an entry
+there.
 
 ---
 
