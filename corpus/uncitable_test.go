@@ -82,10 +82,10 @@ func TestNoCaseCitesAnUncitableProduction(t *testing.T) {
 	}
 }
 
-// The register says nine rules are out of reach, which is a claim about the
-// grammar and not about the corpus, so it has to hold when the corpus is not
-// looking. Every rule the register does not name has to be reachable from a
-// start symbol, and this walks the references to prove it.
+// The register's entries are a claim about the shape of the grammar and not
+// about the corpus, so they have to hold when the corpus is not looking. Every
+// rule the register does not name has to be reachable from a start symbol, and
+// this walks the references to prove it.
 //
 // The grammar has more than one start symbol, which is the thing to know before
 // reading this. <GQL-program> is where a program starts, and the lexical layer
@@ -233,6 +233,11 @@ func TestTheGrammarRegisterRefusesAnEntryItCannotCheck(t *testing.T) {
 		{
 			name: "an unnameable entry for a rule that spells no such name",
 			doc:  entry("  - production: match statement\n    why: unnameable\n    object: binding table\n    note: one\n"),
+			want: "neither is the name of a binding table nor names one",
+		},
+		{
+			name: "an unnameable entry whose identifier rule names another kind",
+			doc:  entry("  - production: authorization identifier\n    why: unnameable\n    object: binding table\n    note: one\n"),
 			want: "neither is the name of a binding table nor names one",
 		},
 		{

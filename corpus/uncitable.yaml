@@ -9,22 +9,26 @@
 # The bar is the one `unwritable.yaml` sets for features. An entry is not "hard
 # to exercise", "no engine implements it" or "the fixture has none of those":
 # every one of those is a case somebody has not written. It is a claim about the
-# shape of the grammar, and the loader checks whichever of the three reasons the
+# shape of the grammar, and the loader checks whichever of the four reasons the
 # entry gives.
 #
 # One thing worth writing down, because it is the obvious idea and it is wrong.
 # A rule the grammar declines to expand, written "!! See the Syntax Rules.", is
-# not by itself uncitable. There are 23 of those and the corpus already cites 5
-# of them honestly: a query with a space in it exercises whitespace, a query
-# with 1e6 in it exercises unsigned decimal in scientific notation, and an
-# unquoted name exercises identifier extend. The grammar refusing to expand a
+# not by itself uncitable. There are 23 of those and the corpus cites 20 of them
+# honestly: a query with a space in it exercises whitespace, a query with 1e6 in
+# it exercises unsigned decimal in scientific notation, an unquoted name
+# exercises identifier start and identifier extend, and a comment on a line of
+# its own exercises simple comment character and newline. The three left are the
+# three this file registers, which is the distinction earning its keep: it is
+# not the unexpanded rules that are out of reach, it is these. The grammar
+# refusing to expand a
 # rule says the spelling is somebody else's to write down, and for most of the
 # 23 that somebody is the lexer, whose answer everyone already agrees on. So
 # unexpanded is not the test. The test is unexpanded and named in ISO's own list
 # of implementation-defined items, which is the standard saying in two documents
 # that the answer is the implementer's.
 #
-# The three reasons, and what the loader checks for each:
+# The four reasons, and what the loader checks for each:
 #
 #   implementers        The grammar declines to expand the rule and one of the
 #                       two lists of implementation-defined and
@@ -43,12 +47,15 @@
 #                       that creates one. ISO names its create statements after
 #                       what they make, so the loader answers this by looking
 #                       for a create statement of that kind and finding none.
+#                       The name may be spelled `<x name>`, `<delimited x
+#                       name>`, `<x identifier>`, which is what ISO calls an
+#                       authorization, or a rule that names one of those.
 #                       This is the feature register's second reason seen from
 #                       the grammar rather than from the feature list.
 #
 # Nothing here changes a denominator. There are still 814 productions and a
 # corpus citing 429 of them still reads as 429 of 814. What changes is that
-# these nine stop appearing in the list of work nobody has done.
+# these stop appearing in the list of work nobody has done.
 
 version: 1
 uncitable:
@@ -126,6 +133,39 @@ uncitable:
       list is where GP14 and GP15 live, a binding table and a graph passed to a
       procedure, and both features are registered as unwritable for the same
       reason the call is: there is no procedure to pass anything to.
+
+  - production: authorization identifier
+    why: unnameable
+    object: authorization
+    note: >-
+      No rule in the grammar names this one and it expands to an identifier, so
+      it exists for the rest of the standard to point at rather than for a
+      query to contain. What it points at is a principal, and the standard says
+      twice over that the principal is not GQL's to make: IV015 leaves the
+      valid syntactic representation of an authorization identifier to the
+      implementer, and IW002 leaves the mechanism for creating and destroying
+      them and their mapping to principals to the implementer as well. So there
+      is no create authorization statement, there is no spelling a case could
+      rely on, and the only authorization identifier a portable query can reach
+      is the one SESSION_USER hands back as a value, which is a string and not
+      a name. The corpus does write that case.
+
+  - production: object name
+    why: unnameable
+    object: object
+    note: >-
+      Catalog object parent reference is the only rule that names this one, and
+      it names it inside a repetition that can be empty, which is how every
+      case in the corpus derives that rule without ever reaching this one. To
+      enter the repetition a query has to name a catalog object that is the
+      parent of another catalog object, and Clause 4's catalog holds no such
+      thing: a directory holds directories and schemas, a schema holds graphs,
+      graph types, binding tables and procedures, and none of those four holds
+      anything. Directories and schemas have their own name rules and their own
+      reference rules, so the parent this rule is for is a kind of object GQL
+      has no statement to create and no other way to bring about. The loader
+      checks the half of that a machine can, which is that the grammar spells
+      no create object statement, and this note carries the rest.
 
   - production: binding table name
     why: unnameable

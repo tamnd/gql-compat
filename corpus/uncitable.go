@@ -69,7 +69,7 @@ func (w Why) Because() string {
 // The bar is the one the feature register sets. An entry is not "hard to
 // exercise", "no engine implements it", or "the fixture does not have one":
 // those are all cases somebody has not written. It is a claim about the shape
-// of the grammar, and every one of the three reasons is checked against the
+// of the grammar, and every one of the four reasons is checked against the
 // grammar at load time.
 //
 // Nothing here changes a denominator. There are still 814 productions and a
@@ -78,7 +78,7 @@ func (w Why) Because() string {
 type Uncitable struct {
 	// Production is the rule's name without angle brackets.
 	Production string `yaml:"production" json:"production"`
-	// Why is which of the three the entry claims.
+	// Why is which of the four the entry claims.
 	Why Why `yaml:"why" json:"why"`
 	// Feature is the optional feature code the rule spells. Required by
 	// BehindAnUnwritableFeature, which checks it against the feature register,
@@ -203,12 +203,15 @@ func ReadUncitable(data []byte, known KnownGrammar, features []Unwritable) ([]Un
 }
 
 // spellsTheNameOf reports whether the rule is a name of this kind of object or
-// is written out of one. The three shapes are the rule that is the name, the
-// delimited spelling of the same name, and a rule whose right-hand side names
-// one, which is how a catalog reference reaches it.
+// is written out of one. The four shapes are the rule that is the name, the
+// delimited spelling of the same name, the rule that identifies the object
+// where ISO says identifier rather than name, which is what it says about an
+// authorization, and a rule whose right-hand side names one, which is how a
+// catalog reference reaches it.
 func spellsTheNameOf(known KnownGrammar, production, object string) bool {
 	return production == object+" name" ||
 		production == "delimited "+object+" name" ||
+		production == object+" identifier" ||
 		known.Names(production, object)
 }
 
