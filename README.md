@@ -121,6 +121,24 @@ rule the title spells, and refuses the entry unless the grammar register holds
 all of them, which is why an entry here can only ever stand behind an entry
 there.
 
+There is a second reason in that file and it is weaker, so the file says so out
+loud. Clause 4 is Concepts, where the standard says what its own words mean
+before the rest of the document states rules in them, and most of it is citable
+because most of what it names is a thing a statement says. Some of it is not. An
+execution context is machinery an engine keeps, a GQL-request context is a thing
+the standard needs a word for so that later subclauses can say what goes into
+it, and no statement names either. Those entries carry the object the subclause
+is about, and the loader checks that ISO's own title says the entry is about
+that, that the subclause is in Clause 4, and that no rule of the published
+grammar has the object in its name. ISO names its rules after what they are, so
+a thing a statement can address has a rule with that thing in its name. Where
+the title does name rules, as 4.14.4 names `<value expression>`, they have to be
+rules a case can write, because then the subclause is the part behind syntax the
+corpus already reaches and the syntax is where the case belongs. What keeps the
+whole file honest is that a citation beats an entry: a case citing a registered
+subclause fails the load, so the day somebody writes the statement, the register
+is what is wrong and the loader is what says so.
+
 ---
 
 ## What it measures

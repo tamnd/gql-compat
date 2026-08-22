@@ -180,10 +180,17 @@ cases:
   # statement, destroys the channel without reading, and judges whatever the
   # engine's client says about a connection that is gone. An adapter whose
   # session cannot do that skips them and the skip names the adapter.
+  #
+  # They are also the only two cases in the corpus that cite 4.2.3.2 and 4.2.3.3.
+  # Those subclauses split a GQL-implementation into a GQL-client and a
+  # GQL-server, and everywhere else in this corpus the split makes no difference,
+  # because the answer starts at the server and the client hands it over
+  # unchanged. Here the server is gone and the answer is the client's own, which
+  # is the one place a case can tell the two apart.
   - id: condition/08007/commit-whose-outcome-never-came-back
     name: A connection lost while a transaction is resolving leaves the outcome unknown
     conditions: ["08007"]
-    subclauses: ["8.4", "23.1", "4.9.3"]
+    subclauses: ["8.4", "23.1", "4.9.3", "4.2.3.2", "4.2.3.3"]
     productions: [commit command]
     requires: [GT01]
     tags: [error, transaction, fault]
@@ -201,7 +208,7 @@ cases:
   - id: condition/40003/statement-whose-completion-is-unknown
     name: A rollback that leaves a statement's completion unknown
     conditions: ["40003"]
-    subclauses: ["8.3", "23.1", "4.9.3"]
+    subclauses: ["8.3", "23.1", "4.9.3", "4.2.3.2", "4.2.3.3"]
     productions: [rollback command]
     requires: [GT01]
     tags: [error, transaction, fault]
