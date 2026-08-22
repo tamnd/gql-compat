@@ -392,6 +392,47 @@ cases:
       columns: [city, n]
       rows: [[Berlin, 2], [Paris, 2], [Lisbon, 1]]
 
+  - id: optional/gq15/group-by-a-bound-variable
+    name: A grouping element names a bound variable and not an expression over one
+    features: [GQ09, GQ15]
+    subclauses: ["16.15"]
+    productions: [grouping element]
+    tags: [aggregate]
+    # ISO writes <grouping element> as a <binding variable reference> and
+    # nothing else, so the property reference the case above groups by is a
+    # convenience engines offer rather than the rule. This case groups by a
+    # variable, which is why it needs a LET to bind one, and it is the only
+    # shape the standard actually spells.
+    query: |
+      MATCH (p:Person)
+      LET city = p.city
+      RETURN city AS city, COUNT(*) AS n
+      GROUP BY city
+    expect:
+      kind: rows
+      unordered: true
+      columns: [city, n]
+      rows: [[Berlin, 2], [Paris, 2], [Lisbon, 1]]
+
+  - id: optional/gq15/empty-grouping-set
+    name: An empty grouping set makes the whole binding table one group
+    features: [GQ15]
+    subclauses: ["16.15"]
+    productions: [empty grouping set]
+    tags: [aggregate]
+    # A group by clause with nothing in it is not the same as no group by
+    # clause at all in every language that has one, so the standard gives the
+    # empty set its own rule. In GQL the two agree: both aggregate the whole
+    # table into one row.
+    query: |
+      MATCH (p:Person)
+      RETURN COUNT(*) AS n
+      GROUP BY ()
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+
   - id: optional/gq16/pre-projection-sort-key
     name: A sort key may name a variable bound before the projection
     features: [GQ16]

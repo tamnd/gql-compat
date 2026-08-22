@@ -325,3 +325,106 @@ cases:
     # never counts the spine of the grammar is measuring the wrong thing.
     # Every rule listed is on the single derivation of the query above, which
     # is checkable against Clause 6 and Clause 14 by reading down.
+
+  # The four cases below are the select statement, ISO 14.12. It is the second
+  # way GQL spells a query and it is not an optional feature: no code in
+  # features.xml gates it, and it hangs off <focused linear query statement>
+  # beside the MATCH and RETURN form every other case in this file is written
+  # in. An engine that reads only the MATCH form is missing mandatory GQL,
+  # which is why these are mandatory cases and not optional ones.
+  #
+  # The graph expression in front of the match statement is not optional in
+  # ISO's rule, so every case here names a graph rather than letting FROM open
+  # straight onto MATCH. CURRENT_PROPERTY_GRAPH is the one spelling of a graph
+  # expression that needs no catalog object, so it is the only one a portable
+  # case can use.
+
+  - id: mandatory/query/select-over-a-graph-match
+    name: A select statement projects the rows a graph match binds
+    subclauses: ["14.12"]
+    productions:
+      - select statement
+      - select item list
+      - select item
+      - select item alias
+      - select statement body
+      - select graph match list
+      - select graph match
+    tags: [pattern]
+    query: |
+      SELECT p.name AS name, p.age AS age
+      FROM CURRENT_PROPERTY_GRAPH MATCH (p:Person)
+      WHERE p.age > 40
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name, age]
+      rows: [[Carol, 41], [Erin, 55]]
+    # The where clause sits after the body rather than inside the match, which
+    # is the shape ISO gives the select statement: the body binds the rows and
+    # the clauses after it narrow, group and order what the body bound.
+
+  - id: mandatory/query/select-from-a-nested-query
+    name: A select statement may read from a nested query instead of from a graph
+    subclauses: ["14.12"]
+    productions: [select query specification]
+    query: |
+      SELECT *
+      FROM { MATCH (p:Person) WHERE p.city = 'Lisbon' RETURN p.name AS name }
+    expect:
+      kind: rows
+      columns: [name]
+      rows: [[Dave]]
+    # An asterisk keeps every column the nested query returned, so the case
+    # measures the body and not a projection written over it.
+
+  - id: mandatory/query/select-from-two-graph-matches
+    name: A select statement body may list more than one graph match
+    subclauses: ["14.12"]
+    productions: [select graph match list]
+    tags: [pattern]
+    query: |
+      SELECT p.name AS person, c.name AS company
+      FROM CURRENT_PROPERTY_GRAPH MATCH (p:Person),
+           CURRENT_PROPERTY_GRAPH MATCH (c:Company)
+      WHERE p.name = 'Alice' AND c.name = 'Acme'
+    expect:
+      kind: rows
+      columns: [person, company]
+      rows: [[Alice, Acme]]
+    # Two matches that share no variable bind every pairing of what each one
+    # found, the same way two match statements written one after the other do,
+    # so the where clause has thirty five rows to cut down to one.
+
+  - id: mandatory/query/select-distinct
+    name: A set quantifier in a select statement drops the duplicate rows
+    subclauses: ["14.12"]
+    productions: [set quantifier]
+    query: |
+      SELECT DISTINCT p.city AS city
+      FROM CURRENT_PROPERTY_GRAPH MATCH (p:Person)
+    expect:
+      kind: rows
+      unordered: true
+      columns: [city]
+      rows: [[Berlin], [Paris], [Lisbon]]
+    # Five people live in three cities, so the quantifier is the whole of what
+    # separates a right answer from a wrong one here.
+
+  - id: mandatory/query/select-having
+    name: A having clause tests the group a select statement aggregated
+    subclauses: ["14.12"]
+    productions: [having clause]
+    tags: [aggregate]
+    query: |
+      SELECT COUNT(*) AS n
+      FROM CURRENT_PROPERTY_GRAPH MATCH (p:Person)
+      HAVING COUNT(*) > 3
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[5]]
+    # No group by clause, so the whole binding table is the one group and the
+    # having clause has one row to keep or drop. The clause is written without
+    # GROUP BY on purpose: an explicit group by clause is optional feature
+    # GQ15 and a mandatory case may not lean on one.
