@@ -836,10 +836,31 @@ cases:
     name: DIFFERENT EDGES forbids one path from binding an edge twice
     features: [G002]
     subclauses: ["16.4", "4.11.9"]
-    productions: [match mode, different edges match mode]
+    productions: [match mode, different edges match mode, edge bindings or edges, edges synonym]
     fixture: triangle
     query: |
       MATCH DIFFERENT EDGES (a:Step)-[:LINK]->(b:Step)-[:LINK]->(c:Step)
+      WHERE a.step = 1
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g002/different-edge-bindings-match-mode
+    name: DIFFERENT EDGE BINDINGS is the long spelling of the same match mode
+    features: [G002]
+    subclauses: ["16.4", "4.11.9"]
+    productions: [edge bindings or edges, edge synonym]
+    fixture: triangle
+    # The grammar writes the mode four ways: the plural word on its own, and
+    # either singular word followed by BINDINGS. An engine that reads only the
+    # spelling the case above uses has half the rule, and the two cases
+    # together are what tells the two apart. RELATIONSHIP is the other
+    # singular and is not written here because the rule that admits it is the
+    # same one this case already reaches.
+    query: |
+      MATCH DIFFERENT EDGE BINDINGS (a:Step)-[:LINK]->(b:Step)-[:LINK]->(c:Step)
       WHERE a.step = 1
       RETURN COUNT(*) AS n
     expect:
@@ -851,10 +872,28 @@ cases:
     name: REPEATABLE ELEMENTS lifts the edge distinctness a match imposes
     features: [G003]
     subclauses: ["16.4", "4.11.9"]
-    productions: [match mode, repeatable elements match mode]
+    productions: [match mode, repeatable elements match mode, element bindings or elements]
     fixture: triangle
     query: |
       MATCH REPEATABLE ELEMENTS (a:Step)-[:LINK]->(b:Step)-[:LINK]->(c:Step)
+      WHERE a.step = 1
+      RETURN COUNT(*) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1]]
+
+  - id: optional/g003/repeatable-element-bindings-match-mode
+    name: REPEATABLE ELEMENT BINDINGS is the long spelling of the same match mode
+    features: [G003]
+    subclauses: ["16.4", "4.11.9"]
+    productions: [element bindings or elements]
+    fixture: triangle
+    # The same two spellings the different edges mode has, for the same
+    # reason: BINDINGS after the singular word is optional and an engine that
+    # reads only the plural has half of one rule.
+    query: |
+      MATCH REPEATABLE ELEMENT BINDINGS (a:Step)-[:LINK]->(b:Step)-[:LINK]->(c:Step)
       WHERE a.step = 1
       RETURN COUNT(*) AS n
     expect:

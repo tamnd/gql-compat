@@ -149,6 +149,75 @@ cases:
       columns: [since]
       rows: [[2020]]
 
+  - id: optional/gd01/insert-two-path-patterns
+    name: One INSERT writes two path patterns separated by a comma
+    features: [GD01]
+    subclauses: ["13.2"]
+    productions: [insert path pattern list, label and property set specification]
+    fixture: blank
+    mutating: true
+    # Every insert in the corpus wrote one pattern, so the comma in the insert
+    # graph pattern had never been read, and neither had the rule that puts a
+    # label and a property set on an inserted element as one thing. Both
+    # variables are declared in the insert itself, which is what makes the
+    # result readable in the same statement.
+    query: |
+      INSERT (a:Person {name: 'Zoe'}), (b:Person {name: 'Yan'})
+      RETURN a.name AS one, b.name AS two
+    expect:
+      kind: rows
+      columns: [one, two]
+      rows: [[Zoe, Yan]]
+
+  - id: optional/gd01/insert-edge-pointing-left
+    name: INSERT writes an edge with the arrowhead on the left
+    features: [GD01]
+    subclauses: ["13.2"]
+    productions: [insert edge pattern, insert edge pointing left]
+    fixture: pair
+    mutating: true
+    # The direction an edge is written in is not the direction it points: the
+    # edge written below runs from Linus to Ada, and an engine that read the
+    # left arrow as decoration would store it the other way round. The read is
+    # a separate statement so that the arrow in it points the one way, which
+    # is what makes the answer say which way the write went.
+    setup:
+      - "MATCH (a:Person {name: 'Ada'}), (b:Person {name: 'Linus'}) INSERT (a)<-[:KNOWS {since: 2021}]-(b)"
+    query: |
+      MATCH (x:Person)-[:KNOWS]->(y:Person)
+      RETURN x.name AS tail, y.name AS head
+    expect:
+      kind: rows
+      columns: [tail, head]
+      rows: [[Linus, Ada]]
+
+  - id: optional/gd01/insert-undirected-edge
+    name: INSERT writes an edge with no direction at all
+    features: [GD01, GH02]
+    subclauses: ["13.2"]
+    productions: [insert edge undirected, tilde left bracket, right bracket tilde]
+    fixture: pair
+    mutating: true
+    # The corpus reads undirected edges in patterns already and had never
+    # written one. What the case measures is that the tilde form is accepted
+    # where an insert pattern is expected and that the edge it wrote is
+    # reachable without naming a direction; an engine that stores it as a
+    # directed edge and reads the tilde in the match as either way round also
+    # passes, and no query the standard supplies could tell the two apart.
+    # The case claims GH02 because an engine with no undirected edges at all
+    # fails at the write.
+    setup:
+      - "MATCH (a:Person {name: 'Ada'}), (b:Person {name: 'Linus'}) INSERT (a)~[:KNOWS {since: 2022}]~(b)"
+    query: |
+      MATCH (x:Person)~[:KNOWS]~(y:Person)
+      WHERE x.name = 'Ada'
+      RETURN y.name AS name
+    expect:
+      kind: rows
+      unordered: true
+      columns: [name]
+      rows: [[Linus]]
+
   - id: optional/gd01/set-property
     name: SET assigns a property on a bound element
     features: [GD01]
@@ -187,7 +256,7 @@ cases:
     name: REMOVE takes a property off an element, leaving a read of it null
     features: [GD01]
     subclauses: ["13.4"]
-    productions: [remove statement, remove item, remove property item]
+    productions: [remove statement, remove item list, remove item, remove property item]
     fixture: pair
     mutating: true
     tags: [write, "null"]
