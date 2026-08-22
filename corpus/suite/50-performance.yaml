@@ -40,13 +40,17 @@ fixtures:
   - name: perf-path-1m
     description: >-
       A million nodes on the same chain. This is the fixture that exists to be
-      big rather than to be interesting: an engine's store has a floor, and a
-      bits-per-edge figure taken on a graph smaller than that floor measures
-      the floor. At a million nodes the data is the store on every engine the
-      harness drives, so the density figures on this row describe an encoding.
-      It carries the two selectivity properties for the same reason
-      perf-path-100k does, so the two are the same graph at two scales and the
-      cost per node can be read off the pair.
+      big rather than to be interesting, and it is the scan and the recursion
+      that want it: a million rows is enough for a per-row cost to separate
+      from the cost of starting. It carries the two selectivity properties for
+      the same reason perf-path-100k does, so the two are the same graph at two
+      scales and the cost per node can be read off the pair.
+      Big is not what makes a density figure mean something, which this fixture
+      is the evidence for rather than the demonstration of. Its nodes are the
+      integers in order and its edges join each to the next, so zu holds the
+      whole million in 2 MiB, about two bytes a node, and a bits-per-edge
+      figure taken here would describe how well an arithmetic sequence folds.
+      perf-random-200k is where the density is taken.
     generated: {shape: path, nodes: 1000000, properties: 2, seed: 1}
 
   - name: perf-star-10k
@@ -79,6 +83,18 @@ fixtures:
       Erdos-Renyi with mean out-degree eight. Uniform degree, no locality: the
       control against which the other shapes' locality effects are read.
     generated: {shape: erdos-renyi, nodes: 10000, degree: 8, seed: 1}
+
+  - name: perf-random-200k
+    description: >-
+      Erdos-Renyi with mean out-degree eight at two hundred thousand nodes:
+      1.6 million edges between endpoints in no order at all. This is the
+      fixture the storage density figures are taken on, and the shape is the
+      point of it rather than the size. A path of a million nodes is a million
+      consecutive ids joined to their successors, which every columnar store
+      folds to a couple of bytes a node, so a density taken there measures the
+      compression of an arithmetic sequence. Random endpoints do not fold, so
+      what is left in the store is the adjacency itself.
+    generated: {shape: erdos-renyi, nodes: 200000, degree: 8, properties: 2, seed: 1}
 
   - name: perf-diamonds-8
     description: >-
@@ -324,6 +340,27 @@ cases:
       RETURN COUNT(*) AS n
     expect:
       kind: accept
+
+  - id: performance/scan/count-edges-of-a-random-graph
+    name: Count every edge of a graph whose adjacency does not compress
+    fixture: perf-random-200k
+    # Tagged large for the usual reason, which is the ingest rather than the
+    # query: the count itself is a scan of one column. The fixture is here to
+    # be weighed, and the count is what makes the harness load it and gives a
+    # verdict that a run can fail on if the store came back short.
+    tags: [performance, scan, large]
+    repeat: 3
+    timeout_ms: 600000
+    # The generator rejects self-loops and repeats as it draws, so the edge
+    # count is a function of the seed rather than of the mean degree, and this
+    # is the number seed 1 produces at 200000 nodes and degree 8.
+    query: |
+      MATCH ()-[e:E]->()
+      RETURN COUNT(e) AS n
+    expect:
+      kind: rows
+      columns: [n]
+      rows: [[1599992]]
 
   - id: performance/join/random-two-hop
     name: Two-hop traversal on a uniform random graph

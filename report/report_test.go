@@ -747,3 +747,89 @@ func TestTheReportNamesAClaimTheRunContradicted(t *testing.T) {
 		t.Error("a run that believed the declaration printed a challenge section")
 	}
 }
+
+// TestTheRunSaysWhatItsDensitiesCameTo is the report end of the rule that no
+// published density goes past the point of being an encoding without the run
+// saying so.
+//
+// Three states, and all three have to read as deliberate. A run that published
+// nothing has to say that it declined rather than leave a column of dashes; a
+// run that published sane figures has to say what the widest one was, since
+// that is the only one a reader needs to check; and a run that published one
+// past the ceiling has to name it, because a wrong density is indistinguishable
+// from a right one at a glance.
+func TestTheRunSaysWhatItsDensitiesCameTo(t *testing.T) {
+	density := func(graph int64, nodes, edges int) *metrics.Load {
+		l := &metrics.Load{
+			Nodes: nodes, Edges: edges,
+			SchemaFloorBytes: 1 << 20,
+			Disk:             metrics.DiskDelta{BytesAfter: (1 << 20) + graph, Files: 1, OK: true},
+		}
+		l.Compute()
+		return l
+	}
+
+	withLoad := func(l *metrics.Load) *runner.Report {
+		rep := sample()
+		for i := range rep.Cases {
+			if rep.Cases[i].Load != nil {
+				rep.Cases[i].Load = l
+				rep.Cases[i].Fixture = "weighed"
+			}
+		}
+		return rep
+	}
+
+	render := func(rep *runner.Report) string {
+		var b bytes.Buffer
+		if err := report.WriteMarkdown(&b, rep); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+
+	// A megabyte of graph over a million edges: eight bits an edge, which is a
+	// density and not an artifact.
+	sane := render(withLoad(density(1<<20, 1<<20, 1<<20)))
+	if !strings.Contains(sane, "bits/edge and") {
+		t.Errorf("the report does not state the widest density it published:\n%s", ingestSection(sane))
+	}
+	if !strings.Contains(sane, "Nothing here is past 10000 bits/edge") {
+		t.Errorf("the report does not say the figures are inside the ceiling:\n%s", ingestSection(sane))
+	}
+
+	// The same megabyte over one edge, which is the shape every wrong density
+	// this project has published took.
+	absurd := render(withLoad(density(1<<20, 1, 1)))
+	if !strings.Contains(absurd, "past 10000 bits/edge") || !strings.Contains(absurd, "weighed at") {
+		t.Errorf("the report published an implausible density without naming it:\n%s", ingestSection(absurd))
+	}
+
+	// And a graph too small to divide at all.
+	none := sample()
+	for i := range none.Cases {
+		if none.Cases[i].Load != nil {
+			l := &metrics.Load{Nodes: 1, Edges: 1, EmptyBytes: 1 << 20,
+				Disk: metrics.DiskDelta{BytesAfter: 1 << 20, Files: 1, OK: true}}
+			l.Compute()
+			none.Cases[i].Load = l
+		}
+	}
+	if out := render(none); !strings.Contains(out, "No load in this run produced a density") {
+		t.Errorf("a run that divided nothing did not say so:\n%s", ingestSection(out))
+	}
+}
+
+// ingestSection is the Ingest section of a report, which is all these assertions are
+// about and is short enough to read in a failure message.
+func ingestSection(out string) string {
+	i := strings.Index(out, "## Ingest")
+	if i < 0 {
+		return out
+	}
+	rest := out[i:]
+	if j := strings.Index(rest, "| Fixture |"); j > 0 {
+		return rest[:j]
+	}
+	return rest
+}

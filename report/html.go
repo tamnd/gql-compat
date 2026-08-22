@@ -620,6 +620,7 @@ func (h *htmlWriter) loads(rep *runner.Report) {
 	if s := schemaSentence(loadsOf(rep.Cases)); s != "" {
 		h.p(`<p>%s</p>`, e(s))
 	}
+	h.p(`<p>%s</p>`, e(densitySentence(rep)))
 	h.p(`<table class="grid wide"><thead><tr>`)
 	for _, col := range []string{"Fixture", "Triggered by", "Nodes", "Edges", "Wall", "Engine", "nodes/s", "edges/s",
 		"Apparent Δ", "Allocated Δ", "× floor", "floor from", "graph", "bits/edge", "bytes/node", "RSS peak", "CPU"} {

@@ -631,6 +631,7 @@ func writeLoads(b io.Writer, rep *runner.Report) {
 	if s := schemaSentence(loadsOf(loads)); s != "" {
 		p("%s\n\n", s)
 	}
+	p("%s\n\n", densitySentence(rep))
 	p("| Fixture | Triggered by | Nodes | Edges | Wall | Engine | nodes/s | edges/s | Apparent Δ | Allocated Δ | × floor | floor from | graph | bits/edge | bytes/node | RSS peak | CPU |\n")
 	p("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|\n")
 	for i := range loads {
@@ -706,6 +707,52 @@ func schemaSentence(loads []*metrics.Load) string {
 			metrics.FormatBytes(with.AllocUnit), metrics.DensityFloor)
 	}
 	return s
+}
+
+// densitySentence is the run counting its own density figures and saying
+// whether any of them is past the point of being an encoding.
+//
+// The two ends of it are equally worth printing. A run that published nothing
+// looks, to a reader skimming a column of dashes, like a run whose measurement
+// broke; saying that every graph came in under the gate and pointing at the
+// reasons under the table is the difference between a refusal and a failure. A
+// run that published a figure past the ceiling has to name it, because the one
+// thing a reader cannot do with a wrong density is tell it from a right one.
+func densitySentence(rep *runner.Report) string {
+	var loads, got, over []*runner.CaseResult
+	var widest *runner.CaseResult
+	for i := range rep.Cases {
+		c := &rep.Cases[i]
+		if c.Load == nil {
+			continue
+		}
+		loads = append(loads, c)
+		if !c.Load.DensityOK {
+			continue
+		}
+		got = append(got, c)
+		if widest == nil || c.Load.BitsPerEdge > widest.Load.BitsPerEdge {
+			widest = c
+		}
+		if c.Load.Implausible() {
+			over = append(over, c)
+		}
+	}
+	if len(got) == 0 {
+		return fmt.Sprintf("No load in this run produced a density. Every fixture's graph came in under the gate its floor is checked by, which for a small fixture is the ordinary outcome and not a broken measurement, and the list under the table says which gate each load fell short of. A density needs a graph big enough that what the store rounded up to is a small part of it, and a corpus written to test conformance is not made of graphs like that.")
+	}
+	s := fmt.Sprintf("%d of the %d loads produced a density. The widest is %.1f bits/edge and %.1f bytes/node, on %s, a graph of %d nodes and %d edges occupying %s once its floor came off.",
+		len(got), len(loads), widest.Load.BitsPerEdge, widest.Load.BytesPerNode,
+		widest.Fixture, widest.Load.Nodes, widest.Load.Edges, metrics.FormatBytes(widest.Load.GraphBytes))
+	if len(over) == 0 {
+		return s + fmt.Sprintf(" Nothing here is past %g bits/edge, which is the point at which a figure has stopped describing an encoding and started describing whatever the subtraction failed to remove.", metrics.DensityCeiling)
+	}
+	names := make([]string, 0, len(over))
+	for _, c := range over {
+		names = append(names, fmt.Sprintf("%s at %.0f bits/edge", c.Fixture, c.Load.BitsPerEdge))
+	}
+	return s + fmt.Sprintf(" %d of them are past %g bits/edge, which is more than an engine spends encoding an edge and so is a measurement of something else: %s. Read those as a statement about the store's fixed cost rather than about its adjacency.",
+		len(over), metrics.DensityCeiling, strings.Join(names, ", "))
 }
 
 func floorCell(l *metrics.Load) string {

@@ -263,6 +263,28 @@ type Load struct {
 // figures, which are printed either way.
 const DensityFloor = 10.0
 
+// DensityCeiling is the bits per edge above which a published density is no
+// longer describing how an engine encodes adjacency.
+//
+// Ten thousand bits is 1.25 KiB for one edge. No store on any of these engines
+// writes an edge that way, so a figure past this is measuring something the
+// subtraction failed to remove: a preallocated file, a page the store rounded
+// up to, an accounting subtotal standing in for an occupancy. It is a ceiling
+// on plausibility rather than on quality, which is why it is three orders above
+// anything a real encoding produces and not one.
+//
+// Nothing is withheld on account of it. The gates above decide what gets
+// printed, and this decides what the run has to say a word about: a report that
+// publishes a figure past this and does not mention it is asking a reader to
+// notice for themselves.
+const DensityCeiling = 10000.0
+
+// Implausible reports whether this load published a density past the ceiling,
+// which is the report's cue to explain it rather than print it and move on.
+func (l *Load) Implausible() bool {
+	return l.DensityOK && l.BitsPerEdge > DensityCeiling
+}
+
 // FloorFrom names which measurement the fixed part of a store was taken from.
 // The three are in descending order of how much a density computed against them
 // is worth, and printing the name beside the figure is what keeps a reader from
