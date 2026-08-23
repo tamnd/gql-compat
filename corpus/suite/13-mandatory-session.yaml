@@ -110,13 +110,20 @@ cases:
     # Subclause 4.3.2 is references to schemas and objects, and a relative one
     # is where that subclause has anything to say: an absolute reference means
     # the same thing wherever it is written and this one does not.
-    # zu takes only the absolute form and reports "expected an absolute
-    # directory path, found '..'", so it has the predefined half of a relative
-    # schema reference and not the path half.
+    # What is graded here is the reading and not the resolution. The corpus
+    # creates no sibling schema and cannot know where the session starts, so
+    # the reference is one an engine reads and then finds nothing under, which
+    # is 42002, an invalid reference: a session sitting in the root has no
+    # parent to climb to and a session anywhere else has no such sibling. An
+    # engine that never learned the two periods stops at the '..' instead and
+    # reports 42001, a syntax error, which is the failure this case is looking
+    # for. The two codes are the whole test: the grammar admits the reference
+    # and the catalog decides whether it resolves.
     query: |
       SESSION SET SCHEMA ../gqlcompat_sibling
     expect:
-      kind: accept
+      kind: error
+      gqlstatus: "42002"
 
   - id: mandatory/session/set-graph
     name: A session may be pointed at a graph
