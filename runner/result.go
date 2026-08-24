@@ -476,6 +476,17 @@ type Status struct {
 	// taught to, and an adapter that has not been taught yet is a gap that is
 	// open rather than one that is closed.
 	Unreachable int `json:"unreachable,omitempty"`
+	// Measured is how many of the skipped cases were skipped because the engine
+	// took what the case asked for and the case was asking after a limit ISO
+	// leaves to the implementation. Nothing was refused, so there is no verdict,
+	// but something was learned: the engine's threshold for that item is at
+	// least what was asked, which is a number the conformance statement carries.
+	//
+	// It is kept apart from Unreachable because the two close differently. An
+	// unreachable code closes by argument and stays closed. This one closes by
+	// a case that asks for more, and whether asking for more is worth doing is
+	// a question about the standard's silence rather than about the engine.
+	Measured int `json:"measured,omitempty"`
 	// Description is the standard's own words for the item, where the
 	// catalogue has them.
 	Description string `json:"description,omitempty"`
@@ -741,6 +752,9 @@ func record(into map[string]Status, keys []string, r *CaseResult) {
 			st.Skip++
 			if unreachable(r.Skip) {
 				st.Unreachable++
+			}
+			if r.Skip == SkipWithinLimit {
+				st.Measured++
 			}
 		case Error:
 			st.Error++

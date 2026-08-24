@@ -397,7 +397,7 @@ cases:
     name: A constructed path whose edge does not join its nodes raises malformed path
     conditions: ["22G0Z"]
     subclauses: ["20.14"]
-    productions: [path value constructor by enumeration, path element list]
+    productions: [path value constructor by enumeration, path element list, path element list step]
     requires: [GE06]
     fixture: chain
     # n0 to n1 to n2 is a path in the fixture. This one puts the n0 to n1 edge

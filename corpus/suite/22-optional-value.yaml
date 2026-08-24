@@ -739,7 +739,7 @@ cases:
     name: PATH builds a path value out of nodes and edges
     features: [GE06]
     subclauses: ["20.14", "4.11.2"]
-    productions: [path value constructor, path value constructor by enumeration, path element list, path element list start]
+    productions: [path value constructor, path value constructor by enumeration, path element list, path element list start, path element list step]
     requires: [GA09]
     fixture: chain
     tags: [read, expression, path]
@@ -747,6 +747,9 @@ cases:
     # so it must equal the matched path. Comparing them is what makes the case
     # evidence about the value that was built rather than about the statement
     # parsing, and it needs GA09, which is why the case requires it.
+    # The list is a start and one step, `a` being the start and `, e, b` the
+    # step, so the three elements are the shortest enumeration that reaches
+    # every rule the constructor is built out of.
     query: |
       MATCH p = (a:Step)-[e:LINK]->(b:Step)
       WHERE a.step = 0
