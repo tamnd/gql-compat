@@ -365,6 +365,12 @@ func verdict(s runner.Status) string {
 		// close, and saying so is the answer rather than an excuse for not
 		// having one.
 		return "unreachable — nothing a client can send raises it here"
+	case s.Pass+s.Fail == 0 && s.Measured == s.Skip:
+		// Nor is this one. The engine took what the case asked for, so it
+		// refused nothing and there is no verdict, but the case was asking
+		// after a limit ISO leaves to the implementation and the answer it got
+		// is that this engine's limit is higher than the question.
+		return "within the engine's limit — it took what the case asked for"
 	case s.Pass+s.Fail == 0:
 		return "untested — every case was skipped"
 	case s.Fail > 0:

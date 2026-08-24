@@ -235,3 +235,26 @@ func TestAConditionTheEngineDoesRaiseIsStillJudged(t *testing.T) {
 		t.Errorf("a code the engine raised is not unreachable, got %d", st.Unreachable)
 	}
 }
+
+// A code the engine took rather than refused is not untested either. The case
+// asked after a threshold ISO leaves to the implementation, the engine's own
+// threshold turned out to be higher than the question, and what that is worth
+// is a number in the conformance statement rather than a gap in a table.
+func TestAWithinLimitSkipIsMeasuredAndNotUnreachable(t *testing.T) {
+	d, _ := scaledEngine(t, 5, false)
+	std, err := gqlcompat.LoadFS(fstest.MapFS{"scaled.yaml": &fstest.MapFile{Data: []byte(scaledCorpus)}})
+	if err != nil {
+		t.Fatalf("loading the scaled corpus: %v", err)
+	}
+	rep, err := std.Run(t.Context(), d, runner.Config{Repeats: 1, WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	st := rep.Coverage.Conditions["22G0S"]
+	if st.Skip != 1 || st.Measured != 1 {
+		t.Errorf("coverage says skip %d measured %d, want 1 and 1", st.Skip, st.Measured)
+	}
+	if st.Unreachable != 0 {
+		t.Errorf("a threshold this engine draws higher is not unreachable, got %d", st.Unreachable)
+	}
+}

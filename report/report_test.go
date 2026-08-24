@@ -908,3 +908,50 @@ func TestTheConditionsTableSaysWhichCodesCameFromABrokenChannel(t *testing.T) {
 		}
 	})
 }
+
+// Three codes with no verdict, three different sentences. A reader deciding
+// what to do next needs to know whether the work is a case, an argument or a
+// number, and one word for all three would hide that.
+func TestTheConditionsTableTellsAMeasurementFromAGapAndFromAnImpossibility(t *testing.T) {
+	rep := sample()
+	rep.Coverage.Conditions["22G10"] = runner.Status{Cases: 1, Skip: 1, Measured: 1,
+		Description: "data exception: path data, right truncation"}
+	rep.Coverage.Conditions["25G02"] = runner.Status{Cases: 1, Skip: 1, Unreachable: 1,
+		Description: "invalid transaction state: catalog and data statement mixing not supported"}
+	rep.Coverage.Conditions["22G0S"] = runner.Status{Cases: 1, Skip: 1,
+		Description: "data exception: node property maximum reached"}
+	var b bytes.Buffer
+	if err := report.Write(&b, rep, report.FormatMarkdown); err != nil {
+		t.Fatalf("rendering: %v", err)
+	}
+	out := b.String()
+	for code, want := range map[string]string{
+		"22G10": "within the engine's limit",
+		"25G02": "unreachable",
+		"22G0S": "untested",
+	} {
+		line := tableRow(out, code)
+		if line == "" {
+			t.Errorf("%s is in no row of the conditions table", code)
+			continue
+		}
+		if !strings.Contains(line, want) {
+			t.Errorf("%s reads %q, want it to say %q", code, line, want)
+		}
+	}
+	// The three verdicts have to be three, so the measurement must not be
+	// carrying the word the untested row carries.
+	if strings.Contains(tableRow(out, "22G10"), "untested") {
+		t.Error("a code the engine took is described as untested")
+	}
+}
+
+// tableRow is the rendered line naming code, or empty.
+func tableRow(out, code string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "`"+code+"`") {
+			return line
+		}
+	}
+	return ""
+}
