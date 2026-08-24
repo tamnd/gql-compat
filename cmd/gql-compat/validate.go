@@ -101,7 +101,7 @@ against the standard's own denominators.
 	// never 19. Counting the heading as open leaves it open forever and counting
 	// it as cited would be a citation nobody wrote, so it is counted apart: a
 	// heading is covered when a case cites something beneath it.
-	beneath := containing(std.Catalog, citedSubclause, unciteable)
+	beneath := setOf(std.Catalog.CoveredBeneath(citedSubclause, unciteable))
 
 	totalConditions := 0
 	for _, c := range std.Catalog.Classes {
@@ -286,27 +286,12 @@ func set(codes []string) map[string]bool {
 	return m
 }
 
-// containing is the clause headings a case cites something beneath, as a set.
-// A heading no case cites directly and the register does not hold is covered
-// when any clause inside it is cited, which is what a heading is: 19 Predicates
-// specifies nothing itself, and 19.3 is one of the things it specifies.
-//
-// A registered subclause does not roll up. The register says no case can cite
-// it, and a heading closed by something out of reach would be closed by
-// nothing.
-func containing(cat *iso.Catalog, cited, registered map[string]bool) map[string]bool {
-	out := map[string]bool{}
-	for number := range cited {
-		for _, at := range cat.Ancestors(number) {
-			// The denominator is the normative subclauses, so an ancestor
-			// outside it is not a gap being closed and is not counted.
-			if s, ok := cat.Subclause(at); !ok || !s.Normative {
-				continue
-			}
-			if !cited[at] && !registered[at] {
-				out[at] = true
-			}
-		}
+// setOf turns a document-ordered list of subclause numbers back into a set,
+// for the two questions below that ask about membership rather than order.
+func setOf(numbers []string) map[string]bool {
+	out := make(map[string]bool, len(numbers))
+	for _, n := range numbers {
+		out[n] = true
 	}
 	return out
 }

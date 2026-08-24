@@ -232,6 +232,7 @@ func writeCoverage(b io.Writer, rep *runner.Report) {
 	p("## Coverage of the standard\n\n")
 	p("Denominators come from ISO's own published surface, not from this corpus: %d optional features, %d GQLSTATUS codes, %d grammar productions, and %d clauses that specify behaviour. A corpus that tests twelve features reads as twelve of %d, which is the honest way to say it.\n\n",
 		cov.FeaturesTotal, cov.ConditionsTotal, cov.ProductionsTotal, cov.SubclausesTotal, cov.FeaturesTotal)
+	writeReach(b, cov)
 
 	p("### Optional feature families\n\n")
 	p("| Family | ISO features | Tested here | Supported | No portable case |\n|---|---:|---:|---:|---:|\n")
@@ -276,6 +277,68 @@ func writeCoverage(b io.Writer, rep *runner.Report) {
 		return
 	}
 	writeStatusTable(b, "### GQLSTATUS conditions tested", "Code", cov.Conditions)
+}
+
+// writeReach is the four denominators of the standard and what this run did
+// with each: what a passing case reached, and, for the rest, which of four
+// arguments accounts for it.
+//
+// The four are not interchangeable and the point of the table is that they are
+// separate columns. Registered is the corpus saying no portable case can be
+// written, which is a fact about ISO and the same on every engine. Unreachable
+// is this engine having the feature ISO names a code for the absence of, so the
+// code is impossible here and becomes possible only by taking the feature out.
+// Measured is this engine taking what a limit case asked for, so nothing was
+// refused and what was learned is that its threshold is above the question.
+// Beneath is a clause heading reached through something inside it. Open is what
+// is left, and it is the only column that is work.
+func writeReach(b io.Writer, cov runner.Coverage) {
+	p := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	p("### What this run reached\n\n")
+	p("| Surface | Reached | Registered | Unreachable | Measured | Beneath | Open | ISO total |\n|---|---:|---:|---:|---:|---:|---:|---:|\n")
+	row := func(name string, reached, registered, unreachable, measured, beneath, total int) {
+		open := total - reached - registered - unreachable - measured - beneath
+		p("| %s | %d | %d | %d | %d | %s | %d | %d |\n", name, reached, registered,
+			unreachable, measured, dashIfZero(beneath), open, total)
+	}
+	var condUnreachable, condMeasured int
+	for _, s := range cov.Conditions {
+		switch {
+		case s.Pass > 0:
+		case s.Unreachable > 0:
+			condUnreachable++
+		case s.Measured > 0:
+			condMeasured++
+		}
+	}
+	row("optional features", passing(cov.Features), len(cov.Unwritable), 0, 0, 0, cov.FeaturesTotal)
+	row("GQLSTATUS codes", passing(cov.Conditions), 0, condUnreachable, condMeasured, 0, cov.ConditionsTotal)
+	row("grammar productions", passing(cov.Productions), len(cov.Uncitable), 0, 0, 0, cov.ProductionsTotal)
+	row("normative subclauses", passing(cov.Subclauses), len(cov.UncitableSubclauses), 0, 0,
+		len(cov.SubclausesBeneath), cov.SubclausesTotal)
+	p("\n")
+}
+
+// passing counts the items of a coverage table at least one passing case
+// reached. An item every case skipped is not reached, whatever the reason, and
+// the reason is the column beside it.
+func passing(items map[string]runner.Status) int {
+	n := 0
+	for _, s := range items {
+		if s.Pass > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// dashIfZero writes a column that does not apply as a dash rather than as a
+// zero, since a zero here reads as a measured absence and this is not one.
+func dashIfZero(n int) string {
+	if n == 0 {
+		return "-"
+	}
+	return fmt.Sprint(n)
 }
 
 // faultSentence says which conditions were reached by breaking the channel

@@ -955,3 +955,41 @@ func tableRow(out, code string) string {
 	}
 	return ""
 }
+
+// The four denominators are ISO's, a run reaches fewer than all of them, and
+// what the table has to do is say which kind of thing the difference is. Six
+// columns rather than one is the whole point: a reader deciding what to work on
+// next needs open, and a reader weighing the claim needs the other five.
+func TestTheReachTableAccountsForEveryDenominatorItPrints(t *testing.T) {
+	rep := sample()
+	cov := &rep.Coverage
+	cov.FeaturesTotal, cov.ConditionsTotal = 4, 4
+	cov.ProductionsTotal, cov.SubclausesTotal = 4, 5
+	cov.Features = map[string]runner.Status{"GA01": {Cases: 1, Pass: 1}}
+	cov.Unwritable = []corpus.Unwritable{{Feature: "GH01"}}
+	cov.Conditions = map[string]runner.Status{
+		"22G03": {Cases: 1, Pass: 1},
+		"25G02": {Cases: 1, Skip: 1, Unreachable: 1},
+		"22G10": {Cases: 1, Skip: 1, Measured: 1},
+	}
+	cov.Productions = map[string]runner.Status{"insert statement": {Cases: 1, Pass: 1}}
+	cov.Uncitable = []corpus.Uncitable{{Production: "authorization identifier"}}
+	cov.Subclauses = map[string]runner.Status{"13.2": {Cases: 1, Pass: 1}}
+	cov.UncitableSubclauses = []corpus.UncitableSubclause{{Subclause: "17.8"}}
+	cov.SubclausesBeneath = []string{"13"}
+	var b bytes.Buffer
+	if err := report.Write(&b, rep, report.FormatMarkdown); err != nil {
+		t.Fatalf("rendering: %v", err)
+	}
+	out := b.String()
+	for _, want := range []string{
+		"| optional features | 1 | 1 | 0 | 0 | - | 2 | 4 |",
+		"| GQLSTATUS codes | 1 | 0 | 1 | 1 | - | 1 | 4 |",
+		"| grammar productions | 1 | 1 | 0 | 0 | - | 2 | 4 |",
+		"| normative subclauses | 1 | 1 | 0 | 0 | 1 | 2 | 5 |",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the reach table has no row %q", want)
+		}
+	}
+}
