@@ -443,6 +443,21 @@ type Coverage struct {
 	// from a gap that is the standard. It is not a result and nothing above is
 	// computed from it.
 	Unwritable []corpus.Unwritable `json:"unwritable,omitempty"`
+	// Uncitable and UncitableSubclauses are the other two registers, the
+	// grammar rules and the subclauses no portable case can cite, each entry
+	// with the reason it is the end of the matter rather than work left. They
+	// are here for the same reason Unwritable is: the four denominators are
+	// ISO's, a run reaches fewer than all of them, and the difference is either
+	// registered with an argument or it is a gap. A report that carried the
+	// numerators and left the registers out would make the two look alike.
+	Uncitable           []corpus.Uncitable          `json:"uncitable,omitempty"`
+	UncitableSubclauses []corpus.UncitableSubclause `json:"uncitable_subclauses,omitempty"`
+	// SubclausesBeneath is the clause headings no passing case cites and some
+	// passing case cites something inside. A heading specifies nothing on its
+	// own, so it is reached through what it holds, and this is counted off the
+	// passing cases rather than off the corpus: a heading whose only cited
+	// child failed has not been reached by the run.
+	SubclausesBeneath []string `json:"subclauses_beneath,omitempty"`
 
 	// FeaturesTotal, ConditionsTotal, ProductionsTotal, and SubclausesTotal
 	// are the ISO denominators: 228 optional features, the codes
@@ -620,7 +635,17 @@ type Report struct {
 const ReportSchema = 1
 
 // summarize computes totals and coverage from the case results.
-func summarize(cat *iso.Catalog, unwritable []corpus.Unwritable, results []CaseResult) (Totals, Coverage) {
+// registers is the three sets of things ISO names and no portable case can
+// reach, read once at the top of a run and carried into the summary so the
+// difference between a denominator and a numerator is always an argument
+// somebody wrote down.
+type registers struct {
+	features   []corpus.Unwritable
+	rules      []corpus.Uncitable
+	subclauses []corpus.UncitableSubclause
+}
+
+func summarize(cat *iso.Catalog, reg registers, results []CaseResult) (Totals, Coverage) {
 	t := Totals{
 		Cases:  len(results),
 		ByKind: map[corpus.Kind]KindTotals{},
@@ -687,8 +712,21 @@ func summarize(cat *iso.Catalog, unwritable []corpus.Unwritable, results []CaseR
 			cov.Subclauses[number] = st
 		}
 	}
-	cov.Unwritable = unwritable
-	cov.Families = families(cat, unwritable, cov.Features)
+	cov.Unwritable = reg.features
+	cov.Uncitable = reg.rules
+	cov.UncitableSubclauses = reg.subclauses
+	// Beneath is computed off the subclauses a passing case cited, not off
+	// every subclause a case named, because a heading reached through a case
+	// that failed has not been reached.
+	reached := map[string]bool{}
+	for number, st := range cov.Subclauses {
+		if st.Pass > 0 {
+			reached[number] = true
+		}
+	}
+	registered := corpus.UncitableSubclauseNumbers(reg.subclauses)
+	cov.SubclausesBeneath = cat.CoveredBeneath(reached, registered)
+	cov.Families = families(cat, reg.features, cov.Features)
 	return t, cov
 }
 
@@ -822,4 +860,26 @@ func goHost() HostInfo {
 		GOMAXPROCS: runtime.GOMAXPROCS(0),
 		CPULogical: runtime.NumCPU(),
 	}
+}
+
+// loadRegisters reads the three registers before the engine is opened.
+//
+// Here rather than beside the summary because a register that does not load is
+// a coverage table that would quietly read a few short, and this is the last
+// moment that can be said before a run starts costing minutes.
+func loadRegisters(cat *iso.Catalog) (registers, error) {
+	known := iso.Codes{Catalog: cat}
+	features, err := corpus.Unwritables(known)
+	if err != nil {
+		return registers{}, err
+	}
+	rules, err := corpus.Uncitables(known)
+	if err != nil {
+		return registers{}, err
+	}
+	subclauses, err := corpus.UncitableSubclauses(known)
+	if err != nil {
+		return registers{}, err
+	}
+	return registers{features: features, rules: rules, subclauses: subclauses}, nil
 }

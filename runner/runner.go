@@ -184,7 +184,7 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 	// here rather than beside the summary, because a register that does not
 	// load is a coverage table that would quietly read one feature short and
 	// this is the last moment that can be said before the engine starts.
-	unwritable, err := corpus.Unwritables(iso.Codes{Catalog: cfg.Catalog})
+	reg, err := loadRegisters(cfg.Catalog)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +293,7 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 	rep.Engine.SchemaFloors = ex.schemaFloors()
 	rep.Run.Finished = time.Now()
 	rep.Run.Wall = rep.Run.Finished.Sub(started)
-	rep.Totals, rep.Coverage = summarize(cfg.Catalog, unwritable, rep.Cases)
+	rep.Totals, rep.Coverage = summarize(cfg.Catalog, reg, rep.Cases)
 	rep.Declarations = declarations(rep.Cases)
 	return rep, nil
 }

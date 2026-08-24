@@ -1381,3 +1381,41 @@ func TestTheWrongCodeIsReportedBeforeTheRecordIs(t *testing.T) {
 		t.Errorf("the reason should be about the code, got %q", r.Reason)
 	}
 }
+
+// The other two registers ride along for the same reason the feature one does.
+// A report that carried 800 of 814 productions and 252 of 317 subclauses and
+// said nothing about the rest would leave a reader to guess whether the
+// difference is work or is the standard, and the guess would be wrong.
+func TestTheRunCarriesTheOtherTwoRegistersAndTheHeadingsItReachedThrough(t *testing.T) {
+	cov := run(t, engine(t, nil), runner.Config{Repeats: 1}).Coverage
+	if len(cov.Uncitable) == 0 {
+		t.Error("the report carries no register of the productions no case can cite")
+	}
+	for _, u := range cov.Uncitable {
+		if u.Production == "" || u.Note == "" {
+			t.Errorf("%+v: an entry that names no rule or gives no reason is not a register", u)
+		}
+	}
+	if len(cov.UncitableSubclauses) == 0 {
+		t.Error("the report carries no register of the subclauses no case can cite")
+	}
+	for _, u := range cov.UncitableSubclauses {
+		if u.Subclause == "" || u.Note == "" {
+			t.Errorf("%+v: an entry that names no subclause or gives no reason is not a register", u)
+		}
+	}
+	// A heading is reached through what it holds, so a run reaching 13.2 has
+	// reached 13, and 13 is in neither the cited set nor the register.
+	registered := map[string]bool{}
+	for _, u := range cov.UncitableSubclauses {
+		registered[u.Subclause] = true
+	}
+	for _, number := range cov.SubclausesBeneath {
+		if cov.Subclauses[number].Pass > 0 {
+			t.Errorf("%s is beneath and cited: a heading a case reached directly is not reached through anything", number)
+		}
+		if registered[number] {
+			t.Errorf("%s is beneath and registered: a heading closed by something out of reach is closed by nothing", number)
+		}
+	}
+}

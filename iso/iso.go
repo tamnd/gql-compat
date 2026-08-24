@@ -365,6 +365,42 @@ func (c *Catalog) NormativeSubclauses() []Subclause {
 	return out
 }
 
+// CoveredBeneath returns the normative clause headings no case cites and
+// something inside is cited, in the standard's own document order.
+//
+// A heading is what it says it is: Clause 19 Predicates specifies nothing on
+// its own and 19.3 is one of the things it specifies, so a case citing 19.3
+// has reached everything 19 has to say. Registered numbers do not roll up. The
+// register says no case can cite them, and a heading closed by something out
+// of reach would be closed by nothing.
+//
+// Both arguments are sets of subclause numbers. Which set to pass for cited
+// depends on the question: the corpus asks with every number a case names, and
+// a run asks with the numbers a passing case named, which is the narrower one
+// and the only one a conformance claim may be built on.
+func (c *Catalog) CoveredBeneath(cited, registered map[string]bool) []string {
+	beneath := map[string]bool{}
+	for number := range cited {
+		for _, at := range c.Ancestors(number) {
+			// The denominator is the normative subclauses, so an ancestor
+			// outside it is not a gap being closed and is not counted.
+			if s, ok := c.Subclause(at); !ok || !s.Normative {
+				continue
+			}
+			if !cited[at] && !registered[at] {
+				beneath[at] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(beneath))
+	for _, s := range c.Subclauses {
+		if beneath[s.Number] {
+			out = append(out, s.Number)
+		}
+	}
+	return out
+}
+
 // Status describes a five-character GQLSTATUS code, e.g. "22G03". The bool
 // reports whether ISO defines it; an implementation returning an undefined
 // code is itself a conformance observation.
