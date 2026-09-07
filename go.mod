@@ -5,7 +5,8 @@ go 1.26.5
 require (
 	github.com/goccy/go-yaml v1.19.2
 	github.com/neo4j/neo4j-go-driver/v6 v6.2.0
-	github.com/shirou/gopsutil/v4 v4.26.7
+	github.com/shirou/gopsutil/v4 v4.26.8
+	modernc.org/sqlite v1.56.0
 )
 
 require (
@@ -25,5 +26,4 @@ require (
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.56.0 // indirect
 )
